@@ -46,7 +46,7 @@ You are working in the Codev project itself, with multiple development protocols
 - **SPIDER-SOLO**: Single-agent variant - `codev/protocols/spider-solo/protocol.md`
 - **TICK**: Fast autonomous implementation - `codev/protocols/tick/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
-- **CLEANUP**: Codebase maintenance and cruft removal - `codev/protocols/cleanup/protocol.md`
+- **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
 
 Key locations:
 - Protocol details: `codev/protocols/` (Choose appropriate protocol)
@@ -91,12 +91,12 @@ When asked about project status, incomplete work, or what to work on next:
 - Research spikes
 - Prototyping before committing to implementation
 
-### Use CLEANUP for:
+### Use MAINTAIN for:
 - Removing dead code and unused dependencies
 - Quarterly codebase maintenance
-- Before major refactoring efforts
-- Cleaning up after feature deprecation
-- Syncing documentation with codebase
+- Before releases (clean slate for shipping)
+- After major features complete
+- Syncing documentation (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md)
 
 ### Skip formal protocols for:
 - README typos or minor documentation fixes
@@ -124,20 +124,19 @@ project-root/
 │   │   ├── spider-solo/    # Single-agent SPIDER variant
 │   │   ├── tick/           # Fast autonomous implementation
 │   │   ├── experiment/     # Disciplined experimentation
-│   │   └── cleanup/        # Codebase maintenance and cruft removal
-│   ├── cleanup/             # CLEANUP protocol runtime artifacts
-│   │   ├── audit-*.md      # Timestamped audit reports (versioned)
+│   │   └── maintain/       # Codebase maintenance (code + docs)
+│   ├── maintain/            # MAINTAIN protocol runtime artifacts
 │   │   └── .trash/         # Soft-deleted files (gitignored, 30-day retention)
 │   ├── projectlist.md      # Master project tracking (status, priority, dependencies)
 │   ├── specs/              # Feature specifications (WHAT to build)
 │   ├── plans/              # Implementation plans (HOW to build)
 │   ├── reviews/            # Reviews and lessons learned from each feature
 │   └── resources/          # Reference materials
-│       └── arch.md         # Architecture documentation (maintained by agent)
+│       ├── arch.md         # Architecture documentation (updated during MAINTAIN)
+│       └── lessons-learned.md  # Extracted wisdom from reviews (generated during MAINTAIN)
 ├── .claude/
 │   └── agents/             # AI agent definitions
 │       ├── spider-protocol-updater.md
-│       ├── architecture-documenter.md
 │       └── codev-updater.md
 ├── AGENTS.md              # Universal AI agent instructions (AGENTS.md standard)
 ├── CLAUDE.md              # This file (Claude Code-specific, identical to AGENTS.md)
@@ -195,35 +194,6 @@ The `spider-protocol-updater` agent helps evolve the SPIDER protocol by analyzin
 5. Recommends specific protocol updates with justification
 
 **Agent location**: `.claude/agents/spider-protocol-updater.md`
-
-## Architecture Documenter Agent
-
-The `architecture-documenter` agent maintains comprehensive architecture documentation (`codev/resources/arch.md`) that serves as the definitive reference for understanding the project's structure, components, and design decisions.
-
-**When to use**:
-- After significant implementation milestones
-- When new features are completed or modules added
-- During code reviews to capture architectural patterns
-- When specifications introduce new architectural components
-- Periodically during active development for up-to-date documentation
-
-**How it's used**:
-- Automatically invoked at the end of TICK protocol reviews
-- Can be manually invoked for architecture updates
-- Maintains directory structure, utilities, design patterns, and integration points
-
-**What the agent does**:
-1. Reviews specs, plans, and reviews for architectural information
-2. Scans the actual implementation to verify documented structure
-3. Maintains comprehensive `arch.md` with:
-   - Complete directory structure
-   - All utility functions and helpers
-   - Key architectural patterns
-   - Component relationships
-   - Technology stack details
-4. Ensures documentation matches actual codebase state
-
-**Agent location**: `.claude/agents/architecture-documenter.md`
 
 ## Codev Updater Agent
 

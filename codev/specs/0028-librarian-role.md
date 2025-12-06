@@ -3,9 +3,20 @@
 ## Metadata
 - **ID**: 0028-librarian-role
 - **Protocol**: SPIDER
-- **Status**: draft
+- **Status**: abandoned
 - **Created**: 2025-12-04
 - **Priority**: medium
+- **Superseded By**: 0035-maintain-protocol
+
+## Abandonment Reason
+
+After consultation with Gemini and Codex, decided against adding new roles. Documentation maintenance is absorbed into the MAINTAIN protocol (spec 0035), which is executed by Builders like any other protocol. This keeps the role model simple: Architect, Builder, Consultant.
+
+See `codev/specs/0035-maintain-protocol.md` for the replacement approach.
+
+---
+
+## Original Specification (preserved for reference)
 
 ## Problem Statement
 

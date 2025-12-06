@@ -241,7 +241,7 @@ Projects currently in development (conceived through committed), sorted by prior
       review: null
     dependencies: []
     tags: [protocols, maintenance]
-    notes: "TICK protocol. Four phases: AUDIT→PRUNE→VALIDATE→SYNC. Dry-run default, soft-delete with restore.sh, 30-day retention. PR 33 merged 2025-12-04. Consulted GPT-5 and Gemini Pro."
+    notes: "TICK protocol. Four phases: AUDIT→PRUNE→VALIDATE→SYNC. PR 33 merged 2025-12-04. **Will be renamed to MAINTAIN and expanded per spec 0035.**"
 
   - id: "0019"
     title: "Tab Bar Status Indicators"
@@ -270,6 +270,20 @@ Projects currently in development (conceived through committed), sorted by prior
     dependencies: ["0022"]
     tags: [architecture, agents, consultation]
     notes: "Phase 2: Stateful. Keep CLI running via stdio. Maintain session until closed. Depends on 0022."
+
+  - id: "0035"
+    title: "MAINTAIN Protocol"
+    summary: "Rename CLEANUP to MAINTAIN, expand scope to include documentation maintenance (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md sync)"
+    status: specified
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0035-maintain-protocol.md
+      plan: null
+      review: null
+    dependencies: ["0015"]
+    tags: [protocols, maintenance, documentation]
+    notes: "Supersedes CLEANUP (0015). Adds doc maintenance to code hygiene. Consulted Gemini/Codex. No new roles - MAINTAIN executed by Builder like any protocol."
 
 # Low Priority
   - id: "0006"
@@ -341,34 +355,6 @@ Projects currently in development (conceived through committed), sorted by prior
     dependencies: ["0007"]
     tags: [ui, dashboard]
     notes: "Wider annotation boxes for readability. Triple-return (Enter x3) as save shortcut."
-
-  - id: "0027"
-    title: "Architecture Documenter as Protocol"
-    summary: "Evaluate whether architecture-documenter should be a protocol rather than a subagent"
-    status: conceived
-    priority: low
-    release: null
-    files:
-      spec: null
-      plan: null
-      review: null
-    dependencies: []
-    tags: [architecture, protocols, agents]
-    notes: "Currently a Claude Code subagent. Consider if DOCUMENT protocol would be more appropriate and portable across AI CLIs."
-
-  - id: "0028"
-    title: "Librarian Role"
-    summary: "Replace architecture-documenter agent with a broader Librarian role that owns all documentation stewardship"
-    status: specified
-    priority: medium
-    release: null
-    files:
-      spec: codev/specs/0028-librarian-role.md
-      plan: null
-      review: null
-    dependencies: []
-    tags: [roles, documentation, architecture]
-    notes: "Librarian responsibilities: maintain arch.md, keep CLAUDE.md/AGENTS.md in sync, curate codev/resources/, track documentation debt, ensure spec/plan/review consistency. Supersedes 0027 (which focused only on arch.md)."
 
   - id: "0029"
     title: "Overview Dashboard"
@@ -658,13 +644,41 @@ Projects that are paused or canceled.
     dependencies: []
     tags: [automation, reporting]
     notes: "Paused per project owner"
+
+  - id: "0027"
+    title: "Architecture Documenter as Protocol"
+    summary: "Evaluate whether architecture-documenter should be a protocol rather than a subagent"
+    status: abandoned
+    priority: low
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: []
+    tags: [architecture, protocols, agents]
+    notes: "Superseded by 0028, which was then superseded by 0035 (MAINTAIN protocol)."
+
+  - id: "0028"
+    title: "Librarian Role"
+    summary: "Replace architecture-documenter agent with a broader Librarian role that owns all documentation stewardship"
+    status: abandoned
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0028-librarian-role.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [roles, documentation, architecture]
+    notes: "After consulting Gemini/Codex, decided against new roles. Documentation maintenance absorbed into MAINTAIN protocol (spec 0035)."
 ```
 
 ---
 
 ## Next Available Number
 
-**0035** - Reserve this number for your next project
+**0036** - Reserve this number for your next project
 
 ---
 
