@@ -26,6 +26,7 @@ import {
   getBuilder,
   getBuilders,
   removeBuilder,
+  upsertBuilder,
   clearState,
   getArchitect,
 } from '../state.js';
@@ -343,8 +344,10 @@ function spawnTmuxWithTtyd(
       execSync(`tmux set-option -t "${sessionName}" -g allow-passthrough on`, { stdio: 'ignore' });
 
       // Copy selection to clipboard when mouse is released
-      execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-and-cancel`, { stdio: 'ignore' });
-      execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-and-cancel`, { stdio: 'ignore' });
+      // Use copy-pipe-and-cancel with pbcopy to directly copy to system clipboard
+      // (OSC 52 via set-clipboard doesn't work reliably through ttyd/xterm.js)
+      execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
+      execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
     }
 
     // Start ttyd to attach to the tmux session
@@ -372,6 +375,129 @@ function spawnTmuxWithTtyd(
     console.error(`Failed to create tmux session ${sessionName}:`, (err as Error).message);
     // Cleanup any partial session
     killTmuxSession(sessionName);
+    return null;
+  }
+}
+
+/**
+ * Generate a short 4-character base64-encoded ID for worktree names
+ */
+function generateShortId(): string {
+  const num = Math.floor(Math.random() * 0xFFFFFF);
+  const bytes = new Uint8Array([num >> 16, (num >> 8) & 0xFF, num & 0xFF]);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '')
+    .substring(0, 4);
+}
+
+/**
+ * Spawn a worktree builder - creates git worktree and starts builder CLI
+ * Similar to shell spawning but with git worktree isolation
+ */
+function spawnWorktreeBuilder(
+  builderPort: number,
+  state: DashboardState
+): { builder: Builder; pid: number } | null {
+  const shortId = generateShortId();
+  const builderId = `worktree-${shortId}`;
+  const branchName = `builder/worktree-${shortId}`;
+  const worktreePath = path.resolve(projectRoot, '.builders', builderId);
+  const sessionName = `builder-${builderId}`;
+
+  try {
+    // Ensure .builders directory exists
+    const buildersDir = path.resolve(projectRoot, '.builders');
+    if (!fs.existsSync(buildersDir)) {
+      fs.mkdirSync(buildersDir, { recursive: true });
+    }
+
+    // Create git branch and worktree
+    execSync(`git branch "${branchName}" HEAD`, { cwd: projectRoot, stdio: 'ignore' });
+    execSync(`git worktree add "${worktreePath}" "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
+
+    // Get builder command from config or use default
+    const configPath = path.resolve(projectRoot, 'codev', 'config.json');
+    let builderCommand = 'claude';
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        builderCommand = config?.shell?.builder || 'claude';
+      } catch {
+        // Use default
+      }
+    }
+
+    // Create tmux session with builder command
+    execSync(
+      `tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${builderCommand}"`,
+      { cwd: worktreePath, stdio: 'ignore' }
+    );
+
+    // Enable mouse support
+    execSync(`tmux set-option -t "${sessionName}" -g mouse on`, { stdio: 'ignore' });
+    execSync(`tmux set-option -t "${sessionName}" -g set-clipboard on`, { stdio: 'ignore' });
+    execSync(`tmux set-option -t "${sessionName}" -g allow-passthrough on`, { stdio: 'ignore' });
+
+    // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+    execSync(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
+    execSync(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`, { stdio: 'ignore' });
+
+    // Start ttyd
+    const customIndexPath = findTemplatePath('ttyd-index.html');
+    const ttydArgs = [
+      '-W',
+      '-p', String(builderPort),
+      '-t', 'theme={"background":"#000000"}',
+      '-t', 'fontSize=14',
+      '-t', 'rightClickSelectsWord=true',
+    ];
+
+    if (customIndexPath) {
+      ttydArgs.push('-I', customIndexPath);
+    }
+
+    ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
+
+    const pid = spawnDetached('ttyd', ttydArgs, worktreePath);
+
+    if (!pid) {
+      // Cleanup on failure
+      killTmuxSession(sessionName);
+      try {
+        execSync(`git worktree remove "${worktreePath}" --force`, { cwd: projectRoot, stdio: 'ignore' });
+        execSync(`git branch -D "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
+      } catch {
+        // Best effort cleanup
+      }
+      return null;
+    }
+
+    const builder: Builder = {
+      id: builderId,
+      name: `Worktree ${shortId}`,
+      port: builderPort,
+      pid,
+      status: 'implementing',
+      phase: 'interactive',
+      worktree: worktreePath,
+      branch: branchName,
+      tmuxSession: sessionName,
+      type: 'worktree',
+    };
+
+    return { builder, pid };
+  } catch (err) {
+    console.error(`Failed to spawn worktree builder:`, (err as Error).message);
+    // Cleanup any partial state
+    killTmuxSession(sessionName);
+    try {
+      execSync(`git worktree remove "${worktreePath}" --force`, { cwd: projectRoot, stdio: 'ignore' });
+      execSync(`git branch -D "${branchName}"`, { cwd: projectRoot, stdio: 'ignore' });
+    } catch {
+      // Best effort cleanup
+    }
     return null;
   }
 }
@@ -625,44 +751,36 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // API: Create builder tab
+    // API: Create builder tab (spawns worktree builder with random ID)
     if (req.method === 'POST' && url.pathname === '/api/tabs/builder') {
-      const body = await parseJsonBody(req);
-      const projectId = body.projectId as string;
-
-      if (!projectId) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Missing projectId');
-        return;
-      }
-
-      // Validate projectId is alphanumeric (prevent command injection)
-      if (!/^[a-zA-Z0-9_-]+$/.test(projectId)) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Invalid projectId format');
-        return;
-      }
-
-      // Check if builder already exists
-      const existingBuilder = getBuilder(projectId);
-      if (existingBuilder) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ id: existingBuilder.id, port: existingBuilder.port, existing: true }));
-        return;
-      }
+      const builderState = loadState();
 
       // DoS protection: check tab limit
-      const builderState = loadState();
       if (countTotalTabs(builderState) >= CONFIG.maxTabs) {
         res.writeHead(429, { 'Content-Type': 'text/plain' });
         res.end(`Tab limit reached (max ${CONFIG.maxTabs}). Close some tabs first.`);
         return;
       }
 
-      // Note: Spawning a builder is complex (requires worktree setup)
-      // For now, return an error directing to CLI
-      res.writeHead(501, { 'Content-Type': 'text/plain' });
-      res.end('Builder spawning from dashboard not yet implemented. Use: agent-farm spawn --project ' + projectId);
+      // Find available port for builder
+      const builderPort = await findAvailablePort(CONFIG.builderPortStart, builderState);
+
+      // Spawn worktree builder
+      const result = spawnWorktreeBuilder(builderPort, builderState);
+      if (!result) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Failed to spawn worktree builder');
+        return;
+      }
+
+      // Wait for ttyd to be ready
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Save builder to state
+      upsertBuilder(result.builder);
+
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: result.builder.id, port: result.builder.port, name: result.builder.name }));
       return;
     }
 

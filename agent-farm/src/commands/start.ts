@@ -110,6 +110,12 @@ export async function start(options: StartOptions = {}): Promise<void> {
   // Create tmux session with the command
   await run(`tmux new-session -d -s ${sessionName} -x 200 -y 50 '${cmd}'`, { cwd: config.projectRoot });
   await run(`tmux set-option -t ${sessionName} -g mouse on`);
+  await run(`tmux set-option -t ${sessionName} -g set-clipboard on`);
+  await run(`tmux set-option -t ${sessionName} -g allow-passthrough on`);
+
+  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+  await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
+  await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
 
   // Start ttyd attached to the tmux session
   // Use custom index.html for file path click-to-open functionality (optional)

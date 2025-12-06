@@ -561,7 +561,7 @@
         <div class="tabs-scroll" id="tabs-container"></div>
         <div class="add-buttons">
           <button class="add-btn" onclick="showFileDialog()" title="Open file">+ 📄</button>
-          <button class="add-btn" onclick="showBuilderDialog()" title="Spawn builder">+ 🔨</button>
+          <button class="add-btn" onclick="spawnBuilder()" title="Spawn worktree builder">+ 🔨</button>
           <button class="add-btn" onclick="spawnShell()" title="New shell">+ >_</button>
         </div>
       </div>
@@ -598,18 +598,6 @@
       <div class="dialog-actions">
         <button class="btn" onclick="hideFileDialog()">Cancel</button>
         <button class="btn" onclick="openFile()">Open</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Builder dialog -->
-  <div class="dialog-overlay hidden" id="builder-dialog">
-    <div class="dialog">
-      <h3>Spawn Builder</h3>
-      <input type="text" id="project-id-input" placeholder="Enter project ID (e.g., 0003)..." />
-      <div class="dialog-actions">
-        <button class="btn" onclick="hideBuilderDialog()">Cancel</button>
-        <button class="btn" onclick="spawnBuilder()">Spawn</button>
       </div>
     </div>
   </div>
@@ -1100,35 +1088,32 @@
       }
     }
 
-    // Builder dialog
-    function showBuilderDialog() {
-      document.getElementById('builder-dialog').classList.remove('hidden');
-      document.getElementById('project-id-input').focus();
-    }
-
-    function hideBuilderDialog() {
-      document.getElementById('builder-dialog').classList.add('hidden');
-      document.getElementById('project-id-input').value = '';
-    }
-
+    // Spawn worktree builder (no dialog - spawns with random ID)
     async function spawnBuilder() {
-      const projectId = document.getElementById('project-id-input').value.trim();
-      if (!projectId) return;
-
       try {
         const response = await fetch('/api/tabs/builder', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId })
+          body: JSON.stringify({})
         });
 
         if (!response.ok) {
           throw new Error(await response.text());
         }
 
-        hideBuilderDialog();
-        await refresh();
-        showToast(`Builder ${projectId} spawned`, 'success');
+        const result = await response.json();
+
+        // Add to local tabs and select it
+        const newTab = {
+          id: `builder-${result.id}`,
+          type: 'builder',
+          name: result.name,
+          port: result.port
+        };
+        localTabs.push(newTab);
+        selectedTabId = newTab.id;
+        renderTabs();
+        showToast(`Builder ${result.name} spawned`, 'success');
       } catch (err) {
         showToast('Failed to spawn builder: ' + err.message, 'error');
       }
