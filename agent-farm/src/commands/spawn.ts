@@ -243,6 +243,12 @@ async function startBuilderSession(
 
   // Enable mouse scrolling in tmux
   await run('tmux set -g mouse on');
+  await run('tmux set -g set-clipboard on');
+  await run('tmux set -g allow-passthrough on');
+
+  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
+  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
   // Start ttyd connecting to the tmux session
   logger.info('Starting builder terminal...');
@@ -290,6 +296,12 @@ async function startShellSession(
 
   // Enable mouse scrolling in tmux
   await run('tmux set -g mouse on');
+  await run('tmux set -g set-clipboard on');
+  await run('tmux set -g allow-passthrough on');
+
+  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
+  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
   // Start ttyd
   logger.info('Starting shell terminal...');
@@ -605,6 +617,12 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
 
   // Enable mouse scrolling in tmux
   await run('tmux set -g mouse on');
+  await run('tmux set -g set-clipboard on');
+  await run('tmux set -g allow-passthrough on');
+
+  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
+  await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
+  await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
   // Start ttyd
   logger.info('Starting worktree terminal...');
