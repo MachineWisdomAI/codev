@@ -126,7 +126,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0039"
     title: "Codev CLI (First-Class Command)"
     summary: "Unified codev command as primary entry point: init, adopt, doctor, update, tower, consult"
-    status: implementing
+    status: committed
     priority: high
     release: null
     files:
@@ -755,9 +755,23 @@ Projects that are paused or canceled.
     tags: [cli, consultation, performance]
     notes: "TICK protocol. Pre-fetch PR diff/comments/specs to tmp files (6 commands vs 19+), extract verdict from output. 30% faster than current approach (138s vs 200s+)."
 
+  - id: "0041"
+    title: "E2E Test Suite"
+    summary: "Automated end-to-end tests for @cluesmith/codev npm package installation and CLI commands"
+    status: planned
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0041-e2e-test-suite.md
+      plan: codev/plans/0041-e2e-test-suite.md
+      review: null
+    dependencies: ["0039"]
+    tags: [testing, npm, ci]
+    notes: "SPIDER protocol. 3-way reviewed. BATS-based tests with XDG sandboxing, tarball testing before publish, CI for macOS+Linux."
+
 ## Next Available Number
 
-**0040** - Reserve this number for your next project
+**0042** - Reserve this number for your next project
 
 ---
 
