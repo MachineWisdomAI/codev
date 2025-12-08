@@ -93,6 +93,33 @@ export function isUserDataPath(relativePath: string): boolean {
 }
 
 /**
+ * Validate that a relative path is safe (no directory traversal)
+ * Returns true if path is safe, false if it contains traversal attempts
+ */
+export function isValidRelativePath(relativePath: string): boolean {
+  // Normalize the path to resolve any . or .. components
+  const normalized = path.normalize(relativePath);
+
+  // Check for directory traversal patterns
+  if (normalized.startsWith('..') || normalized.includes('../') || normalized.includes('..\\')) {
+    return false;
+  }
+
+  // Check for absolute paths
+  if (path.isAbsolute(normalized)) {
+    return false;
+  }
+
+  // Ensure the normalized path doesn't escape the base directory
+  // by checking it doesn't start with a path separator after normalization
+  if (normalized.startsWith(path.sep) || normalized.startsWith('/')) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Recursively copy template files to target directory
  */
 export function copyTemplateDir(
@@ -119,10 +146,23 @@ export function copyTemplateDir(
         const srcPath = path.join(src, entry);
         const destPath = path.join(dest, entry);
         const relativePath = path.join(relativeBase, entry);
+
+        // Validate relative path to prevent directory traversal
+        if (!isValidRelativePath(relativePath)) {
+          console.warn(`Skipping unsafe path: ${relativePath}`);
+          continue;
+        }
+
         copyRecursive(srcPath, destPath, relativePath);
       }
     } else {
       const relativePath = relativeBase;
+
+      // Validate relative path to prevent directory traversal
+      if (!isValidRelativePath(relativePath)) {
+        console.warn(`Skipping unsafe path: ${relativePath}`);
+        return;
+      }
 
       // Skip user data files
       if (isUserDataPath(relativePath)) {
