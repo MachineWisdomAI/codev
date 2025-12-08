@@ -140,7 +140,7 @@ describe('Type Definitions', () => {
         architectPort: 4201,
         builderPortRange: [4210, 4229],
         utilPortRange: [4230, 4249],
-        annotatePortRange: [4250, 4269],
+        openPortRange: [4250, 4269],
       };
 
       expect(config.dashboardPort).toBe(4200);

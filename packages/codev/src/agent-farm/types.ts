@@ -65,7 +65,7 @@ export interface Config {
   architectPort: number;
   builderPortRange: [number, number];
   utilPortRange: [number, number];
-  annotatePortRange: [number, number];
+  openPortRange: [number, number];
 }
 
 // Session tracking for tmux

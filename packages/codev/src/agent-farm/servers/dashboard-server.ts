@@ -48,7 +48,7 @@ const CONFIG = {
   architectPort: port + 1,
   builderPortStart: port + 10,
   utilPortStart: port + 30,
-  annotatePortStart: port + 50,
+  openPortStart: port + 50,
   maxTabs: 20, // DoS protection: max concurrent tabs
 };
 
@@ -565,10 +565,10 @@ function countTotalTabs(state: DashboardState): number {
   return state.builders.length + state.utils.length + state.annotations.length;
 }
 
-// Find annotation server script (prefer .ts for dev, .js for compiled)
-function getAnnotateServerPath(): { script: string; useTsx: boolean } {
-  const tsPath = path.join(__dirname, 'annotate-server.ts');
-  const jsPath = path.join(__dirname, 'annotate-server.js');
+// Find open server script (prefer .ts for dev, .js for compiled)
+function getOpenServerPath(): { script: string; useTsx: boolean } {
+  const tsPath = path.join(__dirname, 'open-server.ts');
+  const jsPath = path.join(__dirname, 'open-server.js');
 
   if (fs.existsSync(tsPath)) {
     return { script: tsPath, useTsx: true };
@@ -685,31 +685,31 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Find available port (pass state to avoid already-allocated ports)
-      const annotatePort = await findAvailablePort(CONFIG.annotatePortStart, state);
+      const openPort = await findAvailablePort(CONFIG.openPortStart, state);
 
-      // Start annotation server
-      const { script: serverScript, useTsx } = getAnnotateServerPath();
+      // Start open server
+      const { script: serverScript, useTsx } = getOpenServerPath();
       if (!fs.existsSync(serverScript)) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Annotation server not found');
+        res.end('Open server not found');
         return;
       }
 
       // Use tsx for TypeScript files, node for compiled JavaScript
       const cmd = useTsx ? 'npx' : 'node';
       const args = useTsx
-        ? ['tsx', serverScript, String(annotatePort), fullPath]
-        : [serverScript, String(annotatePort), fullPath];
+        ? ['tsx', serverScript, String(openPort), fullPath]
+        : [serverScript, String(openPort), fullPath];
       const pid = spawnDetached(cmd, args, projectRoot);
 
       if (!pid) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Failed to start annotation server');
+        res.end('Failed to start open server');
         return;
       }
 
-      // Wait for annotation server to be ready (accepting connections)
-      const serverReady = await waitForPortReady(annotatePort, 5000);
+      // Wait for open server to be ready (accepting connections)
+      const serverReady = await waitForPortReady(openPort, 5000);
       if (!serverReady) {
         // Server didn't start in time - kill it and report error
         try {
@@ -718,7 +718,7 @@ const server = http.createServer(async (req, res) => {
           // Process may have already died
         }
         res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Annotation server failed to start (timeout)');
+        res.end('Open server failed to start (timeout)');
         return;
       }
 
@@ -726,7 +726,7 @@ const server = http.createServer(async (req, res) => {
       const annotation: Annotation = {
         id: generateId('A'),
         file: fullPath,
-        port: annotatePort,
+        port: openPort,
         pid,
         parent: { type: 'architect' },
       };
@@ -734,7 +734,7 @@ const server = http.createServer(async (req, res) => {
       addAnnotation(annotation);
 
       res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ id: annotation.id, port: annotatePort }));
+      res.end(JSON.stringify({ id: annotation.id, port: openPort }));
       return;
     }
 

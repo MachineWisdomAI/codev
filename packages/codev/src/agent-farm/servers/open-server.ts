@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Annotation server for file review.
- * Serves the annotation viewer and handles file saves.
+ * Open server for file viewing/editing.
+ * Serves the file viewer and handles file saves.
  *
- * Usage: node annotate-server.js <port> <filepath>
+ * Usage: node open-server.js <port> <filepath>
  */
 
 import http from 'node:http';
@@ -21,7 +21,7 @@ const port = parseInt(args[0] || '8080', 10);
 const filePath = args[1];
 
 if (!filePath) {
-  console.error('Usage: annotate-server.js <port> <filepath>');
+  console.error('Usage: open-server.js <port> <filepath>');
   process.exit(1);
 }
 
@@ -30,11 +30,11 @@ const fullFilePath = filePath;
 const displayPath = path.basename(filePath);
 
 /**
- * Find the annotate template
+ * Find the open template
  * Template is bundled with agent-farm package in templates/ directory
  */
 function findTemplatePath(): string {
-  const filename = 'annotate.html';
+  const filename = 'open.html';
 
   // 1. Try relative to compiled output (dist/servers/ -> templates/)
   const pkgPath = path.resolve(__dirname, '../templates/', filename);
@@ -154,6 +154,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`Annotation Viewer: http://localhost:${port}`);
+  console.log(`File Viewer: http://localhost:${port}`);
   console.log(`File: ${fullFilePath}`);
 });

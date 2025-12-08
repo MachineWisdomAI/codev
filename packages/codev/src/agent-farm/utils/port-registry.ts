@@ -139,7 +139,7 @@ export interface ProjectPorts {
   architectPort: number;
   builderPortRange: [number, number];
   utilPortRange: [number, number];
-  annotatePortRange: [number, number];
+  openPortRange: [number, number];
 }
 
 export function getProjectPorts(projectRoot: string): ProjectPorts {
@@ -151,7 +151,7 @@ export function getProjectPorts(projectRoot: string): ProjectPorts {
     architectPort: basePort + 1,        // 4201
     builderPortRange: [basePort + 10, basePort + 29] as [number, number],  // 4210-4229
     utilPortRange: [basePort + 30, basePort + 49] as [number, number],     // 4230-4249
-    annotatePortRange: [basePort + 50, basePort + 69] as [number, number], // 4250-4269
+    openPortRange: [basePort + 50, basePort + 69] as [number, number], // 4250-4269
   };
 }
 

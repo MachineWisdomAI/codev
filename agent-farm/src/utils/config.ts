@@ -212,7 +212,7 @@ let cachedPorts: {
   architectPort: number;
   builderPortRange: [number, number];
   utilPortRange: [number, number];
-  annotatePortRange: [number, number];
+  openPortRange: [number, number];
 } | null = null;
 
 /**
@@ -226,7 +226,7 @@ export function initializePorts(): void {
     architectPort: ports.architectPort,
     builderPortRange: ports.builderPortRange,
     utilPortRange: ports.utilPortRange,
-    annotatePortRange: ports.annotatePortRange,
+    openPortRange: ports.openPortRange,
   };
 }
 
@@ -245,7 +245,7 @@ export function getConfig(): Config {
     architectPort: 4201,
     builderPortRange: [4210, 4229] as [number, number],
     utilPortRange: [4230, 4249] as [number, number],
-    annotatePortRange: [4250, 4269] as [number, number],
+    openPortRange: [4250, 4269] as [number, number],
   };
 
   return {
@@ -261,7 +261,7 @@ export function getConfig(): Config {
     architectPort: ports.architectPort,
     builderPortRange: ports.builderPortRange,
     utilPortRange: ports.utilPortRange,
-    annotatePortRange: ports.annotatePortRange,
+    openPortRange: ports.openPortRange,
   };
 }
 

@@ -83,25 +83,25 @@ export async function open(options: OpenOptions): Promise<void> {
   }
 
   // Fall back to direct open
-  logger.header('Opening Annotation Viewer');
+  logger.header('Opening File Viewer');
   logger.kv('File', filePath);
 
   // Generate ID
   const id = generateAnnotationId();
 
   // Find available port
-  const port = await findAvailablePort(config.annotatePortRange[0]);
+  const port = await findAvailablePort(config.openPortRange[0]);
 
   logger.kv('Port', port);
 
-  // Find annotation server script (compiled TypeScript)
-  const serverScript = resolve(config.serversDir, 'annotate-server.js');
+  // Find open server script (compiled TypeScript)
+  const serverScript = resolve(config.serversDir, 'open-server.js');
 
   if (!existsSync(serverScript)) {
-    fatal(`Annotation server not found at ${serverScript}`);
+    fatal(`Open server not found at ${serverScript}`);
   }
 
-  // Start annotation server
+  // Start open server
   const serverProcess = spawnDetached('node', [serverScript, String(port), filePath], {
     cwd: config.projectRoot,
   });
