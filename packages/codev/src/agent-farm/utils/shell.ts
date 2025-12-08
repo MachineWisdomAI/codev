@@ -141,3 +141,49 @@ export async function openBrowser(url: string): Promise<void> {
   const open = (await import('open')).default;
   await open(url);
 }
+
+export interface TtydOptions {
+  /** Port to run ttyd on */
+  port: number;
+  /** tmux session name to attach to (REQUIRED - prevents attaching to wrong session) */
+  sessionName: string;
+  /** Working directory */
+  cwd?: string;
+  /** Custom index.html path for ttyd */
+  customIndexPath?: string;
+}
+
+/**
+ * Spawn ttyd attached to a specific tmux session.
+ *
+ * IMPORTANT: Always specify sessionName to prevent ttyd from attaching
+ * to the wrong tmux session. This has caused cross-project issues.
+ *
+ * @returns The spawned child process, or null if spawn failed
+ */
+export function spawnTtyd(options: TtydOptions): ChildProcess | null {
+  const { port, sessionName, cwd, customIndexPath } = options;
+
+  const ttydArgs = [
+    '-W',
+    '-p', String(port),
+    '-t', 'theme={"background":"#000000"}',
+    '-t', 'rightClickSelectsWord=true',
+  ];
+
+  // Add custom index if provided and exists
+  if (customIndexPath) {
+    ttydArgs.push('-I', customIndexPath);
+  }
+
+  // CRITICAL: Always specify the session name to prevent attaching to wrong session
+  ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
+
+  const child = spawnDetached('ttyd', ttydArgs, { cwd });
+
+  if (!child.pid) {
+    return null;
+  }
+
+  return child;
+}

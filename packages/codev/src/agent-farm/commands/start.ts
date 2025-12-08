@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { StartOptions, ArchitectState } from '../types.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, commandExists, findAvailablePort, openBrowser, run } from '../utils/shell.js';
+import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, spawnTtyd } from '../utils/shell.js';
 import { checkCoreDependencies } from '../utils/deps.js';
 import { loadState, setArchitect } from '../state.js';
 import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan-handler.js';
@@ -123,28 +123,20 @@ exec ${cmd} --append-system-prompt "$(cat '${roleFile}')"
   await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
 
   // Start ttyd attached to the tmux session
-  // Use custom index.html for file path click-to-open functionality (optional)
   const customIndexPath = resolve(config.templatesDir, 'ttyd-index.html');
-  const ttydArgs = [
-    '-W',
-    '-p', String(architectPort),
-    '-t', 'theme={"background":"#000000"}',
-    '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-  ];
-
-  // Add custom index if it exists
-  if (existsSync(customIndexPath)) {
-    ttydArgs.push('-I', customIndexPath);
+  const hasCustomIndex = existsSync(customIndexPath);
+  if (hasCustomIndex) {
     logger.info('Using custom terminal with file click support');
   }
 
-  ttydArgs.push('tmux', 'attach-session', '-t', sessionName);
-
-  const ttydProcess = spawnDetached('ttyd', ttydArgs, {
+  const ttydProcess = spawnTtyd({
+    port: architectPort,
+    sessionName,
     cwd: config.projectRoot,
+    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
   });
 
-  if (!ttydProcess.pid) {
+  if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process');
   }
 
