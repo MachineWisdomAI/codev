@@ -12,7 +12,7 @@ Subcommands:
     spec <number>       Review a Specification
     plan <number>       Review an Implementation Plan
     general <query>     General consultation query
-    integrate <type> <number>  Synthesize verdicts from parallel consultations
+    integration-review <type> <number>  Synthesize verdicts from parallel consultations
 
 Models (--model is REQUIRED):
     gemini, pro         Google Gemini
@@ -1099,7 +1099,7 @@ Subcommands:
   spec <number>          Review a Specification
   plan <number>          Review an Implementation Plan
   general <query>        General consultation query
-  integrate <type> <n>   Synthesize verdicts with AI
+  integration-review <type> <n>   Synthesize verdicts with AI
 
 Subcommand Options:
   -n, --dry-run          Show what would execute without running
@@ -1379,10 +1379,10 @@ Examples:
 
         do_plan(plan_number, resolved_model, dry_run)
 
-    elif subcommand == "integrate":
-        # Parse integrate subcommand
+    elif subcommand == "integration-review":
+        # Parse integration-review subcommand
         if "--help" in sub_args or "-h" in sub_args:
-            print("""Usage: consult --model <model> integrate <type> <number> [options]
+            print("""Usage: consult --model <model> integration-review <type> <number> [options]
 
 Synthesize verdicts from parallel consultations using AI.
 
@@ -1399,28 +1399,28 @@ Options:
 
 Workflow:
   1. Run parallel consultations:
-     consult --model gemini spec 38 &
-     consult --model codex spec 38 &
-     consult --model claude spec 38 &
+     consult --model gemini pr 33 &
+     consult --model codex pr 33 &
+     consult --model claude pr 33 &
      wait
 
-  2. Run parallel integrations:
-     consult --model gemini integrate spec 38 &
-     consult --model codex integrate spec 38 &
-     consult --model claude integrate spec 38 &
+  2. Run parallel integration reviews:
+     consult --model gemini integration-review pr 33 &
+     consult --model codex integration-review pr 33 &
+     consult --model claude integration-review pr 33 &
      wait
 
   3. Architect synthesizes the integration outputs
 
 Examples:
-  consult --model gemini integrate pr 33
-  consult --model claude integrate spec 38
+  consult --model gemini integration-review pr 33
+  consult --model claude integration-review pr 33
 """)
             sys.exit(0)
 
         if len(sub_args) < 2:
-            print("Error: integrate requires <type> and <number>", file=sys.stderr)
-            print("Usage: consult --model <model> integrate <type> <number>", file=sys.stderr)
+            print("Error: integration-review requires <type> and <number>", file=sys.stderr)
+            print("Usage: consult --model <model> integration-review <type> <number>", file=sys.stderr)
             print("Types: pr, spec, plan", file=sys.stderr)
             sys.exit(1)
 
@@ -1443,7 +1443,7 @@ Examples:
 
     else:
         print(f"Error: Unknown subcommand '{subcommand}'", file=sys.stderr)
-        print("Available subcommands: pr, spec, plan, general, integrate", file=sys.stderr)
+        print("Available subcommands: pr, spec, plan, general, integration-review", file=sys.stderr)
         sys.exit(1)
 
 
