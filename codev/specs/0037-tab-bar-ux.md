@@ -3,7 +3,7 @@
 ## Metadata
 - **ID**: 0037-tab-bar-ux
 - **Protocol**: TICK
-- **Status**: specified
+- **Status**: committed
 - **Created**: 2025-12-07
 - **Priority**: medium
 
