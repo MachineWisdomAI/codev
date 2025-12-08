@@ -692,8 +692,192 @@ def do_general(model: str, query: Optional[str], dry_run: bool) -> None:
                 pass
 
 
-def do_pr(number: int, model: str, dry_run: bool) -> None:
-    """Execute a PR consultation with a single model."""
+def run_mediated_consultation(
+    model: str,
+    query: str,
+    codev_root: Path,
+    output_file: Optional[Path] = None,
+) -> tuple[str, int, float]:
+    """Run a consultation with filesystem tools DISABLED.
+
+    Used for architect-mediated reviews where context is pre-provided.
+
+    Returns: (output, return_code, duration_secs)
+    """
+    role_file = codev_root / "codev" / "roles" / "consultant.md"
+    role = get_role(role_file)
+
+    # Resolve model aliases
+    resolved = MODEL_MAP.get(model.lower(), model.lower())
+    temp_system_file = None
+    env = {}
+
+    if resolved == "gemini":
+        if not shutil.which("gemini"):
+            return "Error: gemini-cli not found", 1, 0.0
+        temp_system_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False
+        )
+        temp_system_file.write(role)
+        temp_system_file.close()
+        # --sandbox disables shell access
+        cmd = ["gemini", "--sandbox", query]
+        env = {"GEMINI_SYSTEM_MD": temp_system_file.name}
+        if os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
+            env["GEMINI_API_KEY"] = ""
+    elif resolved == "codex":
+        if not shutil.which("codex"):
+            return "Error: codex not found", 1, 0.0
+        # codex exec without --full-auto has no tool use
+        cmd = ["codex", "exec", query]
+        env = {"CODEX_SYSTEM_MESSAGE": role}
+    elif resolved == "claude":
+        if not shutil.which("claude"):
+            return "Error: claude not found", 1, 0.0
+        full_query = f"{role}\n\n---\n\nConsultation Request:\n{query}"
+        # --print disables interactive tools
+        cmd = ["claude", "--print", "-p", full_query]
+        env = {}
+    else:
+        return f"Unknown model: {model}", 1, 0.0
+
+    full_env = {**os.environ, **env}
+    start_time = time.time()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            env=full_env,
+            capture_output=True,
+            text=True,
+        )
+        duration = time.time() - start_time
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[stderr]: {result.stderr}"
+
+        # Save to output file if specified
+        if output_file:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.write_text(output)
+
+        return output, result.returncode, duration
+    except KeyboardInterrupt:
+        return "Interrupted", 130, time.time() - start_time
+    finally:
+        if temp_system_file:
+            try:
+                os.unlink(temp_system_file.name)
+            except Exception:
+                pass
+
+
+def do_pr_mediated(number: int, model: str, context: str, dry_run: bool) -> None:
+    """Execute a mediated PR consultation (context provided by architect).
+
+    Runs consultant WITHOUT filesystem access - analyzes provided overview only.
+    """
+    codev_root = find_codev_root()
+    log_dir = codev_root / ".consult"
+    pr_dir = log_dir / f"pr-{str(number).zfill(4)}-mediated"
+
+    # Load .env
+    load_dotenv(codev_root)
+
+    print(f"[Mediated PR Review #{number}]", file=sys.stderr)
+    print(f"Model: {model}", file=sys.stderr)
+    print(f"Context length: {len(context)} chars", file=sys.stderr)
+
+    if dry_run:
+        print("\n[DRY RUN] Would execute:", file=sys.stderr)
+        print(f"  1. Use provided context ({len(context)} chars)", file=sys.stderr)
+        print(f"  2. Run consultation with: {model} (sandbox mode)", file=sys.stderr)
+        print(f"  3. Save output to {pr_dir}/{model}-full.txt", file=sys.stderr)
+        print(f"  4. Extract and display verdict", file=sys.stderr)
+        sys.exit(0)
+
+    # Create output directory
+    pr_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save provided context
+    (pr_dir / "provided-context.md").write_text(context)
+
+    # Build query with embedded context
+    query = f"""Review Pull Request #{number}
+
+You have been provided with a comprehensive overview by the Architect.
+Analyze this overview and provide your review. Do NOT attempt to access the filesystem.
+
+---
+{context}
+---
+
+Please review:
+1. Code quality and correctness
+2. Alignment with spec/plan (if provided)
+3. Test coverage and quality
+4. Edge cases and error handling
+5. Documentation and comments
+6. Any security concerns
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]
+"""
+
+    # Run mediated consultation (no filesystem access)
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"[{model.upper()}] Starting mediated consultation...", file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+
+    output_file = pr_dir / f"{model}-full.txt"
+    output, retcode, duration = run_mediated_consultation(
+        model, query, codev_root, output_file
+    )
+    log_query(log_dir, model, f"PR #{number} mediated review", duration)
+
+    # Extract and display verdict
+    verdict = extract_verdict(output)
+    verdict_file = pr_dir / f"{model}-verdict.txt"
+    verdict_file.write_text(verdict)
+
+    print(f"\n{'='*60}")
+    print(f"VERDICT [{model.upper()}] ({duration:.1f}s)")
+    print(f"{'='*60}")
+    print(verdict)
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("SUMMARY")
+    print(f"{'='*60}")
+    print(f"PR: #{number} (mediated review)")
+    print(f"Model: {model}")
+    print(f"Duration: {duration:.1f}s")
+    print(f"Output: {pr_dir}/")
+
+    # Cleanup old mediated consultations (same retention as regular PR reviews)
+    removed = cleanup_old_pr_consultations(log_dir, keep_last=10)
+    if removed > 0:
+        print(f"Cleaned up {removed} old consultation(s)", file=sys.stderr)
+
+
+def do_pr(number: int, model: str, dry_run: bool, context: Optional[str] = None) -> None:
+    """Execute a PR consultation with a single model.
+
+    If context is provided, runs in mediated mode (no filesystem access).
+    Otherwise, runs in exploration mode (consultant fetches data).
+    """
+    # If context provided, use mediated mode
+    if context:
+        do_pr_mediated(number, model, context, dry_run)
+        return
+
     codev_root = find_codev_root()
     log_dir = codev_root / ".consult"
     pr_dir = log_dir / f"pr-{str(number).zfill(4)}"
@@ -863,21 +1047,34 @@ def main():
         if "--help" in sub_args or "-h" in sub_args:
             print("""Usage: consult --model <model> pr <number> [options]
 
-Review a Pull Request with optimized data fetching.
+Review a Pull Request.
 
-Pre-fetches PR data (info, comments, diff, files) and passes file paths
-to the consultant model, reducing git command overhead.
+By default, pre-fetches PR data and allows the consultant to explore.
+With --context, runs in architect-mediated mode (no filesystem access).
 
 Arguments:
   number                 PR number to review [required]
 
 Options:
-  -n, --dry-run          Show what would be fetched without executing
+  -c, --context FILE     Path to context file (architect-mediated mode)
+                         Use '-' to read from stdin
+  -n, --dry-run          Show what would be executed without running
   -h, --help             Show this message and exit
 
+Architect-Mediated Mode:
+  When --context is provided, the consultant receives a pre-prepared
+  overview and runs WITHOUT filesystem access. This is faster and
+  ensures consistent review scope across consultants.
+
+  Create context using the template: codev/templates/pr-overview.md
+
 Examples:
+  # Standard mode (consultant explores)
   consult --model gemini pr 33
-  consult --model claude pr 33 --dry-run
+
+  # Mediated mode (architect provides context)
+  consult --model gemini pr 33 --context overview.md
+  cat overview.md | consult --model gemini pr 33 --context -
 """)
             sys.exit(0)
 
@@ -894,14 +1091,47 @@ Examples:
 
         # Parse PR options
         dry_run = False
-        for arg in sub_args[1:]:
+        context_file = None
+        i = 1
+        while i < len(sub_args):
+            arg = sub_args[i]
             if arg in ["--dry-run", "-n"]:
                 dry_run = True
+                i += 1
+            elif arg in ["--context", "-c"]:
+                if i + 1 >= len(sub_args):
+                    print("Error: --context requires a file path (or '-' for stdin)", file=sys.stderr)
+                    sys.exit(1)
+                context_file = sub_args[i + 1]
+                i += 2
             else:
                 print(f"Error: Unknown option '{arg}'", file=sys.stderr)
                 sys.exit(1)
 
-        do_pr(pr_number, resolved_model, dry_run)
+        # Read context if provided
+        context = None
+        if context_file:
+            if context_file == "-":
+                # Read from stdin
+                if sys.stdin.isatty():
+                    print("Error: --context - requires piped input", file=sys.stderr)
+                    sys.exit(1)
+                context = sys.stdin.read().rstrip()
+                if not context:
+                    print("Error: Empty context from stdin", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Read from file
+                context_path = Path(context_file)
+                if not context_path.exists():
+                    print(f"Error: Context file not found: {context_file}", file=sys.stderr)
+                    sys.exit(1)
+                context = context_path.read_text()
+                if not context.strip():
+                    print(f"Error: Context file is empty: {context_file}", file=sys.stderr)
+                    sys.exit(1)
+
+        do_pr(pr_number, resolved_model, dry_run, context)
 
     elif subcommand == "general":
         # Parse general subcommand

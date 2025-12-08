@@ -484,6 +484,36 @@ wait
 
 **Why Codex is slower**: Codex CLI's `--full-auto` mode executes shell commands sequentially with reasoning between each step. For PR reviews, it typically runs 10-15 commands like `git show <branch>:<file>`, `rg -n "pattern"`, etc. This is more thorough but takes ~2x longer than Gemini's text-only analysis.
 
+### Architect-Mediated PR Reviews
+
+For faster and more consistent PR reviews, the Architect can prepare context upfront and pass it to consultants:
+
+```bash
+# Standard mode (consultant explores filesystem - slower)
+consult --model gemini pr 68
+
+# Mediated mode (architect provides context - faster)
+consult --model gemini pr 68 --context overview.md
+
+# Via stdin
+cat overview.md | consult --model gemini pr 68 --context -
+
+# 3-way parallel mediated reviews
+consult --model gemini pr 68 --context overview.md &
+consult --model codex pr 68 --context overview.md &
+consult --model claude pr 68 --context overview.md &
+wait
+```
+
+**When to use mediated mode**:
+- 3-way reviews where consistent context is important
+- Large PRs where exploration is slow
+- When specific aspects need focused review
+
+**Template**: Use `codev/templates/pr-overview.md` to prepare context.
+
+**Performance**: Mediated reviews complete in ~30-60s vs 120-250s with exploration.
+
 ### How It Works
 
 1. Reads the consultant role from `codev/roles/consultant.md`

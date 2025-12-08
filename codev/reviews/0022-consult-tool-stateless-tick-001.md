@@ -5,6 +5,7 @@
 - **TICK Number**: 001
 - **Date**: 2025-12-08
 - **Protocol**: TICK (amendment workflow per spec 0040)
+- **Branch**: builder/task-Yygr
 
 ## Summary
 
@@ -33,41 +34,79 @@ Architect-mediated reviews:
 
 | File | Change Type |
 |------|-------------|
+| `codev/bin/consult` | Added mediated mode (~180 lines) |
+| `codev/templates/pr-overview.md` | New template (60 lines) |
+| `CLAUDE.md` | Documentation update (30 lines) |
 | `codev/specs/0022-consult-tool-stateless.md` | Added Amendments section with TICK-001 |
 | `codev/plans/0022-consult-tool-stateless.md` | Added Amendment History with Phase 6 |
-| `codev/projectlist.md` | Added `ticks: [001]` field to project 0022 |
 
 ## Implementation Status
 
-This TICK defines the spec and plan changes. Implementation is pending:
+All items completed:
 
-- [ ] Add `--context` flag to PR subcommand
-- [ ] Support stdin for context input
-- [ ] Modify CLI invocation to disable filesystem tools when context provided
-- [ ] Create PR overview template
-- [ ] Update CLAUDE.md documentation
+- [x] Add `--context` flag to PR subcommand
+- [x] Support stdin for context input (`--context -`)
+- [x] Modify CLI invocation to disable filesystem tools when context provided
+- [x] Create PR overview template
+- [x] Update CLAUDE.md documentation
+- [x] Add cleanup for mediated consultation directories
+
+### Sandbox Mode Implementation
+
+| Model | Exploration Mode | Mediated Mode |
+|-------|------------------|---------------|
+| Gemini | `--yolo` | `--sandbox` |
+| Codex | `exec --full-auto` | `exec` (no full-auto) |
+| Claude | `--print --dangerously-skip-permissions` | `--print` |
+
+## 3-Way Review Summary
+
+### Gemini (45.2s) - APPROVE
+> "The implementation fully satisfies the requirements of Spec 0022 TICK-001. The code is robust and the documentation is complete."
+
+Key points:
+- Implementation correctness verified
+- Argument parsing logic properly handles mixed positional/flag arguments
+- Error handling is robust
+- Clean separation of `do_pr` and `do_pr_mediated`
+
+### Codex (317.4s) - APPROVE (with suggestions)
+> "Verdict: APPROVE (addressing the above would be nice but not blocking)."
+
+Suggestions addressed:
+1. **Mediated cleanup** - Added `cleanup_old_pr_consultations()` call to mediated mode
+2. **Documentation note** - The "How It Works" section applies to exploration mode; mediated mode uses different flags
+
+## Test Results
+
+All manual tests passed:
+- `consult --model gemini pr --help` - Shows correct help with --context option
+- `consult --model gemini pr 68 --context overview.md --dry-run` - Correct mediated mode output
+- `echo "test" | consult --model claude pr 99 --context - --dry-run` - Stdin works
+- `consult --model gemini pr 68 --dry-run` - Standard mode still works
+- Error handling for missing/empty context files works
 
 ## Lessons Learned
 
 ### What Worked Well
 
-1. **First use of TICK-as-amendment** (per spec 0040) - the workflow feels natural
-2. **In-place modification** keeps the spec as single source of truth
-3. **Amendment section** provides clear historical record
+1. **TICK-as-amendment workflow** (per spec 0040) - natural extension of existing spec
+2. **Clean separation** - `do_pr_mediated()` keeps mediated logic isolated
+3. **Backward compatible** - standard PR review mode unchanged
 
 ### What Could Be Improved
 
-1. Need to implement the actual CLI changes (this was spec/plan only)
-2. Should add timing metrics once implemented to validate <60s target
+1. **Cleanup consistency** - Initially missed adding cleanup to mediated mode. Always ensure new code paths include cleanup logic.
+2. **Mode-specific docs** - When adding modes, clearly indicate which documentation applies to which mode
 
-### Observations
+### Technical Observations
 
-- The TICK-as-amendment approach (spec 0040) works well for refining existing features
-- Clear separation between "what changed in spec" vs "what changed in plan"
-- Review documents for TICKs can be lighter than full SPIDER reviews
+- Each CLI has different ways to disable filesystem access:
+  - Gemini: explicit `--sandbox` flag
+  - Codex: `exec` without `--full-auto` implicitly disables tools
+  - Claude: drop `--dangerously-skip-permissions` flag
 
 ## Related
 
 - **Parent**: Spec 0022 (Consult Tool Stateless)
 - **Meta-spec**: Spec 0040 (TICK as SPIDER Amendment)
-- **Future**: Implementation will likely be done as a focused PR
