@@ -120,11 +120,39 @@ Before optimizing, verify the baseline:
 2. **Performance**: Measure time on main branch vs builder branch
 3. **Reliability**: Verify temp file cleanup on success and failure
 
+## Research: Community Tips for Faster Codex
+
+From web research ([10 Codex Fixes](https://medium.com/@ThinkingLoop/10-openai-codex-fixes-for-performance-nightmares-ad55d3fc293a), [GitHub Issues](https://github.com/openai/codex/issues/5149), [Speed Discussion](https://medium.com/@magnusriga/the-problem-is-speed-792b30fb3609)):
+
+### Known Issues
+- **GPT-5 is inherently slow**: Users report 5-20 minutes per query, 4-7x slower than GPT-4.1
+- **"Meanders a lot"**: GPT-5 explores many approaches before converging on a solution
+- **Server load**: Response times vary significantly based on OpenAI server load
+
+### Optimization Tips
+1. **Optimize prompts**: Don't paste entire codebases - feed only relevant context
+2. **Summarize boilerplate**: Compress repetitive code before passing to Codex
+3. **Use focused queries**: Specific questions get faster responses than open-ended ones
+4. **Streaming**: Perceived speed improves with streaming enabled (already using --full-auto)
+
+### What We Can Control
+- **Consultant prompt optimization**: Make it concise and focused
+- **Reasoning effort**: `model_reasoning_effort=low` reduces computation
+- **Context size**: Pass less context for faster responses (trade-off with quality)
+
+### What We Cannot Control
+- **Server latency**: OpenAI infrastructure speed
+- **Model inherent speed**: GPT-5.1-codex is slower than alternatives by design
+- **Token generation**: ~1ms per token, unavoidable
+
 ## References
 
 - [Codex CLI Reference](https://developers.openai.com/codex/cli/reference/)
 - [Custom System Prompt Discussion](https://github.com/openai/codex/discussions/3896)
 - [Pro Tip: Custom System Prompts](https://github.com/openai/codex/discussions/7296)
 - [Codex Prompting Guide](https://developers.openai.com/codex/prompting/)
+- [10 Codex Fixes for Performance](https://medium.com/@ThinkingLoop/10-openai-codex-fixes-for-performance-nightmares-ad55d3fc293a)
+- [Codex CLI Slow Issue #5149](https://github.com/openai/codex/issues/5149)
+- [Speed Discussion](https://medium.com/@magnusriga/the-problem-is-speed-792b30fb3609)
 - Current implementation: `codev/bin/consult`
 - Consultant role: `codev/roles/consultant.md`
