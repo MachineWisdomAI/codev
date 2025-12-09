@@ -786,7 +786,7 @@ Projects that are paused or canceled.
   - id: "0043"
     title: "Codex Reliability for Codev"
     summary: "Get Codex CLI running consistently and rapidly with codev consultations"
-    status: committed
+    status: integrated
     priority: high
     release: null
     files:
@@ -797,9 +797,23 @@ Projects that are paused or canceled.
     tags: [cli, consultation, codex]
     notes: "Merged PR #83. Replaced undocumented CODEX_SYSTEM_MESSAGE with experimental_instructions_file, added model_reasoning_effort=low."
 
+  - id: "0044"
+    title: "Architect-Builder Workflow Clarity"
+    summary: "Document and enforce clear workflow stages between architect and builder roles"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0044-architect-builder-workflow.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [protocol, workflow, spider]
+    notes: "Clarify the 7-stage workflow: conceived → spec-drafted → planned → implementing → pr-ready → committed → integrated. Delete SPIDER-SOLO (redundant)."
+
 ## Next Available Number
 
-**0044** - Reserve this number for your next project
+**0045** - Reserve this number for your next project
 
 ---
 
