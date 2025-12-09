@@ -1,15 +1,50 @@
-# Codev Installation Guide for AI Agents
+# Codev Installation Guide
 
-## Overview
+## Recommended: Install via npm
 
-This document provides instructions for AI agents to install the Codev methodology framework into a user's project. Codev is a context-driven development methodology that uses structured protocols to guide collaborative software development.
+The easiest way to install Codev is through npm:
+
+```bash
+npm install -g @cluesmith/codev
+```
+
+This provides three CLI commands:
+- `codev` - Main CLI (init, adopt, doctor, update, tower)
+- `af` - Agent-farm CLI for parallel development
+- `consult` - Multi-agent consultation tool
+
+### Initialize a New Project
+
+```bash
+mkdir my-project && cd my-project
+codev init
+```
+
+### Adopt Codev in an Existing Project
+
+```bash
+cd existing-project
+codev adopt
+```
+
+### Verify Installation
+
+```bash
+codev doctor
+```
+
+---
+
+## Alternative: Manual Installation for AI Agents
+
+This section provides instructions for AI agents to manually install the Codev methodology framework. Most users should use `npm install -g @cluesmith/codev` instead.
 
 ### Core Principles
 1. **Context Drives Code** - Context definitions flow from high-level specifications down to implementation details
 2. **Human-AI Collaboration** - Designed for seamless cooperation between developers and AI agents
 3. **Evolving Methodology** - The process itself evolves and improves with each project
 
-## Installation Process
+## Manual Installation Process
 
 ### Step 1: Check Prerequisites
 
@@ -177,20 +212,17 @@ Key sections to verify:
 
 **Run the Doctor Command**:
 
-The easiest way to verify your installation is to run the `codev-doctor` command:
+The easiest way to verify your installation is to run:
 
 ```bash
-./codev/bin/codev-doctor
+codev doctor
 ```
 
 This checks:
-- **Core dependencies**: Node.js, tmux, ttyd, git, Python (with versions)
+- **Core dependencies**: Node.js, tmux, ttyd, git (with versions)
 - **AI CLI dependencies**: Claude Code, Gemini CLI, Codex CLI (at least one required)
-- **Python packages**: typer (for the consult tool)
 
 If any required dependencies are missing, the doctor will show install instructions.
-
-**Note**: If the doctor reports missing dependencies, your AI agent can guide you through installing them. Simply share the doctor output and ask for help.
 
 **Quick Codev Structure Verification**:
 ```bash
@@ -352,42 +384,29 @@ For projects with parallelizable components, Codev includes the Architect-Builde
 
 ### Prerequisites
 
+After installing `@cluesmith/codev` via npm, ensure these dependencies are installed:
+
 - **ttyd** (web-based terminal): `brew install ttyd` on macOS
 - **tmux** (terminal multiplexer): `brew install tmux` on macOS
-- **Node.js** 18+ (for agent-farm runtime)
+- **Node.js** 18+
 - **git** 2.5+ (with worktree support)
+
+Check with:
+```bash
+codev doctor
+```
 
 ### Setup
 
-The architect-builder tools are included in the codev installation:
+The architect-builder tools are available globally via the `af` command after installing `@cluesmith/codev`:
 
 ```bash
 # Ensure .builders/ and .agent-farm/ are in your .gitignore
 echo ".builders/" >> .gitignore
 echo ".agent-farm/" >> .gitignore
 
-# Build the agent-farm TypeScript
-cd agent-farm && npm install && npm run build && cd ..
-
 # Verify the agent-farm CLI is available
-./codev/bin/agent-farm --help
-```
-
-### Shell Alias (Recommended)
-
-Add to your `~/.bashrc` or `~/.zshrc` for convenience:
-
-```bash
-# Agent Farm alias - run from any codev project
-alias af='./codev/bin/agent-farm'
-```
-
-Then use shorter commands:
-```bash
-af start           # Start architect dashboard
-af spawn -p 0003   # Spawn builder
-af status          # Check status
-af stop            # Stop everything
+af --help
 ```
 
 ### Configuration
@@ -412,40 +431,40 @@ Create `codev/config.json` to customize commands:
 
 Override via CLI:
 ```bash
-./codev/bin/agent-farm start --architect-cmd "claude --model opus"
-./codev/bin/agent-farm spawn --project 0003 --builder-cmd "claude"
+af start --architect-cmd "claude --model opus"
+af spawn --project 0003 --builder-cmd "claude"
 ```
 
 ### Quick Start
 
 ```bash
 # Start the architect dashboard
-./codev/bin/agent-farm start
+af start
 
 # Spawn a builder for a spec
-./codev/bin/agent-farm spawn --project 0003
+af spawn --project 0003
 
 # Check status of all builders
-./codev/bin/agent-farm status
+af status
 
 # Open a utility shell
-./codev/bin/agent-farm util
+af util
 
 # Open a file in annotation viewer
-./codev/bin/agent-farm open src/auth/login.ts
+af open src/auth/login.ts
 
 # Clean up a builder (checks for uncommitted changes first)
-./codev/bin/agent-farm cleanup --project 0003
+af cleanup --project 0003
 
 # Force cleanup (WARNING: may lose uncommitted work)
-./codev/bin/agent-farm cleanup --project 0003 --force
+af cleanup --project 0003 --force
 
 # Stop the architect and all builders
-./codev/bin/agent-farm stop
+af stop
 
 # Manage port allocations (for multi-project support)
-./codev/bin/agent-farm ports list
-./codev/bin/agent-farm ports cleanup
+af ports list
+af ports cleanup
 ```
 
 ### How It Works
@@ -470,7 +489,6 @@ Override via CLI:
 - `codev/config.json` - Project configuration
 - `codev/templates/` - Dashboard and annotation HTML templates
 - `codev/roles/` - Architect and builder role prompts
-- `codev/bin/agent-farm` - CLI wrapper script
 
 See `codev/specs/0002-architect-builder.md` for full documentation.
 

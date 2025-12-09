@@ -8,13 +8,28 @@ You have a project that previously installed codev (from codev-skeleton) and wan
 
 ## Prerequisites
 
+### Install the npm package
+
+First, install the new npm package:
+
+```bash
+npm install -g @cluesmith/codev
+```
+
+This provides three CLI commands:
+- `codev` - Main CLI (init, adopt, doctor, update, tower)
+- `af` - Agent-farm CLI for parallel development
+- `consult` - Multi-agent consultation tool
+
+### Verify dependencies
+
 Before migrating, ensure all dependencies are installed. See **[DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md)** for complete installation instructions.
 
 **Quick check:**
 
 ```bash
-# Run the doctor script
-./codev/bin/codev-doctor
+# Run the doctor command
+codev doctor
 
 # Or check manually
 which node && node --version    # Need 18+
@@ -22,7 +37,6 @@ which tmux && tmux -V           # Need 3.0+
 which ttyd && ttyd --version    # Need 1.7+
 which git && git --version      # Need 2.5+
 which gh && gh auth status      # Need authenticated
-which python3 && python3 --version  # Need 3.10+
 which claude || which gemini || which codex  # Need at least one
 ```
 
@@ -107,25 +121,22 @@ The AI should compare each file/directory and merge appropriately:
 
 **For `CLAUDE.md` and `AGENTS.md`**: These often have project-specific sections. Merge new codev instructions while preserving project-specific content.
 
-### Step 4: Install agent-farm
+### Step 4: Verify npm package installation
 
-**Option A: Use global agent-farm (recommended for most users)**
+After installing `@cluesmith/codev` globally, verify the commands are available:
 
-If you have the codev source repo, you can run agent-farm from there:
 ```bash
-# Add alias to your shell profile
-alias af='/path/to/codev/agent-farm/dist/index.js'
-
-# Or symlink the wrapper script
-ln -s /path/to/codev/codev/bin/agent-farm /usr/local/bin/af
+# Check all three commands work
+codev --help
+af --help
+consult --help
 ```
 
-**Option B: Copy agent-farm to project (for isolated/portable installs)**
-
-Only if you need a fully self-contained project:
+If any commands are not found, ensure npm global bin is in your PATH:
 ```bash
-cp -r /path/to/codev/agent-farm .
-cd agent-farm && npm install && npm run build && cd ..
+npm config get prefix
+# Should show a directory like /usr/local or ~/.npm-global
+# Ensure $(npm config get prefix)/bin is in your $PATH
 ```
 
 ### Step 5: Update .gitignore
@@ -136,10 +147,6 @@ Ensure your `.gitignore` includes:
 # Agent Farm
 .agent-farm/
 .builders/
-
-# If using local agent-farm copy
-agent-farm/node_modules/
-agent-farm/dist/
 
 # Consultation logs
 .consult/
@@ -197,23 +204,26 @@ The AI migration assistant should merge these template improvements while preser
 
 ```bash
 # Check CLI works
-./codev/bin/agent-farm --help
+af --help
 
 # Run health check
-./codev/bin/codev-doctor
+codev doctor
 
 # Test starting the dashboard
-./codev/bin/agent-farm start
+af start
 ```
 
 ---
 
 ## Post-Migration Checklist
 
-- [ ] Dependencies installed (ttyd, tmux, node 18+, git, gemini-cli, codex)
-- [ ] `./codev/bin/agent-farm --help` shows available commands
-- [ ] `./codev/bin/codev-doctor` passes all checks (AI CLIs show "working")
-- [ ] Dashboard starts with `./codev/bin/agent-farm start`
+- [ ] npm package installed: `npm install -g @cluesmith/codev`
+- [ ] Dependencies installed (ttyd, tmux, node 18+, git, AI CLIs)
+- [ ] `codev --help` shows available commands
+- [ ] `af --help` shows available commands
+- [ ] `consult --help` shows available commands
+- [ ] `codev doctor` passes all checks (AI CLIs show "working")
+- [ ] Dashboard starts with `af start`
 - [ ] Your specs in `codev/specs/` are intact
 - [ ] Your plans in `codev/plans/` are intact
 - [ ] Your reviews in `codev/reviews/` are intact
@@ -235,20 +245,21 @@ Source codev repo: /path/to/codev
 My project: /path/to/my/project
 
 Please:
-1. Check prerequisites (ttyd, tmux, node, git, gemini-cli, codex)
-2. Clean up obsolete files (builders.md, .architect.pid, .builders/, etc.)
-3. Compare my codev/protocols/, codev/templates/, codev/roles/ with the
+1. Install the npm package: npm install -g @cluesmith/codev
+2. Verify the three commands work: codev --help, af --help, consult --help
+3. Check prerequisites (ttyd, tmux, node, git, AI CLIs) with: codev doctor
+4. Clean up obsolete files (builders.md, .architect.pid, .builders/, etc.)
+5. Compare my codev/protocols/, codev/templates/, codev/roles/ with the
    new versions in codev-skeleton/ and merge any local customizations
-4. Compare my CLAUDE.md/AGENTS.md with codev-skeleton/ versions and
+6. Compare my CLAUDE.md/AGENTS.md with codev-skeleton/ versions and
    merge, preserving my project-specific content
-5. Update codev/projectlist.md to the new YAML format:
+7. Update codev/projectlist.md to the new YAML format:
    - Convert existing projects to new schema (id, title, summary, status, etc.)
    - Add lifecycle stages and tags
    - Sort active projects to the top
-6. Create codev/config.json with shell command configuration
-7. Update codev/bin/ with new scripts (agent-farm, codev-doctor, consult)
-8. Run codev-doctor to verify all dependencies work
-9. Test agent-farm start/stop
+8. Create codev/config.json with shell command configuration
+9. Run codev doctor to verify all dependencies work
+10. Test af start/stop
 
 Do NOT blindly overwrite - check for local modifications first.
 Preserve all existing project entries when updating projectlist.md.
@@ -261,7 +272,7 @@ Preserve all existing project entries when updating projectlist.md.
 ### Port already in use
 
 ```bash
-./codev/bin/agent-farm ports cleanup
+af ports cleanup
 ```
 
 ### Old state causing issues
@@ -271,6 +282,20 @@ rm -rf .agent-farm/
 rm -rf ~/.agent-farm/ports.json
 ```
 
-### agent-farm command not found
+### Commands not found (codev, af, consult)
 
-Check that `codev/bin/agent-farm` exists and points to a valid agent-farm installation. The wrapper script should reference either a local `agent-farm/` directory or a global installation.
+Ensure npm global bin is in your PATH:
+```bash
+npm config get prefix
+# Add $(npm config get prefix)/bin to your $PATH if needed
+
+# Example for bash/zsh:
+echo 'export PATH="$(npm config get prefix)/bin:$PATH"' >> ~/.bashrc
+# or for zsh:
+echo 'export PATH="$(npm config get prefix)/bin:$PATH"' >> ~/.zshrc
+```
+
+Then restart your shell or run:
+```bash
+source ~/.bashrc  # or ~/.zshrc
+```

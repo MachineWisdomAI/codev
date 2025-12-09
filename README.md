@@ -2,6 +2,41 @@
 
 A development methodology that treats natural language context as code. Instead of writing code first and documenting later, you start with clear specifications that both humans and AI agents can understand and execute.
 
+## Installation
+
+Install Codev globally via npm:
+
+```bash
+npm install -g @cluesmith/codev
+```
+
+This provides three CLI commands:
+- `codev` - Main CLI (init, adopt, doctor, update, tower)
+- `af` - Agent-farm CLI for parallel development
+- `consult` - Multi-agent consultation tool
+
+### Initialize a New Project
+
+```bash
+mkdir my-project && cd my-project
+codev init
+```
+
+### Adopt Codev in an Existing Project
+
+```bash
+cd existing-project
+codev adopt
+```
+
+### Verify Installation
+
+```bash
+codev doctor
+```
+
+This checks all dependencies and provides installation instructions for anything missing.
+
 ## Prerequisites
 
 Codev requires several dependencies. See **[DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md)** for complete installation instructions.
@@ -15,7 +50,6 @@ Codev requires several dependencies. See **[DEPENDENCIES.md](codev-skeleton/DEPE
 | ttyd | 1.7 | `brew install ttyd` | Web terminal |
 | git | 2.5 | (pre-installed) | Worktrees |
 | gh | latest | `brew install gh` | GitHub CLI |
-| Python | 3.10 | `brew install python` | Consult tool |
 | AI CLI | - | See below | At least one required |
 
 **AI CLI Options** (install at least one):
@@ -23,19 +57,14 @@ Codev requires several dependencies. See **[DEPENDENCIES.md](codev-skeleton/DEPE
 - Gemini CLI: [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
 - Codex CLI: `npm install -g @openai/codex`
 
-**Verify your installation:**
-```bash
-./codev/bin/codev-doctor
-```
-
 ## Get Started
 
-Tell your AI agent:
+Once installed, tell your AI agent:
 ```
-Apply Codev to this repo following the instructions at https://github.com/ansari-project/codev/
+I want to build X using the SPIDER protocol
 ```
 
-Then say "I want to build X using the SPIDER protocol" or "Teach me about Codev". 
+Or ask to learn more about Codev. 
 
 ## Learn about Codev
 
@@ -368,35 +397,20 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 ### Quick Start
 
 ```bash
-# Build agent-farm (first time only)
-cd agent-farm && npm install && npm run build && cd ..
-
 # Start the architect dashboard
-./codev/bin/agent-farm start
+af start
 
 # Spawn a builder for a spec
-./codev/bin/agent-farm spawn --project 0003
+af spawn --project 0003
 
 # Check status
-./codev/bin/agent-farm status
+af status
+
+# Stop everything
+af stop
 ```
 
-### Shell Alias (Recommended)
-
-Add to your `~/.bashrc` or `~/.zshrc` for convenience:
-
-```bash
-# Agent Farm alias - run from any codev project
-alias af='./codev/bin/agent-farm'
-```
-
-Then use:
-```bash
-af start           # Start architect dashboard
-af spawn -p 0003   # Spawn builder
-af status          # Check status
-af stop            # Stop everything
-```
+The `af` command is globally available after installing `@cluesmith/codev`.
 
 ### Autonomous Builder Flags
 
