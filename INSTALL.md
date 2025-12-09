@@ -35,6 +35,37 @@ codev doctor
 
 ---
 
+## How It Works: Embedded Skeleton with Local Overrides
+
+When you install `@cluesmith/codev`, the package includes all framework files (protocols, roles, agents) as an **embedded skeleton**. This means:
+
+1. **Minimal project structure**: `codev init` and `codev adopt` only create:
+   - `codev/specs/` - Your feature specifications
+   - `codev/plans/` - Your implementation plans
+   - `codev/reviews/` - Your reviews and lessons learned
+   - `codev/projectlist.md` - Project tracking
+   - `CLAUDE.md` and `AGENTS.md` - AI agent instructions
+
+2. **Framework files provided at runtime**: Protocols, roles, and templates are read from the installed npm package, not copied to your project. This keeps your project clean and makes updates seamless.
+
+3. **Local overrides supported**: If you want to customize any framework file, simply create it in your local `codev/` directory. Local files always take precedence:
+   - To customize the consultant role: create `codev/roles/consultant.md`
+   - To modify SPIDER protocol: create `codev/protocols/spider/protocol.md`
+   - To add custom templates: create files in `codev/templates/`
+
+### Example: Customizing a Role
+
+```bash
+# Copy the default consultant role to your project for customization
+mkdir -p codev/roles
+cat $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md > codev/roles/consultant.md
+
+# Edit it to suit your needs
+# The local version will now be used instead of the embedded one
+```
+
+---
+
 ## Alternative: Manual Installation for AI Agents
 
 This section provides instructions for AI agents to manually install the Codev methodology framework. Most users should use `npm install -g @cluesmith/codev` instead.

@@ -124,22 +124,40 @@ Our flagship protocol for structured development:
 
 ## Project Structure
 
+After running `codev init` or `codev adopt`, your project has a **minimal structure**:
+
 ```
 your-project/
 ├── codev/
-│   ├── protocols/
-│   │   └── spider/          # The SP(IDE)R protocol
-│   │       ├── protocol.md  # Detailed protocol documentation
-│   │       ├── manifest.yaml
-│   │       └── templates/   # Document templates
 │   ├── specs/              # Feature specifications
 │   ├── plans/              # Implementation plans
 │   ├── reviews/            # Review and lessons learned
-│   └── resources/          # Reference materials (llms.txt, etc.)
+│   └── projectlist.md      # Project tracking
 ├── AGENTS.md               # AI agent instructions (AGENTS.md standard)
 ├── CLAUDE.md               # AI agent instructions (Claude Code)
 └── [your code]
 ```
+
+**Framework files are provided at runtime** by the `@cluesmith/codev` package. This includes:
+- Protocols (SPIDER, TICK, EXPERIMENT, MAINTAIN)
+- Roles (architect, builder, consultant)
+- Templates and agents
+
+### Customizing Framework Files
+
+If you need to customize any framework file, create it in your local `codev/` directory. **Local files always take precedence** over the embedded skeleton:
+
+```bash
+# Example: Customize the SPIDER protocol
+mkdir -p codev/protocols/spider
+cp $(npm root -g)/@cluesmith/codev/skeleton/protocols/spider/protocol.md codev/protocols/spider/
+
+# Example: Customize a role
+mkdir -p codev/roles
+cp $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md codev/roles/
+```
+
+This approach keeps your project clean while allowing full customization when needed.
 
 ## Key Features
 
