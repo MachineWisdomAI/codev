@@ -61,7 +61,7 @@ This is what gets distributed to users when they install Codev:
 - **Location**: `/Users/mwk/Development/ansari-project/codev/codev-skeleton/`
 - **Purpose**: Clean template for new Codev installations
 - **Contains**:
-  - `protocols/` - Protocol definitions (SPIDER, SPIDER-SOLO, TICK)
+  - `protocols/` - Protocol definitions (SPIDER, TICK, EXPERIMENT, MAINTAIN)
   - `specs/` - Empty directory (users create their own)
   - `plans/` - Empty directory (users create their own)
   - `reviews/` - Empty directory (users create their own)
@@ -133,8 +133,9 @@ codev/                                  # Project root (git repository)
 │   │   │   ├── protocol.md
 │   │   │   ├── templates/
 │   │   │   └── manifest.yaml
-│   │   ├── spider-solo/                # Single-agent variant
-│   │   └── tick/                       # Fast autonomous protocol
+│   │   ├── tick/                       # Fast autonomous protocol
+│   │   ├── experiment/                 # Disciplined experimentation
+│   │   └── maintain/                   # Codebase maintenance
 │   ├── specs/                          # Our feature specifications
 │   ├── plans/                          # Our implementation plans
 │   ├── reviews/                        # Our lessons learned
@@ -159,8 +160,9 @@ codev/                                  # Project root (git repository)
 │   │   └── annotate.html
 │   ├── protocols/                      # Protocol definitions
 │   │   ├── spider/
-│   │   ├── spider-solo/
-│   │   └── tick/
+│   │   ├── tick/
+│   │   ├── experiment/
+│   │   └── maintain/
 │   ├── specs/                          # Empty (placeholder)
 │   ├── plans/                          # Empty (placeholder)
 │   ├── reviews/                        # Empty (placeholder)
@@ -222,16 +224,6 @@ codev/                                  # Project root (git repository)
 - `templates/spec.md` - Specification template
 - `templates/plan.md` - Planning template
 - `templates/review.md` - Review template
-
-#### SPIDER-SOLO Protocol (`codev/protocols/spider-solo/`)
-**Purpose**: Single-agent variant of SPIDER for environments without multi-agent support
-
-**Key Differences from SPIDER**:
-- Self-review instead of multi-agent consultation
-- Same phase structure (Specify → Plan → IDE → Review)
-- Simplified templates without consultation sections
-- Faster execution (no external agent coordination)
-- Best for prototyping and exploration
 
 #### TICK Protocol (`codev/protocols/tick/`)
 **Purpose**: **T**ask **I**dentification, **C**oding, **K**ickout - Fast autonomous implementation
@@ -513,8 +505,7 @@ exec node "$PROJECT_ROOT/agent-farm/dist/index.js" "$@"
 - Helper function tests
 
 **Protocol Tests (10-19)**:
-- SPIDER protocol installation (Zen present)
-- SPIDER-SOLO protocol installation (Zen absent)
+- SPIDER protocol installation
 - CLAUDE.md preservation and updates
 - Directory structure validation
 - Protocol content verification
@@ -538,7 +529,6 @@ exec node "$PROJECT_ROOT/agent-farm/dist/index.js" "$@"
 - `create_claude_md()` - Creates CLAUDE.md with specified content
 - `assert_codev_structure()` - Validates directory structure
 - `assert_spider_protocol()` - Validates SPIDER protocol files
-- `assert_spider_solo_protocol()` - Validates SPIDER-SOLO protocol files
 - `file_contains()` - Checks file for literal string match
 
 **Agent Installation Logic**:
@@ -561,11 +551,11 @@ fi
 - Never overwrites existing agent files (2>/dev/null || true pattern)
 
 ##### mock_mcp.bash
-**Purpose**: Simulate Zen MCP server presence/absence
+**Purpose**: Test isolation utilities for PATH manipulation
 
 **Key Functions**:
-- `mock_mcp_present()` - Simulates Zen MCP availability
-- `mock_mcp_absent()` - Simulates Zen MCP unavailability
+- `mock_mcp_present()` - Simulates MCP command availability
+- `mock_mcp_absent()` - Simulates MCP command unavailability
 - `remove_mcp_from_path()` - Removes MCP from PATH
 - `restore_path()` - Restores original PATH
 
@@ -616,9 +606,8 @@ claude --strict-mcp-config --mcp-config '[]' --settings '{}'
 **Entry Point**: `INSTALL.md` - Instructions for AI agents to install Codev
 
 **Installation Flow**:
-1. **Prerequisite Check**: Detect Zen MCP server availability
-2. **Protocol Selection**: SPIDER (Zen present) or SPIDER-SOLO (Zen absent)
-3. **Directory Creation**: Create `codev/` structure in target project
+1. **Prerequisite Check**: Verify consult CLI availability
+2. **Directory Creation**: Create `codev/` structure in target project
 4. **Skeleton Copy**: Copy protocol definitions, templates, and agents
 5. **Conditional Agent Installation**:
    - Detect if Claude Code is available (`command -v claude`)
@@ -647,14 +636,14 @@ claude --strict-mcp-config --mcp-config '[]' --settings '{}'
 1. **Specification** (`codev/specs/####-feature.md`)
    - Defines WHAT to build
    - Created by developer or AI agent
-   - Multi-agent reviewed (SPIDER) or self-reviewed (SPIDER-SOLO)
+   - Multi-agent reviewed (SPIDER with consultation)
    - Committed before planning
 
 2. **Plan** (`codev/plans/####-feature.md`)
    - Defines HOW to build
    - Breaks specification into phases (SPIDER) or single phase (TICK)
    - Lists files to create/modify
-   - Multi-agent reviewed (SPIDER) or self-reviewed (SPIDER-SOLO)
+   - Multi-agent reviewed (SPIDER with consultation)
    - Committed before implementation
 
 3. **Implementation** (actual code in project)
@@ -938,7 +927,7 @@ base+70-99: Reserved for future use
 - **Cursor**: Via AGENTS.md standard
 - **GitHub Copilot**: Via AGENTS.md standard
 - **Other AI coding assistants**: Via AGENTS.md standard
-- **Zen MCP Server**: Optional for multi-agent features
+- **Consult CLI**: For multi-agent consultation (installed with @cluesmith/codev)
 
 ### Internal Dependencies
 - **Git**: Version control, worktrees for builder isolation
@@ -955,7 +944,7 @@ base+70-99: Reserved for future use
 ## Development Patterns
 
 ### 1. Protocol-Driven Development
-Every feature follows a protocol (SPIDER, SPIDER-SOLO, or TICK):
+Every feature follows a protocol (SPIDER, TICK, EXPERIMENT, or MAINTAIN):
 - Start with specification (WHAT)
 - Create plan (HOW)
 - Implement in phases or single execution
@@ -1119,7 +1108,7 @@ file_contains "$TEST_PROJECT/CLAUDE.md" "Codev Methodology"
 ### Test Helpers (`tests/helpers/mock_mcp.bash`)
 
 #### mock_mcp_present()
-**Purpose**: Simulate Zen MCP server availability
+**Purpose**: Simulate MCP command availability (for test isolation)
 
 **Usage**:
 ```bash
@@ -1127,7 +1116,7 @@ mock_mcp_present
 ```
 
 #### mock_mcp_absent()
-**Purpose**: Simulate Zen MCP server unavailability
+**Purpose**: Simulate MCP command unavailability (for test isolation)
 
 **Usage**:
 ```bash
@@ -1236,8 +1225,8 @@ fi
 
 ### Protocol Execution Times
 - **TICK**: ~4 minutes for simple tasks
-- **SPIDER-SOLO**: ~15-30 minutes depending on complexity
-- **SPIDER**: ~30-60 minutes depending on complexity and multi-agent consultation
+- **SPIDER** (without consultation): ~15-30 minutes depending on complexity
+- **SPIDER** (with consultation): ~30-60 minutes depending on complexity
 
 ### Installation
 - **Network**: Not required (uses local skeleton)

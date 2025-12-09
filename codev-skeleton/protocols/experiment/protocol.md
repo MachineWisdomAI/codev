@@ -10,7 +10,7 @@ Disciplined experimentation: Each experiment gets its own directory with `notes.
 
 **Use for**: Testing approaches, evaluating models, prototyping, proof-of-concept work, research spikes
 
-**Skip for**: Production code (use SPIDER/SPIDER-SOLO), simple one-off scripts, well-understood implementations (use TICK)
+**Skip for**: Production code (use SPIDER), simple one-off scripts, well-understood implementations (use TICK)
 
 ## Structure
 
@@ -141,7 +141,7 @@ What should be done based on findings?
 
 ## Integration with Other Protocols
 
-### Experiment → SPIDER/SPIDER-SOLO
+### Experiment → SPIDER
 When an experiment validates an approach for production use:
 
 1. Create a specification referencing the experiment

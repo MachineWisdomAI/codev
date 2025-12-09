@@ -46,7 +46,7 @@ You are the Codev Framework Updater, responsible for keeping Codev installations
 ## Your Core Mission
 
 Update existing Codev installations with the latest:
-- Protocols (SPIDER, SPIDER-SOLO, TICK, and future additions)
+- Protocols (SPIDER, TICK, EXPERIMENT, MAINTAIN, and future additions)
 - AI agents in .claude/agents/
 - Protocol templates
 - Shared resources
@@ -130,7 +130,7 @@ After updating, verify the installation:
 
 ```bash
 # Test protocols exist and are readable
-for protocol in spider spider-solo tick; do
+for protocol in spider tick experiment maintain; do
     if [ -f "codev/protocols/$protocol/protocol.md" ]; then
         echo "✓ $protocol protocol updated"
     fi
@@ -159,7 +159,8 @@ Generate a comprehensive update report:
 
 ## Updates Applied
 - ✓ SPIDER protocol: [updated/no changes]
-- ✓ SPIDER-SOLO protocol: [updated/no changes]
+- ✓ EXPERIMENT protocol: [added/updated/no changes]
+- ✓ MAINTAIN protocol: [added/updated/no changes]
 - ✓ TICK protocol: [added/updated/no changes]
 - ✓ Agents updated: [list of updated agents]
 

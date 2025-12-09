@@ -93,16 +93,6 @@ assert_spider_protocol() {
   assert_file_exist "$dir/codev/protocols/spider/templates/plan.md"
 }
 
-# Assert that SPIDER-SOLO protocol is properly configured
-# Usage: assert_spider_solo_protocol <directory>
-assert_spider_solo_protocol() {
-  local dir="$1"
-
-  assert_dir_exist "$dir/codev/protocols/spider-solo"
-  assert_file_exist "$dir/codev/protocols/spider-solo/protocol.md"
-  assert_file_exist "$dir/codev/protocols/spider-solo/templates/spec.md"
-  assert_file_exist "$dir/codev/protocols/spider-solo/templates/plan.md"
-}
 
 # Get the content of CLAUDE.md
 # Usage: get_claude_md_content <directory>

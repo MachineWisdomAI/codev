@@ -57,8 +57,6 @@ See codev/protocols/spider/protocol.md for full protocol details."
   assert_codev_structure "$TEST_PROJECT"
   assert_spider_protocol "$TEST_PROJECT"
 
-  # Verify both protocols are available for user choice
-  assert_spider_solo_protocol "$TEST_PROJECT"
 }
 
 @test "SPIDER protocol has all required templates" {
@@ -114,7 +112,6 @@ See codev/protocols/spider/protocol.md for full protocol details."
 
   # Verify protocols subdirectories
   assert_dir_exist "$TEST_PROJECT/codev/protocols/spider"
-  assert_dir_exist "$TEST_PROJECT/codev/protocols/spider-solo"
 }
 
 @test "SPIDER protocol.md contains required phases" {
@@ -181,14 +178,13 @@ See codev/protocols/spider/protocol.md for full protocol details."
   # Users can add their own resources here
 }
 
-@test "both SPIDER and SPIDER-SOLO protocols are installed" {
+@test "SPIDER protocol is installed" {
   install_from_local "$TEST_PROJECT"
 
-  # Both protocols should be present
+  # SPIDER protocol should be present
   assert_spider_protocol "$TEST_PROJECT"
-  assert_spider_solo_protocol "$TEST_PROJECT"
 
-  # User chooses which one to use via CLAUDE.md
+  # User can reference the protocol via CLAUDE.md
   create_claude_md "$TEST_PROJECT" "Protocol: SPIDER"
   run file_contains "$TEST_PROJECT/CLAUDE.md" "Protocol: SPIDER"
   assert_success

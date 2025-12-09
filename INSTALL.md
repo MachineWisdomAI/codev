@@ -79,21 +79,14 @@ This section provides instructions for AI agents to manually install the Codev m
 
 ### Step 1: Check Prerequisites
 
-When a user requests Codev installation, first determine which protocol variant to install:
+When a user requests Codev installation, check if the consultation tools are available:
 
 ```bash
-# Check if Zen MCP server is available
-mcp list
-# or try
-mcp__zen__version
+# Check if consult CLI is available
+command -v consult >/dev/null && echo "✓ consult CLI available" || echo "✗ consult CLI not found"
 ```
 
-**Decision Tree**:
-- If Zen MCP is available → Install **SPIDER** protocol (with multi-agent consultation)
-- If Zen MCP is not available:
-  - Ask: "Zen MCP server is not detected. Would you like to:"
-    1. "Install Zen MCP server for multi-agent consultation features"
-    2. "Use SPIDER-SOLO protocol (single-agent variant)"
+**Note**: The `consult` CLI is installed with `npm install -g @cluesmith/codev`. Multi-agent consultation requires at least one of: `claude`, `gemini-cli`, or `codex`.
 
 ### Step 2: Create and Populate the Codev Directory
 
@@ -162,7 +155,6 @@ The entire `codev/protocols/` directory is copied with all available protocols. 
 
 Available protocols:
 - `codev/protocols/spider/` - Full SPIDER with multi-agent consultation
-- `codev/protocols/spider-solo/` - Single-agent variant
 - `codev/protocols/tick/` - Fast autonomous implementation for simple tasks
 - `codev/protocols/experiment/` - Disciplined experimentation for research and prototyping
 
@@ -220,7 +212,7 @@ For direct management, AGENTS.md and CLAUDE.md should contain identical content 
 This project uses the Codev context-driven development methodology.
 
 ### Active Protocol
-- Protocol: SPIDER (or SPIDER-SOLO)
+- Protocol: SPIDER
 - Location: codev/protocols/spider/protocol.md
 
 ### Directory Structure
@@ -299,7 +291,7 @@ find codev -type d -maxdepth 2 | sort
 # codev/plans
 # codev/protocols
 # codev/protocols/spider
-# codev/protocols/spider-solo
+# codev/protocols/tick
 # codev/reviews
 # codev/resources
 # codev/specs
@@ -316,7 +308,7 @@ After installation, guide the user:
 - **Ruler users**: Edit `.ruler/codev.md` and run `npx @intellectronica/ruler apply`
 - **Direct management**: Edit both `AGENTS.md` and `CLAUDE.md` (keep them synchronized)
 
-1. **First Specification**: "What would you like to build first? I can help create a specification. Which protocol would you prefer - SPIDER (with multi-agent consultation) or SPIDER-SOLO?"
+1. **First Specification**: "What would you like to build first? I can help create a specification using the SPIDER protocol."
 
 2. **Explain the Flow**:
    - **Build in phases using the IDE loop**:
@@ -336,9 +328,9 @@ After installation, guide the user:
 
 ### Common Issues:
 
-**Q: User wants multi-agent but Zen MCP isn't working**
-- Try: "Let me help you install Zen MCP server first"
-- Fallback: "We can start with SPIDER-SOLO and migrate later"
+**Q: User wants multi-agent consultation but consult CLI isn't working**
+- Try: "Let me verify the consult CLI and its dependencies are installed: `codev doctor`"
+- Fallback: "You can run SPIDER with 'without consultation' to skip multi-agent reviews"
 
 **Q: User has existing codev directory**
 - If upgrading from a previous codev version, see **[MIGRATION-1.0.md](MIGRATION-1.0.md)** for upgrade instructions
@@ -355,16 +347,18 @@ After installation, guide the user:
 
 ## Protocol Comparison
 
-| Feature | SPIDER | SPIDER-SOLO | TICK | EXPERIMENT |
-|---------|--------|-------------|------|------------|
-| Multi-agent consultation | ✓ (GPT-5 + Gemini Pro) | ✗ (self-review only) | ✗ | ✗ |
-| Prerequisites | Zen MCP server | None | None | None |
-| Specification reviews | Multi-agent external | Self-review | Minimal | N/A |
-| Plan reviews | Multi-agent external | Self-review | Minimal | N/A |
-| Implementation reviews | Multi-agent per phase | Self-review | Post-implementation | Results-focused |
-| Best for | Production features | Medium features | Small tasks | Research & prototyping |
-| Speed | Slower (thorough) | Medium | Fast | Flexible |
-| Output | Spec + Plan + Review | Spec + Plan + Review | Spec + Plan + Review | notes.md per experiment |
+| Feature | SPIDER | TICK | EXPERIMENT |
+|---------|--------|------|------------|
+| Multi-agent consultation | ✓ (GPT-5 + Gemini Pro) | ✗ | ✗ |
+| Prerequisites | consult CLI | None | None |
+| Specification reviews | Multi-agent external | Minimal | N/A |
+| Plan reviews | Multi-agent external | Minimal | N/A |
+| Implementation reviews | Multi-agent per phase | Post-implementation | Results-focused |
+| Best for | Production features | Small tasks / amendments | Research & prototyping |
+| Speed | Thorough | Fast | Flexible |
+| Output | Spec + Plan + Review | Spec + Plan + Review | notes.md per experiment |
+
+**Note**: To skip multi-agent consultation in SPIDER, say "without consultation" when starting work.
 
 ## Workflow Agents
 

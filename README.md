@@ -277,7 +277,7 @@ This repository has a dual nature:
 Our comprehensive test suite (64 tests) validates the Codev installation process:
 
 - **Framework**: Shell-based testing with bats-core (zero dependencies)
-- **Coverage**: SPIDER protocol, SPIDER-SOLO variant, CLAUDE.md preservation, agent installation
+- **Coverage**: SPIDER protocol, CLAUDE.md preservation, agent installation
 - **Isolation**: XDG sandboxing ensures tests never touch real user directories
 - **CI/CD Ready**: Tests run in seconds with clear TAP output
 - **Multi-Platform**: Works on macOS and Linux without modification
@@ -308,10 +308,9 @@ Install Codev by following the instructions at https://github.com/ansari-project
 ```
 
 The agent will:
-1. Check for prerequisites (Zen MCP server)
-2. Create the codev/ directory structure
-3. Install the appropriate protocol (SPIDER or SPIDER-SOLO)
-4. Set up or update your CLAUDE.md file
+1. Create the codev/ directory structure
+2. Install the SPIDER protocol
+3. Set up or update your CLAUDE.md file
 
 ## Examples
 

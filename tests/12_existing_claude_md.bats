@@ -102,19 +102,15 @@ Location: codev/protocols/spider/protocol.md
   assert_equal "$size_after" "0"
 }
 
-@test "CLAUDE.md with different protocol choice is respected" {
-  # User explicitly chose SPIDER-SOLO
+@test "CLAUDE.md with protocol choice is respected" {
+  # User explicitly configured SPIDER protocol
   local existing_content="# Project Instructions
 
 ## Codev Protocol
-Using SPIDER-SOLO protocol (no multi-agent consultation needed)
-See: codev/protocols/spider-solo/protocol.md"
+Using SPIDER protocol
+See: codev/protocols/spider/protocol.md"
 
   create_claude_md "$TEST_PROJECT" "$existing_content"
-
-  # Even though Zen is present, respect user's SPIDER-SOLO choice
-  run is_zen_available
-  assert_success  # Zen is available
 
   # Install Codev
   run install_from_local "$TEST_PROJECT"
@@ -124,9 +120,8 @@ See: codev/protocols/spider-solo/protocol.md"
   run cat "$TEST_PROJECT/CLAUDE.md"
   assert_output "$existing_content"
 
-  # Both protocols installed but user chose SOLO
+  # Protocol installed
   assert_spider_protocol "$TEST_PROJECT"
-  assert_spider_solo_protocol "$TEST_PROJECT"
 }
 
 @test "CLAUDE.md permissions are preserved" {

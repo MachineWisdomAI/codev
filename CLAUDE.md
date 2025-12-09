@@ -43,7 +43,6 @@ You are working in the Codev project itself, with multiple development protocols
 
 **Available Protocols**:
 - **SPIDER**: Multi-phase development with consultation - `codev/protocols/spider/protocol.md`
-- **SPIDER-SOLO**: Single-agent variant - `codev/protocols/spider-solo/protocol.md`
 - **TICK**: Amendment workflow for existing specs - `codev/protocols/tick/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
@@ -131,7 +130,6 @@ project-root/
 ├── codev/
 │   ├── protocols/           # Development protocols
 │   │   ├── spider/         # Multi-phase development with consultation
-│   │   ├── spider-solo/    # Single-agent SPIDER variant
 │   │   ├── tick/           # Fast autonomous implementation
 │   │   ├── experiment/     # Disciplined experimentation
 │   │   └── maintain/       # Codebase maintenance (code + docs)
@@ -160,7 +158,7 @@ Use sequential numbering with descriptive names:
 - Plan: `codev/plans/0001-feature-name.md`
 - Review: `codev/reviews/0001-feature-name.md`
 
-**Note**: Sequential numbering is shared across all protocols (SPIDER, SPIDER-SOLO, TICK)
+**Note**: Sequential numbering is shared across all protocols (SPIDER, TICK)
 
 ## Multi-Agent Consultation
 

@@ -3,11 +3,9 @@
 ## Prerequisites
 
 **Required for Multi-Agent Consultation**:
-- Zen MCP server must be installed and running
-- Check with: `mcp list` or test with `mcp__zen__version`
-- If not available:
-  - Option 1: "Would you like help installing Zen MCP server?"
-  - Option 2: "Use spider-solo protocol instead (no multi-agent consultation)"
+- The `consult` CLI must be available (installed with `npm install -g @cluesmith/codev`)
+- At least one consultation backend: `claude`, `gemini-cli`, or `codex`
+- Check with: `codev doctor` or `consult --help`
 
 ## Protocol Configuration
 
@@ -17,11 +15,11 @@
 Multi-agent consultation is **ENABLED BY DEFAULT** when using SPIDER protocol.
 
 **DEFAULT AGENTS:**
-- **GPT-5**: Primary reviewer for architecture, feasibility, and code quality
+- **GPT-5 Codex**: Primary reviewer for architecture, feasibility, and code quality
 - **Gemini Pro**: Secondary reviewer for completeness, edge cases, and alternative approaches
 
 **DISABLING CONSULTATION:**
-For single-agent workflow, use the spider-solo protocol instead.
+To run SPIDER without consultation, say "without consultation" when starting work.
 
 **CUSTOM AGENTS:**
 The user can specify different agents by saying: "use SPIDER with consultation from [agent1] and [agent2]"

@@ -32,9 +32,10 @@ Protocols are sequences of steps to build something. Each protocol balances rigo
 | Protocol | Purpose | When to Use |
 |----------|---------|-------------|
 | **SPIDER** | Multi-phase development with consultation | Complex features, architecture changes, unclear requirements |
-| **SPIDER-SOLO** | Single-agent variant | When consultation is unavailable or unnecessary |
 | **TICK** | Fast autonomous implementation | Small features, bug fixes, well-defined tasks |
 | **EXPERIMENT** | Disciplined experimentation | Prototypes, research spikes, evaluating approaches |
+
+**Note**: To skip consultation in SPIDER, say "without consultation" when starting work.
 
 ### Roles
 

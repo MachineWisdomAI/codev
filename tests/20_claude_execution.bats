@@ -73,7 +73,7 @@ check_claude_cli() {
   refute_output --partial "invalid option"
 }
 
-@test "claude with empty MCP config starts without Zen" {
+@test "claude with empty MCP config starts without loading servers" {
   check_claude_cli
 
   cd "$TEST_PROJECT"

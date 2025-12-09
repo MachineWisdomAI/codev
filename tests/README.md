@@ -13,8 +13,7 @@ The test suite is organized into functional groups:
 - **02_runner_behavior.bats** - Test runner behavior verification
 
 ### Protocol Tests (10-19)
-- **10_fresh_spider.bats** - SPIDER protocol tests (Zen present)
-- **11_fresh_spider_solo.bats** - SPIDER-SOLO protocol tests (Zen absent)
+- **10_fresh_spider.bats** - SPIDER protocol tests
 - **12_existing_claude_md.bats** - CLAUDE.md preservation tests
 
 ### Integration Tests (20+)
@@ -55,9 +54,9 @@ Key functions:
 
 ### Mock MCP Helpers (`helpers/mock_mcp.bash`)
 
-Functions for simulating Zen MCP presence/absence:
-- `mock_mcp_present()` - Simulates Zen MCP availability
-- `mock_mcp_absent()` - Simulates Zen MCP unavailability
+Functions for simulating MCP presence/absence (used for test isolation):
+- `mock_mcp_present()` - Simulates MCP availability
+- `mock_mcp_absent()` - Simulates MCP unavailability
 - `remove_mcp_from_path()` - Removes MCP from PATH
 - `restore_path()` - Restores original PATH
 
@@ -133,15 +132,13 @@ claude --strict-mcp-config --mcp-config '[]' --settings '{}'
 ## Test Coverage
 
 ### Installation Testing
-- ✅ Fresh installation with Zen present (SPIDER)
-- ✅ Fresh installation with Zen absent (SPIDER-SOLO)
+- ✅ Fresh installation (SPIDER)
 - ✅ Existing CLAUDE.md preservation
 - ✅ Permission preservation
 - ✅ Symlink handling
 
 ### Protocol Testing
 - ✅ SPIDER protocol structure and templates
-- ✅ SPIDER-SOLO protocol structure and templates
 - ✅ Multi-agent consultation requirements
 - ✅ Git commit requirements
 - ✅ Phase structure validation
@@ -202,7 +199,6 @@ When adding new tests:
 ### Optional
 - Claude CLI (for execution tests)
 - timeout/gtimeout (for execution timeout protection)
-- Zen MCP server (for multi-agent tests)
 
 ## Troubleshooting
 
@@ -235,10 +231,9 @@ which bats
 ## Test Metrics
 
 Current test suite:
-- **Total Tests**: 52
+- **Total Tests**: 42
 - **Core Framework**: 12 tests
 - **SPIDER Protocol**: 10 tests
-- **SPIDER-SOLO Protocol**: 10 tests
 - **CLAUDE.md Preservation**: 10 tests
 - **Claude Execution**: 10 tests
 

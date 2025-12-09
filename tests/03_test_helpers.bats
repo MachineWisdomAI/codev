@@ -48,7 +48,6 @@ teardown() {
   assert_dir_exist "$TEST_TEMP_DIR/codev"
   assert_dir_exist "$TEST_TEMP_DIR/codev/protocols"
   assert_dir_exist "$TEST_TEMP_DIR/codev/protocols/spider"
-  assert_dir_exist "$TEST_TEMP_DIR/codev/protocols/spider-solo"
   assert_dir_exist "$TEST_TEMP_DIR/codev/specs"
   assert_dir_exist "$TEST_TEMP_DIR/codev/plans"
   assert_dir_exist "$TEST_TEMP_DIR/codev/reviews"
@@ -79,31 +78,30 @@ teardown() {
   assert_success
 }
 
-@test "mock_mcp_present simulates Zen MCP availability" {
+@test "mock_mcp_present simulates MCP availability" {
   mock_mcp_present
 
   # Check mcp is in PATH
   run command -v mcp
   assert_success
 
-  # Check Zen is listed
+  # Check servers are listed
   run mcp list
   assert_success
-  assert_output --partial "@anthropic/zen"
+  assert_output --partial "@example/other"
 }
 
-@test "mock_mcp_absent simulates MCP without Zen" {
+@test "mock_mcp_absent simulates MCP with no servers" {
   mock_mcp_absent
 
   # Check mcp is in PATH
   run command -v mcp
   assert_success
 
-  # Check Zen is NOT listed
+  # Check no servers are listed
   run mcp list
   assert_success
-  refute_output --partial "@anthropic/zen"
-  assert_output --partial "@example/other"
+  assert_output --partial "(none)"
 }
 
 @test "remove_mcp_from_path masks mcp command" {
@@ -141,22 +139,22 @@ teardown() {
   assert [ -z "${MOCK_MCP_DIR:-}" ]
 }
 
-@test "is_zen_available detects Zen presence correctly" {
-  # Test with Zen present
+@test "is_mcp_available detects MCP presence correctly" {
+  # Test with MCP present
   mock_mcp_present
-  run is_zen_available
+  run is_mcp_available
   assert_success
   restore_path
 
-  # Test with Zen absent
+  # Test with MCP absent
   mock_mcp_absent
-  run is_zen_available
+  run is_mcp_available
   assert_failure
   restore_path
 
-  # Test with no mcp
+  # Test with no mcp command
   remove_mcp_from_path
-  run is_zen_available
+  run is_mcp_available
   assert_failure
 }
 
@@ -189,22 +187,3 @@ teardown() {
   assert_failure
 }
 
-@test "assert_spider_solo_protocol validates SPIDER-SOLO setup" {
-  TEST_TEMP_DIR=$(setup_test_project)
-
-  # Create minimal SPIDER-SOLO protocol structure
-  mkdir -p "$TEST_TEMP_DIR/codev/protocols/spider-solo/templates"
-  touch "$TEST_TEMP_DIR/codev/protocols/spider-solo/protocol.md"
-  touch "$TEST_TEMP_DIR/codev/protocols/spider-solo/templates/spec.md"
-  touch "$TEST_TEMP_DIR/codev/protocols/spider-solo/templates/plan.md"
-
-  # Should succeed with all files present
-  assert_spider_solo_protocol "$TEST_TEMP_DIR"
-
-  # Test missing directory should fail
-  TEST_TEMP_DIR2=$(setup_test_project)
-  mkdir -p "$TEST_TEMP_DIR2/codev"
-  run assert_spider_solo_protocol "$TEST_TEMP_DIR2"
-  assert_failure
-  teardown_test_project "$TEST_TEMP_DIR2"
-}

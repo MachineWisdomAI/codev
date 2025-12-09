@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Mock MCP helper for testing Zen MCP detection
+# Mock MCP helper for testing (used for test isolation)
 
-# Mock mcp command - simulates Zen MCP being present
+# Mock mcp command - simulates MCP being present
 # Usage: mock_mcp_present
 mock_mcp_present() {
   # Create a mock mcp executable in a temporary directory
@@ -12,7 +12,6 @@ mock_mcp_present() {
 # Mock mcp command
 if [[ "$1" == "list" ]]; then
   echo "Available MCP servers:"
-  echo "  - @anthropic/zen"
   echo "  - @example/other"
 elif [[ "$1" == "--version" ]]; then
   echo "mcp version 1.0.0-mock"
@@ -33,19 +32,18 @@ EOF
   return 0
 }
 
-# Mock mcp command - simulates Zen MCP being absent
+# Mock mcp command - simulates MCP being absent
 # Usage: mock_mcp_absent
 mock_mcp_absent() {
-  # Create a mock mcp executable that doesn't list Zen
+  # Create a mock mcp executable that returns no servers
   export MOCK_MCP_DIR="${MOCK_MCP_DIR:-$(mktemp -d)}"
 
   cat > "$MOCK_MCP_DIR/mcp" << 'EOF'
 #!/usr/bin/env bash
-# Mock mcp command without Zen
+# Mock mcp command with no servers
 if [[ "$1" == "list" ]]; then
   echo "Available MCP servers:"
-  echo "  - @example/other"
-  echo "  - @example/another"
+  echo "  (none)"
 elif [[ "$1" == "--version" ]]; then
   echo "mcp version 1.0.0-mock"
 else
@@ -120,15 +118,20 @@ restore_path() {
   return 0
 }
 
-# Check if Zen MCP is available (for verification)
-# Usage: is_zen_available
-is_zen_available() {
+# Check if MCP is available (for verification)
+# Usage: is_mcp_available
+is_mcp_available() {
   if ! command -v mcp >/dev/null 2>&1; then
     return 1
   fi
 
-  # Check if Zen is in the list
-  mcp list 2>/dev/null | grep -q "@anthropic/zen"
+  # Check if mcp command works
+  mcp list 2>/dev/null | grep -qv "(none)"
+}
+
+# Legacy alias for backwards compatibility
+is_zen_available() {
+  is_mcp_available
 }
 
 # Simulate installing Codev with mocked MCP state
