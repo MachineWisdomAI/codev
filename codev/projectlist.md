@@ -786,16 +786,16 @@ Projects that are paused or canceled.
   - id: "0043"
     title: "Codex Reliability for Codev"
     summary: "Get Codex CLI running consistently and rapidly with codev consultations"
-    status: spec-draft
+    status: planned
     priority: high
     release: null
     files:
       spec: codev/specs/0043-codex-reliability.md
-      plan: null
+      plan: codev/plans/0043-codex-reliability.md
       review: null
     dependencies: ["0022"]
     tags: [cli, consultation, codex]
-    notes: "Spec complete. Research findings: use o4-mini or gpt-4.1 model, set reasoning_effort=low, replace undocumented CODEX_SYSTEM_MESSAGE with instructions.md. Target: reduce 200-250s to <150s."
+    notes: "Planned 2025-12-08. Replace undocumented CODEX_SYSTEM_MESSAGE with experimental_instructions_file, optimize consultant prompt for Codex. GPT-5.1-codex only."
 
 ## Next Available Number
 
