@@ -2420,13 +2420,13 @@
 
     // Stage tooltips explaining purpose and exit criteria
     const STAGE_TOOLTIPS = {
-      'conceived': "CONCEIVED: Idea captured, spec draft exists.\nExit: Human approves the specification.",
-      'specified': "SPECIFIED: Spec approved by human.\nExit: Implementation plan is created.",
-      'planned': "PLANNED: Implementation plan ready.\nExit: Builder is spawned to implement.",
-      'implementing': "IMPLEMENTING: Builder actively coding.\nExit: Code complete, tests pass, PR created.",
-      'implemented': "IMPLEMENTED: PR ready for review.\nExit: Architect reviews, Builder merges PR.",
-      'committed': "COMMITTED: PR merged to main.\nExit: Human validates in production.",
-      'integrated': "INTEGRATED: Complete! Validated in production.\nThis is the goal state."
+      'conceived': "CONCEIVED: Idea has been captured.\nExit: Human approves the specification.",
+      'specified': "SPECIFIED: Human approved the spec.\nExit: Architect creates an implementation plan.",
+      'planned': "PLANNED: Implementation plan is ready.\nExit: Architect spawns a Builder.",
+      'implementing': "IMPLEMENTING: Builder is working on the code.\nExit: Builder creates a PR.",
+      'implemented': "IMPLEMENTED: PR is ready for review.\nExit: Builder merges after Architect review.",
+      'committed': "COMMITTED: PR has been merged.\nExit: Human validates in production.",
+      'integrated': "INTEGRATED: Validated in production.\nThis is the goal state."
     };
 
     // Get stage index (for comparison)
