@@ -803,7 +803,7 @@ Projects that are paused or canceled.
   - id: "0044"
     title: "Architect-Builder Workflow Clarity"
     summary: "Document and enforce clear workflow stages between architect and builder roles"
-    status: committed
+    status: integrated
     priority: high
     release: null
     files:
@@ -812,7 +812,7 @@ Projects that are paused or canceled.
       review: codev/reviews/0044-architect-builder-workflow.md
     dependencies: []
     tags: [protocol, workflow, spider]
-    notes: "PR #86 merged 2025-12-09. Deleted SPIDER-SOLO, added workflow-reference.md, review-types prompts, consult --type parameter."
+    notes: "Integrated: 2025-12-09T20:34:53-08:00. PR #86 merged 2025-12-09. Deleted SPIDER-SOLO, added workflow-reference.md, review-types prompts, consult --type parameter."
 
   - id: "0045"
     title: "Project List UI"
