@@ -1243,7 +1243,7 @@ Projects that are paused or canceled.
   - id: "0048"
     title: "Markdown Preview for af open"
     summary: "Add option to render markdown files as formatted HTML when opened via af open"
-    status: implemented
+    status: committed
     priority: medium
     release: null
     files:
@@ -1258,7 +1258,7 @@ Projects that are paused or canceled.
       planned_at: "2025-12-09T23:28:59-08:00"
       implementing_at: "2025-12-09T23:31:36-08:00"
       implemented_at: "2025-12-09T23:57:41-08:00"
-      committed_at: null
+      committed_at: "2025-12-10T00:02:19-08:00"
       integrated_at: null
     notes: ""
 ```
