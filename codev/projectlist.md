@@ -127,16 +127,17 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0039"
     title: "Codev CLI (First-Class Command)"
     summary: "Unified codev command as primary entry point: init, adopt, doctor, update, tower, consult"
-    status: committed
+    status: implementing
     priority: high
     release: null
     files:
       spec: codev/specs/0039-codev-cli.md
       plan: codev/plans/0039-codev-cli.md
       review: null
+    ticks: [001, 002, 003]
     dependencies: ["0005", "0022"]
     tags: [cli, npm, architecture]
-    notes: "PR #84 merged 2025-12-09. TICK-001 (consult TS consolidation) + TICK-002 (embedded skeleton)."
+    notes: "PR #84 merged 2025-12-09. TICK-001 (consult TS consolidation) + TICK-002 (embedded skeleton) + TICK-003 (revert to copy-on-init for AI accessibility)."
 
   - id: "0040"
     title: "TICK as SPIDER Amendment"

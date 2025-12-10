@@ -670,3 +670,253 @@ Delete the duplicate templates directory - skeleton is now the single source of 
 - [ ] `codev init` creates minimal structure (specs/, plans/, reviews/ only)
 - [ ] `codev eject` command implemented
 - [ ] Existing projects with full codev/ directory continue to work
+
+---
+
+## Phase 10: Revert to Copy-on-Init (TICK-003)
+
+**Goal**: Revert TICK-002's embedded skeleton approach. Copy framework files to project during init for AI consultant accessibility.
+
+### 10.1 Update codev init to copy all framework files
+
+```typescript
+// src/commands/init.ts
+import { getSkeletonDir } from '../lib/skeleton.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+const FRAMEWORK_VERSION = '1.2.0'; // Read from package.json
+
+export async function init(projectName: string) {
+  const targetDir = path.resolve(projectName);
+  const skeletonDir = getSkeletonDir();
+
+  // Create base structure
+  const codevDir = path.join(targetDir, 'codev');
+
+  // Copy entire skeleton (protocols, roles, templates)
+  copyDirRecursive(skeletonDir, codevDir, {
+    addHeader: true,
+    version: FRAMEWORK_VERSION
+  });
+
+  // Create user directories
+  fs.mkdirSync(path.join(codevDir, 'specs'), { recursive: true });
+  fs.mkdirSync(path.join(codevDir, 'plans'), { recursive: true });
+  fs.mkdirSync(path.join(codevDir, 'reviews'), { recursive: true });
+
+  // Write framework version
+  fs.writeFileSync(
+    path.join(codevDir, '.framework-version'),
+    FRAMEWORK_VERSION
+  );
+
+  // Create projectlist.md if not copied
+  // ...
+}
+```
+
+### 10.2 Add managed file headers
+
+```typescript
+// src/lib/copy-utils.ts
+const MANAGED_HEADER = `<!-- MANAGED BY CODEV - Run 'codev update' to refresh -->
+<!-- Version: {{VERSION}} | Do not edit unless customizing -->
+
+`;
+
+function addManagedHeader(content: string, version: string): string {
+  // Only add to markdown files
+  return MANAGED_HEADER.replace('{{VERSION}}', version) + content;
+}
+
+function copyDirRecursive(src: string, dest: string, options: CopyOptions) {
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+
+  fs.mkdirSync(dest, { recursive: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, destPath, options);
+    } else {
+      let content = fs.readFileSync(srcPath, 'utf-8');
+
+      if (options.addHeader && entry.name.endsWith('.md')) {
+        content = addManagedHeader(content, options.version);
+      }
+
+      fs.writeFileSync(destPath, content);
+    }
+  }
+}
+```
+
+### 10.3 Implement codev update command
+
+```typescript
+// src/commands/update.ts
+import * as crypto from 'node:crypto';
+
+interface UpdateResult {
+  updated: string[];
+  skipped: string[];
+  conflicts: string[];
+  newVersion: string;
+}
+
+export async function update(options: { dryRun?: boolean; force?: boolean }): Promise<UpdateResult> {
+  const codevDir = path.join(process.cwd(), 'codev');
+  const skeletonDir = getSkeletonDir();
+
+  const currentVersion = readFrameworkVersion(codevDir);
+  const newVersion = getPackageVersion();
+
+  const result: UpdateResult = {
+    updated: [],
+    skipped: [],
+    conflicts: [],
+    newVersion
+  };
+
+  // Get list of framework files (protocols/, roles/, templates/)
+  const frameworkFiles = getFrameworkFiles(skeletonDir);
+
+  for (const relPath of frameworkFiles) {
+    const localPath = path.join(codevDir, relPath);
+    const skeletonPath = path.join(skeletonDir, relPath);
+
+    if (!fs.existsSync(localPath)) {
+      // New file - copy it
+      if (!options.dryRun) {
+        fs.mkdirSync(path.dirname(localPath), { recursive: true });
+        copyWithHeader(skeletonPath, localPath, newVersion);
+      }
+      result.updated.push(relPath);
+      continue;
+    }
+
+    // Check if user modified the file
+    const localContent = fs.readFileSync(localPath, 'utf-8');
+    const isManaged = localContent.includes('MANAGED BY CODEV');
+
+    if (options.force || !isUserModified(localPath, skeletonPath)) {
+      // Safe to overwrite
+      if (!options.dryRun) {
+        copyWithHeader(skeletonPath, localPath, newVersion);
+      }
+      result.updated.push(relPath);
+    } else {
+      // User modified - create .codev-new
+      if (!options.dryRun) {
+        copyWithHeader(skeletonPath, localPath + '.codev-new', newVersion);
+      }
+      result.conflicts.push(relPath);
+    }
+  }
+
+  // Update version file
+  if (!options.dryRun) {
+    fs.writeFileSync(
+      path.join(codevDir, '.framework-version'),
+      newVersion
+    );
+  }
+
+  return result;
+}
+
+function isUserModified(localPath: string, skeletonPath: string): boolean {
+  const localContent = fs.readFileSync(localPath, 'utf-8');
+
+  // Remove managed header for comparison
+  const strippedLocal = stripManagedHeader(localContent);
+  const skeletonContent = fs.readFileSync(skeletonPath, 'utf-8');
+
+  return strippedLocal !== skeletonContent;
+}
+```
+
+### 10.4 Remove runtime resolution from af/consult
+
+Update these files to read directly from `codev/`:
+- `src/commands/consult/index.ts` - Load from `codev/roles/consultant.md`
+- `src/agent-farm/lib/roles.ts` - Load from `codev/roles/builder.md`
+
+Remove the `resolveCodevFile()` fallback to embedded skeleton.
+
+### 10.5 Update codev adopt
+
+```typescript
+// src/commands/adopt.ts
+export async function adopt(options: { yes?: boolean }) {
+  const cwd = process.cwd();
+  const codevDir = path.join(cwd, 'codev');
+  const skeletonDir = getSkeletonDir();
+
+  // Copy framework files (protocols, roles, templates)
+  copyDirRecursive(skeletonDir, codevDir, {
+    addHeader: true,
+    version: getPackageVersion(),
+    skipExisting: true // Don't overwrite existing files
+  });
+
+  // Create user directories
+  fs.mkdirSync(path.join(codevDir, 'specs'), { recursive: true });
+  fs.mkdirSync(path.join(codevDir, 'plans'), { recursive: true });
+  fs.mkdirSync(path.join(codevDir, 'reviews'), { recursive: true });
+
+  // Write framework version
+  fs.writeFileSync(
+    path.join(codevDir, '.framework-version'),
+    getPackageVersion()
+  );
+}
+```
+
+### 10.6 Update E2E tests
+
+Update `tests/e2e/init.bats` and `tests/e2e/adopt.bats`:
+
+```bash
+@test "codev init creates protocols directory" {
+  ./node_modules/.bin/codev init my-project --yes
+  assert_dir_exists "my-project/codev/protocols"
+  assert_dir_exists "my-project/codev/protocols/spider"
+}
+
+@test "codev init creates roles directory" {
+  ./node_modules/.bin/codev init my-project --yes
+  assert_dir_exists "my-project/codev/roles"
+  assert_file_exists "my-project/codev/roles/builder.md"
+}
+
+@test "codev init adds managed header to framework files" {
+  ./node_modules/.bin/codev init my-project --yes
+  run cat my-project/codev/protocols/spider/protocol.md
+  assert_output --partial "MANAGED BY CODEV"
+}
+
+@test "codev init creates .framework-version" {
+  ./node_modules/.bin/codev init my-project --yes
+  assert_file_exists "my-project/codev/.framework-version"
+}
+```
+
+### 10.7 Remove codev eject command
+
+Since files are now copied, eject is no longer needed.
+
+### Exit Criteria (TICK-003)
+
+- [ ] `codev init` copies protocols/, roles/, templates/ to project
+- [ ] Copied .md files have managed header
+- [ ] `codev/.framework-version` tracks version
+- [ ] `codev update` implemented with merge strategy
+- [ ] `codev update --dry-run` shows what would change
+- [ ] `codev update --force` overwrites even modified files
+- [ ] Runtime resolution removed from af and consult
+- [ ] E2E tests updated and passing
+- [ ] `codev eject` command removed

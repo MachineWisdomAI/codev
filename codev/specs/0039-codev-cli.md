@@ -410,3 +410,77 @@ This creates problems:
 - [ ] `consult` resolves consultant.md from embedded skeleton, local overrides take precedence
 - [ ] `codev eject <path>` command to copy embedded file locally for customization
 - [ ] Existing projects continue to work (local files still take precedence)
+
+---
+
+## TICK Amendment: 2025-12-09 (TICK-003)
+
+### Problem
+
+TICK-002's embedded skeleton approach creates accessibility issues for AI consultants:
+
+1. **AI tools ignore node_modules**: Most AI agents (Gemini, Codex, Claude) and search tools are configured to skip `node_modules/` by default
+2. **Windows symlink issues**: Symlinks require admin privileges on Windows
+3. **node_modules fragility**: Deleting/reinstalling `node_modules/` would break symlinks or require re-initialization
+4. **Project portability**: Historical project checkouts wouldn't have matching protocol versions
+
+### Consultation Summary (Gemini + Codex)
+
+Both consultants unanimously recommended **reverting to copying files**:
+
+> "When you hire a consultant, they bring their playbooks, but they leave them with you so you can operate when they are gone." - Gemini
+
+Key recommendations:
+- Copy files during `codev init` (scaffolding pattern)
+- Add generated header noting files are managed
+- Implement `codev update` to refresh from package
+- Optional `framework.lock` to track installed version
+
+### Amendment Scope
+
+**Revert to copy-on-init with managed headers**:
+
+1. **`codev init` copies framework files**:
+   ```
+   codev/
+   ├── protocols/           # Copied from skeleton
+   ├── roles/               # Copied from skeleton
+   ├── templates/           # Copied from skeleton
+   ├── specs/
+   ├── plans/
+   ├── reviews/
+   └── projectlist.md
+   ```
+
+2. **Add managed file headers**:
+   ```markdown
+   <!-- MANAGED BY CODEV - Run 'codev update' to refresh -->
+   <!-- Version: 1.2.0 | Do not edit unless customizing -->
+   ```
+
+3. **`codev update` command**:
+   - Compare local files against embedded skeleton
+   - If unchanged (matching hash), overwrite silently
+   - If user modified, create `.codev-new` file and prompt for merge
+   - Track version in `codev/.framework-version`
+
+4. **Remove runtime resolution**: `af` and `consult` read directly from local `codev/` directory (no fallback to node_modules)
+
+5. **Update E2E tests**: Tests should expect `codev/protocols/` to exist after init
+
+### Benefits
+
+- AI consultants can find and read protocol files at expected paths
+- Works on all platforms without symlink issues
+- Project is self-contained and portable
+- User customizations are possible and preserved
+- Clear update path via `codev update`
+
+### Success Criteria (TICK-003)
+
+- [ ] `codev init` copies protocols/, roles/, templates/ to project
+- [ ] Managed file headers added to copied files
+- [ ] `codev/.framework-version` tracks skeleton version
+- [ ] `codev update` refreshes framework files with merge strategy
+- [ ] E2E tests updated for new directory structure
+- [ ] AI consultants can find `codev/protocols/spider/protocol.md`
