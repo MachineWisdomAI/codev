@@ -91,9 +91,10 @@ teardown() {
   assert_output --partial "plan"
 }
 
-@test "templates directory is included in package" {
+@test "skeleton directory is included in package" {
+  # Skeleton contains embedded protocols/roles/templates for runtime resolution
   install_codev
-  assert_dir_exists "node_modules/@cluesmith/codev/templates"
+  assert_dir_exists "node_modules/@cluesmith/codev/skeleton"
 }
 
 # === Error Cases ===
