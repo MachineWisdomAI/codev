@@ -849,15 +849,21 @@
 
     /* Stage cell styling */
     .stage-cell {
-      font-size: 11px;
+      font-size: 12px;
+      position: relative;
     }
 
-    .stage-cell--complete {
-      background: rgba(34, 197, 94, 0.3);
+    .stage-cell .checkmark {
+      color: #22c55e;
+      font-weight: bold;
     }
 
-    .stage-cell--current {
-      background: rgba(249, 115, 22, 0.3);
+    .stage-cell .current-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f97316;
+      border-radius: 50%;
     }
 
     .stage-cell a {
@@ -866,6 +872,48 @@
     }
 
     .stage-cell a:hover {
+      text-decoration: underline;
+    }
+
+    /* Arrow between columns */
+    .kanban-grid th:not(:first-child):not(:last-child)::after,
+    .kanban-grid td.stage-cell:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -8px;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    /* Projects info header */
+    .projects-info {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 12px;
+    }
+
+    .projects-info p {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin: 0 0 8px 0;
+    }
+
+    .projects-info p:last-child {
+      margin-bottom: 0;
+    }
+
+    .projects-info strong {
+      color: var(--text-primary);
+    }
+
+    .projects-info a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .projects-info a:hover {
       text-decoration: underline;
     }
 
@@ -2417,30 +2465,32 @@
       let ariaLabel = '';
 
       if (stageIndex < currentIndex) {
-        // Completed stage - green background
-        cellClass += ' stage-cell--complete';
+        // Completed stage - green checkmark
         ariaLabel = `${stage}: completed`;
 
         const cellContent = getStageCellContent(project, stage);
         if (cellContent.label && cellContent.link) {
           if (cellContent.external) {
-            content = `<a href="${cellContent.link}" target="_blank" rel="noopener">${cellContent.label}</a>`;
+            content = `<a href="${cellContent.link}" target="_blank" rel="noopener"><span class="checkmark">✓</span> ${cellContent.label}</a>`;
           } else {
-            content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;">${cellContent.label}</a>`;
+            content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;"><span class="checkmark">✓</span> ${cellContent.label}</a>`;
           }
+        } else {
+          content = '<span class="checkmark">✓</span>';
         }
       } else if (stageIndex === currentIndex) {
-        // Current stage - orange background
-        cellClass += ' stage-cell--current';
-        ariaLabel = `${stage}: current`;
+        // Current stage - hollow orange circle
+        ariaLabel = `${stage}: in progress`;
 
         const cellContent = getStageCellContent(project, stage);
         if (cellContent.label && cellContent.link) {
           if (cellContent.external) {
-            content = `<a href="${cellContent.link}" target="_blank" rel="noopener">${cellContent.label}</a>`;
+            content = `<a href="${cellContent.link}" target="_blank" rel="noopener"><span class="current-indicator"></span> ${cellContent.label}</a>`;
           } else {
-            content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;">${cellContent.label}</a>`;
+            content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;"><span class="current-indicator"></span> ${cellContent.label}</a>`;
           }
+        } else {
+          content = '<span class="current-indicator"></span>';
         }
       } else {
         // Future stage - empty
@@ -2668,6 +2718,17 @@
       `;
     }
 
+    // Render the info header with helpful links
+    function renderInfoHeader() {
+      return `
+        <div class="projects-info">
+          <p><strong>Active Projects</strong> — This view shows all projects currently in progress.</p>
+          <p>To add projects, update status, or approve stages, use the <strong>Architect</strong> terminal on the left.</p>
+          <p>Docs: <a href="https://github.com/cluesmith/codev#readme" target="_blank">README</a> · <a href="#" onclick="openProjectFile('codev/docs/commands/overview.md'); return false;">CLI Reference</a> · <a href="#" onclick="openProjectFile('codev/protocols/spider/protocol.md'); return false;">SPIDER Protocol</a></p>
+        </div>
+      `;
+    }
+
     // Render the projects tab content (internal - called after data is loaded)
     function renderProjectsTabContent() {
       const content = document.getElementById('tab-content');
@@ -2692,7 +2753,7 @@
 
       content.innerHTML = `
         <div class="projects-container">
-          ${renderStatusSummary(projectsData)}
+          ${renderInfoHeader()}
           ${renderKanbanGrid(projectsData)}
           ${renderTerminalProjects(projectsData)}
         </div>
