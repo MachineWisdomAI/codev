@@ -866,6 +866,10 @@
       border-radius: 50%;
     }
 
+    .stage-cell .celebration {
+      font-size: 16px;
+    }
+
     .stage-cell a {
       color: var(--text-primary);
       text-decoration: none;
@@ -2490,18 +2494,23 @@
           content = '<span class="checkmark">✓</span>';
         }
       } else if (stageIndex === currentIndex) {
-        // Current stage - hollow orange circle
-        ariaLabel = `${stage}: in progress`;
-
-        const cellContent = getStageCellContent(project, stage);
-        if (cellContent.label && cellContent.link) {
-          if (cellContent.external) {
-            content = `<a href="${cellContent.link}" target="_blank" rel="noopener"><span class="current-indicator"></span> ${cellContent.label}</a>`;
-          } else {
-            content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;"><span class="current-indicator"></span> ${cellContent.label}</a>`;
-          }
+        // Current stage - hollow orange circle (or confetti if recently integrated)
+        if (stage === 'integrated' && isRecentlyIntegrated(project)) {
+          ariaLabel = `${stage}: recently completed!`;
+          content = '<span class="celebration">🎉</span>';
         } else {
-          content = '<span class="current-indicator"></span>';
+          ariaLabel = `${stage}: in progress`;
+
+          const cellContent = getStageCellContent(project, stage);
+          if (cellContent.label && cellContent.link) {
+            if (cellContent.external) {
+              content = `<a href="${cellContent.link}" target="_blank" rel="noopener"><span class="current-indicator"></span> ${cellContent.label}</a>`;
+            } else {
+              content = `<a href="#" onclick="openProjectFile('${cellContent.link}'); return false;"><span class="current-indicator"></span> ${cellContent.label}</a>`;
+            }
+          } else {
+            content = '<span class="current-indicator"></span>';
+          }
         }
       } else {
         // Future stage - empty
@@ -2658,12 +2667,34 @@
       `;
     }
 
+    // Check if a project was integrated in the last 24 hours
+    function isRecentlyIntegrated(project) {
+      if (project.status !== 'integrated') return false;
+      if (!project.notes) return false;
+
+      // Look for date patterns like "2025-12-10" or "PR #N merged 2025-12-10"
+      const dateMatch = project.notes.match(/(\d{4}-\d{2}-\d{2})/);
+      if (!dateMatch) return false;
+
+      const integratedDate = new Date(dateMatch[1]);
+      const now = new Date();
+      const hoursDiff = (now - integratedDate) / (1000 * 60 * 60);
+
+      return hoursDiff <= 24;
+    }
+
     // Render the Kanban grid with Active/Inactive sections
     function renderKanbanGrid(projects) {
       // Separate active (conceived through committed) from inactive (integrated)
       const activeStatuses = ['conceived', 'specified', 'planned', 'implementing', 'implemented', 'committed'];
-      const activeProjects = projects.filter(p => activeStatuses.includes(p.status));
-      const inactiveProjects = projects.filter(p => p.status === 'integrated');
+
+      // Include recently integrated projects in Active section
+      const activeProjects = projects.filter(p =>
+        activeStatuses.includes(p.status) || isRecentlyIntegrated(p)
+      );
+      const inactiveProjects = projects.filter(p =>
+        p.status === 'integrated' && !isRecentlyIntegrated(p)
+      );
 
       let html = '';
 
