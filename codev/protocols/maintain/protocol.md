@@ -6,6 +6,12 @@ MAINTAIN is a periodic maintenance protocol for keeping codebases healthy. Unlik
 
 **Core Principle**: Regular maintenance prevents technical debt accumulation.
 
+**Key Documents**: MAINTAIN is responsible for keeping these living documents accurate and consistent:
+- `codev/resources/arch.md` - Architecture documentation (how the system works)
+- `codev/resources/lessons-learned.md` - Extracted wisdom from reviews
+
+Any builder can update these files during development, but MAINTAIN ensures they stay consistent with the actual codebase.
+
 ## When to Use MAINTAIN
 
 - When the user/architect requests it
