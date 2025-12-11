@@ -1732,6 +1732,198 @@ When a file path is clicked in a terminal:
 5. **Dashboard** receives message, opens file via `/api/tabs/file`
 6. **open-server.ts** spawns to serve the annotation viewer
 
+### Error Handling and Recovery
+
+Agent Farm includes several mechanisms for handling failures and recovering from error states.
+
+#### Orphan Session Detection
+
+On startup, `handleOrphanedSessions()` detects and cleans up:
+- tmux sessions from previous crashed runs
+- ttyd processes without parent dashboard
+- State entries for dead processes
+
+```typescript
+// From utils/orphan-handler.ts
+export async function handleOrphanedSessions(options: { kill: boolean }): Promise<void> {
+  // Find tmux sessions matching af-* or builder-* patterns
+  // Check if corresponding state entries exist
+  // Kill orphaned sessions if options.kill is true
+}
+```
+
+#### Port Allocation Race Conditions
+
+When multiple builders spawn simultaneously:
+
+```typescript
+// Retry loop in dashboard-server.ts
+const MAX_PORT_RETRIES = 5;
+for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
+  const currentState = loadState();
+  const candidatePort = await findAvailablePort(CONFIG.utilPortStart, currentState);
+
+  // Try to spawn on candidatePort...
+  // If port taken by concurrent request, retry with fresh state
+  if (tryAddUtil(util)) {
+    break; // Success
+  }
+  // Port conflict - kill spawned process and retry
+  await killProcessGracefully(spawnedPid);
+}
+```
+
+#### Dead Process Cleanup
+
+Dashboard server cleans up stale entries on state load:
+
+```typescript
+function cleanupDeadProcesses(): void {
+  // Check each util/annotation for running process
+  for (const util of getUtils()) {
+    if (!isProcessRunning(util.pid)) {
+      console.log(`Auto-closing shell tab ${util.name} (process ${util.pid} exited)`);
+      if (util.tmuxSession) {
+        killTmuxSession(util.tmuxSession);
+      }
+      removeUtil(util.id);
+    }
+  }
+}
+```
+
+#### Graceful Shutdown
+
+Two-phase process termination prevents zombie processes:
+
+```typescript
+async function killProcessGracefully(pid: number, tmuxSession?: string): Promise<void> {
+  // First kill tmux session
+  if (tmuxSession) {
+    killTmuxSession(tmuxSession);
+  }
+
+  // SIGTERM first
+  process.kill(pid, 'SIGTERM');
+
+  // Wait up to 500ms
+  // If still alive, SIGKILL
+  process.kill(pid, 'SIGKILL');
+}
+```
+
+#### Worktree Pruning
+
+Stale worktree entries are pruned automatically:
+
+```bash
+# Run before spawn to prevent "can't find session" errors
+git worktree prune
+```
+
+This catches orphaned worktrees from crashes, manual kills, or incomplete cleanups.
+
+#### Port Exhaustion
+
+When maximum allocations are reached (~58 projects):
+
+```typescript
+if (nextPort >= BASE_PORT + (MAX_ALLOCATIONS * PORT_BLOCK_SIZE)) {
+  throw new Error('No available port blocks. Maximum allocations reached.');
+}
+```
+
+**Recovery**: Run `af ports cleanup` to remove stale allocations from deleted projects.
+
+### Security Model
+
+Agent Farm is designed for local development use only. Understanding the security model is critical for safe operation.
+
+#### Network Binding
+
+All services bind to `localhost` only:
+- Dashboard server: `127.0.0.1:4200`
+- ttyd terminals: `127.0.0.1:{port}`
+- No external network exposure
+
+#### Authentication
+
+**Current approach: None (localhost assumption)**
+- Dashboard has no login/password
+- ttyd terminals are directly accessible
+- All processes share the user's permissions
+
+**Justification**: Since all services bind to localhost, only processes running as the same user can connect. External network access is blocked at the binding level.
+
+#### Request Validation
+
+The dashboard server implements multiple security checks:
+
+```javascript
+// Host header validation (prevents DNS rebinding)
+if (host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
+  return false;
+}
+
+// Origin header validation (prevents CSRF from external sites)
+if (origin && !origin.startsWith('http://localhost') && !origin.startsWith('http://127.0.0.1')) {
+  return false;
+}
+```
+
+#### Path Traversal Prevention
+
+All file operations validate paths are within the project root:
+
+```javascript
+function validatePathWithinProject(filePath: string): string | null {
+  // Decode URL encoding to catch %2e%2e (encoded ..)
+  const decodedPath = decodeURIComponent(filePath);
+
+  // Resolve and normalize to prevent .. traversal
+  const normalizedPath = path.normalize(path.resolve(projectRoot, decodedPath));
+
+  // Verify path stays within project
+  if (!normalizedPath.startsWith(projectRoot + path.sep)) {
+    return null; // Reject
+  }
+
+  // Resolve symlinks to prevent symlink-based traversal
+  if (fs.existsSync(normalizedPath)) {
+    const realPath = fs.realpathSync(normalizedPath);
+    if (!realPath.startsWith(projectRoot + path.sep)) {
+      return null; // Reject symlink pointing outside
+    }
+  }
+
+  return normalizedPath;
+}
+```
+
+#### Worktree Isolation
+
+Each builder operates in a separate git worktree:
+- **Filesystem isolation**: Different directory per builder
+- **Branch isolation**: Each builder has its own branch
+- **No secret sharing**: Worktrees don't share uncommitted files
+- **Safe cleanup**: Refuses to delete dirty worktrees without `--force`
+
+#### DoS Protection
+
+Tab creation has built-in limits:
+```javascript
+const CONFIG = {
+  maxTabs: 20, // Maximum concurrent tabs
+};
+```
+
+#### Security Recommendations
+
+1. **Never expose ports externally**: Don't use port forwarding or tunnels
+2. **Trust local processes**: Anyone with local access can use agent-farm
+3. **Review worktree contents**: Check `.builder-*` files before committing
+4. **Use `--force` carefully**: Understand what uncommitted changes will be lost
+
 ### Key Files Reference
 
 #### CLI Layer
