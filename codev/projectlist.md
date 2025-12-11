@@ -447,24 +447,24 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0050"
     title: "Dashboard Polish"
     summary: "UX improvements: clickable title only for expand, show TICKs in project view, poll for projectlist.md creation"
-    status: committed
+    status: integrated
     priority: medium
     release: null
     files:
       spec: codev/specs/0050-dashboard-polish.md
       plan: codev/plans/0050-dashboard-polish.md
-      review: null
+      review: codev/reviews/0050-dashboard-polish.md
     dependencies: []
     tags: [dashboard, ui, ux]
     timestamps:
       conceived_at: "2025-12-11T10:40:00-08:00"
-      specified_at: null
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: ""
+      specified_at: "2025-12-11T10:40:00-08:00"
+      planned_at: "2025-12-11T10:40:00-08:00"
+      implementing_at: "2025-12-11T10:40:00-08:00"
+      implemented_at: "2025-12-11T11:00:00-08:00"
+      committed_at: "2025-12-11T11:10:00-08:00"
+      integrated_at: "2025-12-11T13:30:00-08:00"
+    notes: "PR #97 merged 2025-12-11"
 
   - id: "0035"
     title: "MAINTAIN Protocol"
