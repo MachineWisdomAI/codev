@@ -2,7 +2,7 @@
 
 **Status:** integrated
 **Protocol:** SPIDER
-**Amended:** 2025-12-09 (TICK)
+**Amended:** 2025-12-11 (TICK-004)
 **Priority:** High
 **Dependencies:** 0005 (TypeScript CLI), 0022 (Consult Tool)
 **Blocks:** None
@@ -485,3 +485,76 @@ Key recommendations:
 - [ ] `codev update` refreshes framework files with merge strategy
 - [ ] E2E tests updated for new directory structure
 - [ ] AI consultants can find `codev/protocols/spider/protocol.md`
+
+---
+
+## TICK Amendment: 2025-12-11 (TICK-004)
+
+### Problem
+
+TICK-003 was never fully implemented. The current code still uses TICK-002's embedded skeleton approach:
+- `codev init` creates minimal structure (specs/, plans/, reviews/ only)
+- Framework files (protocols/, roles/) resolved from `packages/codev/skeleton/` at runtime
+- `codev eject` exists to copy files locally when customization needed
+
+This creates duplication and confusion:
+1. `codev-skeleton/` - canonical source in repo
+2. `packages/codev/skeleton/` - copy embedded in npm package (build artifact)
+3. Runtime resolution adds complexity
+4. `eject` command needed but awkward
+
+### Amendment Scope
+
+**Fetch skeleton from GitHub during init** (like `degit` or `create-react-app`):
+
+1. **`codev init` fetches from GitHub**:
+   ```typescript
+   const version = getPackageVersion(); // e.g., "1.1.1"
+   const url = `https://api.github.com/repos/cluesmith/codev-public/contents/codev-skeleton?ref=v${version}`;
+   // Or use tarball: https://github.com/cluesmith/codev-public/archive/refs/tags/v${version}.tar.gz
+   await downloadAndExtract(url, targetDir + '/codev/');
+   ```
+
+2. **Remove embedded skeleton**:
+   - Delete `packages/codev/skeleton/` directory
+   - Remove `copy-skeleton` build step from package.json
+   - Remove runtime skeleton resolution (`src/lib/skeleton.ts`)
+
+3. **Remove `codev eject`**:
+   - No longer needed since files are local after init
+   - Delete `src/commands/eject.ts`
+   - Remove from CLI registration
+
+4. **Simplify `codev update`**:
+   - Re-fetch from GitHub at current CLI version tag
+   - Same merge strategy as before (hash comparison)
+
+5. **Keep `codev-skeleton/` as single source of truth**:
+   - Only location for skeleton files
+   - Tagged with releases
+
+### Benefits
+
+- Single source of truth (`codev-skeleton/` only)
+- No build-time copying
+- Smaller npm package
+- Files are local and AI-accessible after init
+- Version-aligned fetching (tag matches CLI version)
+- Simpler codebase (no runtime resolution, no eject)
+
+### Offline Fallback
+
+For offline scenarios, `codev init --offline` could:
+- Fail with helpful message: "Network required for init. Use codev adopt for existing projects."
+- Or bundle minimal skeleton (just templates) as fallback
+
+### Success Criteria (TICK-004)
+
+- [ ] `codev init` fetches skeleton from GitHub at matching version tag
+- [ ] `packages/codev/skeleton/` removed from repo
+- [ ] `copy-skeleton` build step removed
+- [ ] `src/lib/skeleton.ts` runtime resolution removed
+- [ ] `codev eject` command removed
+- [ ] `codev update` fetches from GitHub
+- [ ] Tests updated for new behavior
+- [ ] Offline behavior documented (or fallback implemented)

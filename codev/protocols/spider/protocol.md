@@ -490,8 +490,8 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
    - Enhance documentation
 
 3. **Update Architecture Documentation**
-   - Use architecture-documenter agent to update `codev/resources/arch.md`
-   - Document new modules, utilities, or architectural changes
+   - Update `codev/resources/arch.md` with new modules, utilities, or architectural changes
+   - Follow guidance in MAINTAIN protocol's "Update arch.md" task for structure and standards
    - Ensure arch.md reflects current codebase state
 
 4. **Revision Requirements** (MANDATORY)
