@@ -1083,6 +1083,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Check if projectlist.md exists (for starter page polling)
+    if (req.method === 'GET' && url.pathname === '/api/projectlist-exists') {
+      const projectlistPath = path.join(projectRoot, 'codev/projectlist.md');
+      const exists = fs.existsSync(projectlistPath);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ exists }));
+      return;
+    }
+
     // Read file contents (for Projects tab to read projectlist.md)
     if (req.method === 'GET' && url.pathname === '/file') {
       const filePath = url.searchParams.get('path');
