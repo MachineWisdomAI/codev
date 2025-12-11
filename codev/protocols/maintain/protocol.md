@@ -241,6 +241,16 @@ Size targets (~400 lines for CLAUDE.md/README.md) are **guidelines, not mandates
 - Consultation requirements
 - Links to detailed docs
 
+**Good candidates for deletion from CLAUDE.md**:
+- Content duplicated elsewhere (e.g., in protocol files, role files, docs/)
+- **When removing duplicated content**: Replace with a pointer to the canonical location
+  ```markdown
+  ## Consult Tool
+
+  See `codev/docs/commands/consult.md` for full documentation.
+  ```
+- This keeps CLAUDE.md as an index/guide rather than duplicating detailed docs
+
 ### Remove Dead Code
 
 Use static analysis to find and remove unused code:
