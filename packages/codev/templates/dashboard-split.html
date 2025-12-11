@@ -809,12 +809,12 @@
     }
 
     .kanban-grid tbody tr {
-      cursor: pointer;
+      cursor: default;
       transition: background 0.15s;
     }
 
     .kanban-grid tbody tr:hover {
-      background: var(--bg-tertiary);
+      background: var(--bg-secondary);
     }
 
     .kanban-grid tbody tr:focus {
@@ -837,6 +837,15 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .kanban-grid .project-cell.clickable {
+      cursor: pointer;
+    }
+
+    .kanban-grid .project-cell.clickable:hover .project-title {
+      text-decoration: underline;
+      color: var(--accent);
     }
 
     .kanban-grid .tick-badge {
@@ -970,6 +979,23 @@
       margin-top: 8px;
       font-size: 12px;
       color: var(--text-muted);
+    }
+
+    .project-ticks {
+      margin-top: 8px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .project-ticks .tick-badge {
+      background: #238636;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
     }
 
     /* Collapsible project sections */
@@ -2574,10 +2600,9 @@
             role="row"
             tabindex="0"
             aria-expanded="${isExpanded}"
-            onclick="toggleProjectDetails('${project.id}')"
             onkeydown="handleProjectRowKeydown(event, '${project.id}')">
           <td role="gridcell">
-            <div class="project-cell">
+            <div class="project-cell clickable" onclick="toggleProjectDetails('${project.id}'); event.stopPropagation();">
               <span class="project-id">${escapeProjectHtml(project.id)}</span>
               <span class="project-title" title="${escapeProjectHtml(project.title)}">${escapeProjectHtml(project.title)}</span>
             </div>
@@ -2603,6 +2628,11 @@
         ? `<div class="project-dependencies">Dependencies: ${project.dependencies.map(d => escapeProjectHtml(d)).join(', ')}</div>`
         : '';
 
+      // Render TICKs if present
+      const ticks = project.ticks && project.ticks.length > 0
+        ? `<div class="project-ticks">TICKs: ${project.ticks.map(t => `<span class="tick-badge">TICK-${escapeProjectHtml(t)}</span>`).join(' ')}</div>`
+        : '';
+
       return `
         <tr class="project-details-row" role="row">
           <td colspan="8">
@@ -2610,6 +2640,7 @@
               <h3>${escapeProjectHtml(project.title)}</h3>
               ${project.summary ? `<p>${escapeProjectHtml(project.summary)}</p>` : ''}
               ${project.notes ? `<p class="notes">${escapeProjectHtml(project.notes)}</p>` : ''}
+              ${ticks}
               ${links.length > 0 ? `<div class="project-details-links">${links.join('')}</div>` : ''}
               ${dependencies}
             </div>
@@ -2829,6 +2860,7 @@
 
       await loadProjectlist();
       renderProjectsTabContent();
+      checkStarterMode(); // Update polling state after initial load
     }
 
     // Load projectlist.md from disk
@@ -2870,6 +2902,7 @@
       projectlistHash = null; // Force re-parse
       await loadProjectlist();
       renderProjectsTabContent();
+      checkStarterMode(); // Update polling state after reload
     }
 
     // Poll projectlist for changes (every 5 seconds)
@@ -2892,10 +2925,52 @@
             projectsData = parseProjectlist(text);
             projectlistError = null;
             renderProjectsTabContent();
+            checkStarterMode(); // Update polling state after content change
           }, 500);
         }
       } catch (err) {
         // Silently ignore polling errors
+      }
+    }
+
+    // Poll for projectlist.md creation when in starter mode (every 15 seconds)
+    let starterModePollingInterval = null;
+
+    async function pollForProjectlistCreation() {
+      try {
+        const response = await fetch('/api/projectlist-exists');
+        if (!response.ok) return;
+
+        const { exists } = await response.json();
+        if (exists) {
+          // projectlist.md was created - stop polling and reload
+          if (starterModePollingInterval) {
+            clearInterval(starterModePollingInterval);
+            starterModePollingInterval = null;
+          }
+          window.location.reload();
+        }
+      } catch (err) {
+        // Silently ignore polling errors
+      }
+    }
+
+    // Check if we should start starter mode polling
+    function checkStarterMode() {
+      // We're in starter mode ONLY if:
+      // 1. projectsData is empty (no projects loaded)
+      // 2. No error occurred
+      // 3. projectlistHash is null (file was not found, not just empty)
+      // This prevents infinite reload loop when file exists but is empty
+      const isStarterMode = projectsData.length === 0 && !projectlistError && projectlistHash === null;
+
+      if (isStarterMode && !starterModePollingInterval) {
+        // Start polling for projectlist.md creation
+        starterModePollingInterval = setInterval(pollForProjectlistCreation, 15000);
+      } else if (!isStarterMode && starterModePollingInterval) {
+        // Stop polling - file exists now (even if empty)
+        clearInterval(starterModePollingInterval);
+        starterModePollingInterval = null;
       }
     }
 
