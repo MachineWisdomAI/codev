@@ -492,7 +492,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0012"
     title: "Hide tmux Status Bar"
     summary: "Cleaner dashboard UI by removing the tmux status bar from embedded terminals"
-    status: planned
+    status: implementing
     priority: low
     release: null
     files:
@@ -505,11 +505,11 @@ Projects currently in development (conceived through committed), sorted by prior
       conceived_at: null
       specified_at: null
       planned_at: "2025-12-10T12:24:00-08:00"
-      implementing_at: null
+      implementing_at: "2025-12-10T12:24:38-08:00"
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "TICK protocol. Plan approved by Gemini and Codex (HIGH confidence)."
+    notes: "TICK protocol. Builder started 2025-12-10."
 
   - id: "0017"
     title: "Platform Portability Layer"
