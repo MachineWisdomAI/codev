@@ -809,12 +809,12 @@
     }
 
     .kanban-grid tbody tr {
-      cursor: pointer;
+      cursor: default;
       transition: background 0.15s;
     }
 
     .kanban-grid tbody tr:hover {
-      background: var(--bg-tertiary);
+      background: var(--bg-secondary);
     }
 
     .kanban-grid tbody tr:focus {
@@ -2860,6 +2860,7 @@
 
       await loadProjectlist();
       renderProjectsTabContent();
+      checkStarterMode(); // Update polling state after initial load
     }
 
     // Load projectlist.md from disk
@@ -2901,6 +2902,7 @@
       projectlistHash = null; // Force re-parse
       await loadProjectlist();
       renderProjectsTabContent();
+      checkStarterMode(); // Update polling state after reload
     }
 
     // Poll projectlist for changes (every 5 seconds)
@@ -2923,6 +2925,7 @@
             projectsData = parseProjectlist(text);
             projectlistError = null;
             renderProjectsTabContent();
+            checkStarterMode(); // Update polling state after content change
           }, 500);
         }
       } catch (err) {
@@ -2954,14 +2957,18 @@
 
     // Check if we should start starter mode polling
     function checkStarterMode() {
-      // We're in starter mode if projectsData is empty and there's no error
-      const isStarterMode = projectsData.length === 0 && !projectlistError;
+      // We're in starter mode ONLY if:
+      // 1. projectsData is empty (no projects loaded)
+      // 2. No error occurred
+      // 3. projectlistHash is null (file was not found, not just empty)
+      // This prevents infinite reload loop when file exists but is empty
+      const isStarterMode = projectsData.length === 0 && !projectlistError && projectlistHash === null;
 
       if (isStarterMode && !starterModePollingInterval) {
         // Start polling for projectlist.md creation
         starterModePollingInterval = setInterval(pollForProjectlistCreation, 15000);
       } else if (!isStarterMode && starterModePollingInterval) {
-        // Stop polling - we have data now
+        // Stop polling - file exists now (even if empty)
         clearInterval(starterModePollingInterval);
         starterModePollingInterval = null;
       }
@@ -2969,9 +2976,6 @@
 
     // Start projectlist polling (separate from main state polling)
     setInterval(pollProjectlist, 5000);
-
-    // Check starter mode after initial load
-    setTimeout(checkStarterMode, 1000);
 
     // Initialize on load
     init();
