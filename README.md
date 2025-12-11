@@ -3,7 +3,7 @@
 Codev is an operating system for humans and AI agents to build software together. It provides:
 
 - **Core Philosophies** - Natural language as programming language, multi-model collaboration, structured human-agent workflows
-- **Core Concepts** - Protocols (SPIDER, TICK, MAINTAIN), roles (Architect, Builder, Consultant), information hierarchy
+- **Core Concepts** - Protocols (SPIDER, TICK, EXPERIMENT, MAINTAIN), roles (Architect, Builder, Consultant), information hierarchy
 - **Core Tools** - `codev`, `af` (agent-farm), `consult`
 
 ## Installation
