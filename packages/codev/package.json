@@ -11,7 +11,8 @@
   "files": [
     "dist",
     "bin",
-    "skeleton"
+    "skeleton",
+    "templates"
   ],
   "scripts": {
     "build": "tsc && npm run copy-skeleton",

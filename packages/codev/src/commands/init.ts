@@ -114,21 +114,42 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
     fileCount++;
   }
 
-  // Create projectlist.md for tracking projects
+  // Get skeleton directory for templates
+  const skeletonDir = getTemplatesDir();
+
+  // Create projectlist.md from skeleton template
   const projectlistPath = path.join(targetDir, 'codev', 'projectlist.md');
-  const projectlistContent = `# Project List
+  const projectlistTemplatePath = path.join(skeletonDir, 'templates', 'projectlist.md');
+  if (fs.existsSync(projectlistTemplatePath)) {
+    fs.copyFileSync(projectlistTemplatePath, projectlistPath);
+  } else {
+    // Fallback to inline template if skeleton template not found
+    const projectlistContent = `# Project List
 
 Track all projects here. See codev documentation for status values.
 
-| ID | Name | Status | Priority | Notes |
-|----|------|--------|----------|-------|
+\`\`\`yaml
+projects:
+  - id: "0001"
+    title: "Example Project"
+    summary: "Brief description"
+    status: conceived
+    priority: medium
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: []
+    tags: []
+    notes: "Replace with your first project"
+\`\`\`
 `;
-  fs.writeFileSync(projectlistPath, projectlistContent);
+    fs.writeFileSync(projectlistPath, projectlistContent);
+  }
   console.log(chalk.green('  +'), 'codev/projectlist.md');
   fileCount++;
 
   // Create CLAUDE.md / AGENTS.md at project root from skeleton templates
-  const skeletonDir = getTemplatesDir();
   const claudeMdSrc = path.join(skeletonDir, 'CLAUDE.md.template');
   const agentsMdSrc = path.join(skeletonDir, 'AGENTS.md.template');
 
