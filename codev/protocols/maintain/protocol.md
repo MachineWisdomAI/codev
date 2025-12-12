@@ -120,16 +120,40 @@ ruff check --select F401   # Find unused imports
 
 ### Update arch.md
 
-Scan the actual codebase and update `codev/resources/arch.md`:
+#### Audience & Purpose
 
-**Discovery phase**:
+arch.md serves **two audiences**:
+
+1. **New developers** (human or AI) trying to understand the codebase - they need the conceptual map, the "how big pieces fit together"
+2. **Experienced developers** debugging issues or making design decisions - they need deep technical reference, the "where do I trace this flow?"
+
+Both audiences expect arch.md to answer: *"How does this system actually work, well enough that I can make good debugging deductions and design decisions?"*
+
+#### Expected Content
+
+| Content Type | For Onboarding | For Debugging/Design |
+|--------------|----------------|----------------------|
+| **System diagrams** | High-level component relationships | Detailed data flow diagrams |
+| **Core components** | What each does, conceptually | How each works mechanically |
+| **Sequence diagrams** | Critical user-facing flows | Error paths and edge cases |
+| **State management** | Where state lives | Persistence boundaries, lifecycle |
+| **Security** | Auth model overview | Implementation details, attack surface |
+| **Scheduled jobs** | What runs automatically | Timing, dependencies, failure modes |
+| **Directory structure** | Codebase map (concepts → paths) | Where specific logic lives |
+| **Integration points** | External dependencies | Contracts, failure modes, rate limits |
+| **Invariants & constraints** | Core design principles | What strictly cannot change |
+| **Quick tracing guide** | - | "Start here to debug X" |
+
+#### Discovery Phase
+
 1. `git log --oneline <base-commit>..HEAD` - what changed since last maintenance
 2. `ls -R` key directories to find new files/modules
 3. `grep` for new exports, classes, key functions
 4. Review new/modified specs: `git diff <base-commit>..HEAD --name-only -- codev/specs/`
 5. Review new/modified plans: `git diff <base-commit>..HEAD --name-only -- codev/plans/`
 
-**Update arch.md**:
+#### Update Actions
+
 1. Verify directory structure matches documented structure
 2. Update component descriptions for changed modules
 3. Add new utilities/helpers discovered
@@ -137,25 +161,15 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 5. Update technology stack if dependencies changed
 6. Document new integration points or APIs
 7. Capture architectural decisions from new specs/plans
+8. Update sequence diagrams for modified flows
+9. Verify "Quick Tracing Guide" still points to correct entry points
 
-**Primary sources** (specs/plans):
-- Architectural decisions from specs
-- Component relationships from plans
-- Design rationale and tradeoffs
+#### What NOT to include
 
-**Secondary sources** (code):
-- File locations and their purpose
-- Key functions/classes and what they do
-- Data flow and dependencies
-- Configuration options
-- CLI commands and flags
-
-**What NOT to include**:
-- Implementation details that change frequently
+- Implementation details that change with every commit
 - Line numbers (they go stale)
 - Full API documentation (use JSDoc/docstrings for that)
-
-**Primary Purpose**: arch.md should enable a developer (or AI agent) to rapidly understand the entire system - not just file locations, but **how things actually work**.
+- Aspirational architecture (document what IS, not what SHOULD BE)
 
 **Recommended Document Structure**:
 ```markdown
@@ -163,15 +177,37 @@ Scan the actual codebase and update `codev/resources/arch.md`:
 
 ## Overview
 [High-level description: what the system does, core design philosophy, 2-3 sentences]
+[System metaphor if applicable - e.g., "Codev acts as an OS for AI agents..."]
 
 ## Quick Start for Developers
 [The fastest path to understanding: "To understand X, read Y first"]
 
+## Quick Tracing Guide
+[For experienced developers - entry points for common debugging tasks]
+- **"User reports X not working"** → Start at path/to/file.ts:functionName()
+- **"Performance issue in Y"** → Check path/to/other.ts, look for Z
+- **"Data inconsistency"** → State lives in A, sync happens in B
+
+## Glossary
+[Define domain terms used throughout the codebase - the ubiquitous language]
+- **Spec**: A feature specification document (codev/specs/XXXX-*.md)
+- **Builder**: An AI agent working in an isolated git worktree
+- [Add project-specific terms]
+
 ## Technology Stack
 [Technologies, frameworks, key dependencies with versions]
 
-## Directory Structure
-[Complete directory tree with explanations for each major directory]
+## Directory Structure (Codebase Map)
+[Map high-level concepts to specific paths - don't just list folders]
+- **"The Brain"** → src/core/ - Decision-making logic
+- **"The Hands"** → src/commands/ - Actions the system can take
+[Complete tree with explanations for each major directory]
+
+## Invariants & Constraints
+[What MUST remain true - critical for avoiding breaking changes]
+- State is always persisted to disk before returning success
+- The codev/ directory is never modified during build
+- [Add project-specific invariants]
 
 ## Major Components
 
@@ -188,23 +224,38 @@ Scan the actual codebase and update `codev/resources/arch.md`:
   - `other.ts` - handles Y
 - **Configuration**: How to customize behavior
 - **Common Operations**: Examples of typical usage
+- **Failure Modes**: What can go wrong and how to diagnose
 
 [Repeat for each major component - be thorough about HOW, not just WHAT]
 
-## Utility Functions & Helpers
-### [Utility Category]
-- **File**: path/to/utility.ts
-- **Functions**: `functionName()` - Description and use case
-- **When to Use**: Guidance on appropriate usage
+## State Management
+[Where does state live? What's ephemeral vs persistent?]
+- **Persistent**: SQLite at .agent-farm/state.db, JSON at codev/projectlist.md
+- **Ephemeral**: In-memory caches, tmux sessions
+- **Lifecycle**: How state transitions between states
 
 ## Data Flow
 [How data moves through the system, with concrete examples]
+[Include sequence diagrams for critical flows using Mermaid]
 
-## Key Design Decisions
+## Key Design Decisions (ADRs)
 [Important architectural choices and their rationale - the WHY]
+- **Decision**: Why we chose X over Y
+- **Context**: What problem we were solving
+- **Consequences**: Tradeoffs we accepted
 
 ## Integration Points
 [External services, APIs, databases, and how they connect]
+- **Service**: What it provides
+- **Contract**: Expected inputs/outputs
+- **Failure modes**: What happens when it's down
+- **Rate limits**: If applicable
+
+## System-Wide Patterns
+[Cross-cutting concerns that appear throughout the codebase]
+- **Logging**: Where logs go, log levels, format
+- **Error handling**: How errors propagate, what gets caught where
+- **Configuration**: Loading precedence, environment variables
 
 ## Development Patterns
 [Common patterns used throughout the codebase]
