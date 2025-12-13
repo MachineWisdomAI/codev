@@ -491,7 +491,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0035"
     title: "MAINTAIN Protocol"
     summary: "Rename CLEANUP to MAINTAIN, expand scope to include documentation maintenance (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md sync)"
-    status: implementing
+    status: integrated
     priority: medium
     release: null
     files:
@@ -507,7 +507,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
+      integrated_at: "2025-12-11T15:30:00-08:00"
     notes: "Supersedes CLEANUP (0015). Adds doc maintenance to code hygiene. Consulted Gemini/Codex. No new roles - MAINTAIN executed by Builder like any protocol."
 
   - id: "0037"
