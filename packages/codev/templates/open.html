@@ -348,7 +348,7 @@
     }
   </style>
 </head>
-<body data-builder="{{BUILDER_ID}}" data-file="{{FILE_PATH}}" data-lang="{{LANG}}" data-is-image="{{IS_IMAGE}}" data-file-size="{{FILE_SIZE}}">
+<body data-builder="{{BUILDER_ID}}" data-file="{{FILE_PATH}}" data-lang="{{LANG}}" data-is-image="{{IS_IMAGE}}" data-is-video="{{IS_VIDEO}}" data-file-size="{{FILE_SIZE}}">
   <div class="header">
     <h1 class="path">{{FILE_PATH}}</h1>
     <div class="subtitle" id="subtitle">Click on a line number to leave an annotation.</div>
@@ -385,6 +385,16 @@
     <div class="image-container zoom-fit" id="image-container">
       <img id="image-display" alt="Image preview" />
       <div id="image-error" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- Video viewer mode -->
+  <div id="video-viewer" style="display: none; padding: 15px; height: calc(100vh - 80px);">
+    <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #222; border-radius: 4px;">
+      <video id="video-display" controls style="max-width: 100%; max-height: 100%;">
+        Your browser does not support the video tag.
+      </video>
+      <div id="video-error" style="display: none; color: #ef4444; text-align: center; padding: 40px;"></div>
     </div>
   </div>
 
@@ -447,6 +457,9 @@
     let currentZoomLevel = 1.0;
     let imageNaturalWidth = 0;
     let imageNaturalHeight = 0;
+
+    // Video viewer state
+    const isVideoFile = {{IS_VIDEO}};
 
     // Comment patterns by file extension
     const COMMENT_PATTERNS = {
@@ -523,6 +536,40 @@
 
       // Add cache-busting query param to allow reload
       img.src = '/api/image?t=' + Date.now();
+    }
+
+    // Initialize video viewer
+    function initVideo(fileSize) {
+      // Hide code view elements
+      document.getElementById('viewMode').style.display = 'none';
+      document.getElementById('editBtn').style.display = 'none';
+      document.getElementById('togglePreviewBtn').style.display = 'none';
+
+      // Update subtitle
+      const sizeStr = formatFileSize(fileSize);
+      document.querySelector('.subtitle').textContent = 'Video player · ' + sizeStr;
+
+      // Show video viewer
+      const videoViewer = document.getElementById('video-viewer');
+      videoViewer.style.display = 'block';
+
+      // Load video
+      const video = document.getElementById('video-display');
+      const videoError = document.getElementById('video-error');
+
+      video.onloadedmetadata = function() {
+        videoError.style.display = 'none';
+        video.style.display = 'block';
+      };
+
+      video.onerror = function() {
+        videoError.textContent = 'Failed to load video. The file may be corrupted or in an unsupported format.';
+        videoError.style.display = 'block';
+        video.style.display = 'none';
+      };
+
+      // Add cache-busting query param to allow reload
+      video.src = '/api/video?t=' + Date.now();
     }
 
     // Update image info display (in both header and controls)

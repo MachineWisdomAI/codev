@@ -68,6 +68,10 @@ const isMarkdown = ext === 'md';
 const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
 const isImage = imageExtensions.includes(ext);
 
+// Video detection
+const videoExtensions = ['webm', 'mp4', 'mov', 'avi'];
+const isVideo = videoExtensions.includes(ext);
+
 // MIME type mapping for images
 const imageMimeTypes: Record<string, string> = {
   png: 'image/png',
@@ -76,6 +80,14 @@ const imageMimeTypes: Record<string, string> = {
   gif: 'image/gif',
   webp: 'image/webp',
   svg: 'image/svg+xml'
+};
+
+// MIME type mapping for videos
+const videoMimeTypes: Record<string, string> = {
+  webm: 'video/webm',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo'
 };
 
 // Create server
@@ -107,6 +119,7 @@ const server = http.createServer((req, res) => {
       template = template.replace(/\{\{LANG\}\}/g, lang);
       template = template.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
       template = template.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
+      template = template.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
       template = template.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
 
       if (isImage) {
@@ -114,6 +127,12 @@ const server = http.createServer((req, res) => {
         template = template.replace(
           '// FILE_CONTENT will be injected by the server',
           `initImage(${fileSize});`
+        );
+      } else if (isVideo) {
+        // For videos, don't inject file content - it will be loaded via /api/video
+        template = template.replace(
+          '// FILE_CONTENT will be injected by the server',
+          `initVideo(${fileSize});`
         );
       } else {
         // For text files, inject content as before
@@ -171,6 +190,31 @@ const server = http.createServer((req, res) => {
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Error reading image: ' + (err as Error).message);
+    }
+    return;
+  }
+
+  // Handle video content (GET /api/video)
+  // Use startsWith to allow query params like ?t=123 for cache busting
+  if (req.method === 'GET' && req.url?.startsWith('/api/video')) {
+    if (!isVideo) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Not a video file');
+      return;
+    }
+
+    try {
+      const videoData = fs.readFileSync(fullFilePath);
+      const mimeType = videoMimeTypes[ext] || 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': mimeType,
+        'Content-Length': videoData.length,
+        'Cache-Control': 'no-cache'  // Don't cache, allow reload to work
+      });
+      res.end(videoData);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Error reading video: ' + (err as Error).message);
     }
     return;
   }
