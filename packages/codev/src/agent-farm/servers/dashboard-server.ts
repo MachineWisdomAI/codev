@@ -1169,9 +1169,8 @@ const server = http.createServer(async (req, res) => {
           const items = fs.readdirSync(dirPath, { withFileTypes: true });
 
           for (const item of items) {
-            // Skip excluded directories and hidden files (except .claude)
+            // Skip excluded directories only (allow dotfiles like .github, .eslintrc, etc.)
             if (EXCLUDED_DIRS.has(item.name)) continue;
-            if (item.name.startsWith('.') && item.name !== '.claude') continue;
 
             const itemRelPath = relativePath ? `${relativePath}/${item.name}` : item.name;
             const itemFullPath = path.join(dirPath, item.name);

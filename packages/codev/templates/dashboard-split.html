@@ -3027,6 +3027,17 @@
       `;
     }
 
+    // Escape a string for use inside a JavaScript string literal in onclick handlers
+    // This handles quotes, backslashes, and other special characters
+    function escapeJsString(str) {
+      return str
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+    }
+
     // Render tree nodes recursively
     function renderTreeNodes(nodes, depth) {
       if (!nodes || nodes.length === 0) return '';
@@ -3034,6 +3045,9 @@
       return nodes.map(node => {
         const indent = depth * 16;
         const isExpanded = filesTreeExpanded.has(node.path);
+        // Use escapeJsString for onclick handlers (handles quotes correctly)
+        // Use escapeHtml for data attributes and display text (handles XSS)
+        const jsPath = escapeJsString(node.path);
 
         if (node.type === 'dir') {
           const icon = isExpanded ? '▼' : '▶';
@@ -3042,7 +3056,7 @@
             : '';
 
           return `
-            <div class="tree-item" data-type="dir" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="toggleFolder('${escapeHtml(node.path)}')">
+            <div class="tree-item" data-type="dir" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="toggleFolder('${jsPath}')">
               <span class="tree-item-icon folder-toggle">${icon}</span>
               <span class="tree-item-name">${escapeHtml(node.name)}</span>
             </div>
@@ -3050,7 +3064,7 @@
           `;
         } else {
           return `
-            <div class="tree-item" data-type="file" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="openFileFromTree('${escapeHtml(node.path)}')">
+            <div class="tree-item" data-type="file" data-path="${escapeHtml(node.path)}" style="padding-left: ${indent + 8}px;" onclick="openFileFromTree('${jsPath}')">
               <span class="tree-item-icon">${getFileIcon(node.name)}</span>
               <span class="tree-item-name">${escapeHtml(node.name)}</span>
             </div>
