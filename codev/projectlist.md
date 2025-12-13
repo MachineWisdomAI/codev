@@ -400,6 +400,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Phase 2: Stateful. Keep CLI running via stdio. Maintain session until closed. Depends on 0022."
 
+  - id: "0053"
+    title: "af open Image Support"
+    summary: "Extend af open to display images (PNG, JPG, GIF, WebP, SVG) with zoom controls"
+    status: planned
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0053-af-open-image-support.md
+      plan: codev/plans/0053-af-open-image-support.md
+      review: null
+    dependencies: []
+    tags: [agent-farm, dashboard, ui]
+    timestamps:
+      conceived_at: "2025-12-11T15:00:00-08:00"
+      specified_at: "2025-12-11T15:00:00-08:00"
+      planned_at: "2025-12-11T15:00:00-08:00"
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: ""
+
   - id: "0052"
     title: "Agent Farm Internals Documentation"
     summary: "Comprehensive arch.md section on af internals: ports, tmux, state, worktrees, dashboard"
