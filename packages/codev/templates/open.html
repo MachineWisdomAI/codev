@@ -351,7 +351,8 @@
 <body data-builder="{{BUILDER_ID}}" data-file="{{FILE_PATH}}" data-lang="{{LANG}}" data-is-image="{{IS_IMAGE}}" data-file-size="{{FILE_SIZE}}">
   <div class="header">
     <h1 class="path">{{FILE_PATH}}</h1>
-    <div class="subtitle">Click on a line number to leave an annotation.</div>
+    <div class="subtitle" id="subtitle">Click on a line number to leave an annotation.</div>
+    <div id="image-header-info" style="display: none; color: #888; font-size: 12px; margin-top: 4px;"></div>
     <div class="actions">
       <button id="reloadBtn" class="btn btn-secondary" onclick="reloadFile()" title="Reload from disk" aria-label="Reload file from disk">↻</button>
       <button id="togglePreviewBtn" class="btn btn-secondary" style="display: none;" title="Toggle Preview (Cmd+Shift+P)">
@@ -524,11 +525,19 @@
       img.src = '/api/image?t=' + Date.now();
     }
 
-    // Update image info display
+    // Update image info display (in both header and controls)
     function updateImageInfo(fileSize) {
-      const info = document.getElementById('image-info');
       const sizeStr = formatFileSize(fileSize);
-      info.textContent = `${imageNaturalWidth} × ${imageNaturalHeight} px · ${sizeStr}`;
+      const infoText = `${imageNaturalWidth} × ${imageNaturalHeight} px · ${sizeStr}`;
+
+      // Update controls area
+      const info = document.getElementById('image-info');
+      info.textContent = infoText;
+
+      // Update header area
+      const headerInfo = document.getElementById('image-header-info');
+      headerInfo.textContent = infoText;
+      headerInfo.style.display = 'block';
     }
 
     // Format file size in human-readable form
