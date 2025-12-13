@@ -2,8 +2,7 @@
 
 ## Overview
 
-Codev is a context-driven development methodology framework that treats natural language specifications as first-class code. This repository serves a dual purpose: it is both the canonical source of the Codev framework AND a self-hosted instance where Codev uses its own methodology to develop itself.
-<!-- REVIEW(@architect): Please use the official description: Human-Agent Software Development Operating System. -->
+Codev is a Human-Agent Software Development Operating System. This repository serves a dual purpose: it is both the canonical source of the Codev framework AND a self-hosted instance where Codev uses its own methodology to develop itself.
 
 ## Quick Start for Developers
 
@@ -33,7 +32,7 @@ For debugging common issues, start here:
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
-| **"Projectlist not parsing"** | `packages/codev/src/projectlist-parser.ts` | YAML parsing, project entry format |
+| **"Projectlist not parsing"** | `packages/codev/src/lib/projectlist-parser.ts` | YAML parsing, project entry format |
 | **"Init/adopt not working"** | `packages/codev/src/commands/{init,adopt}.ts` | Skeleton copy, template processing |
 
 **Common debugging commands:**
@@ -78,7 +77,7 @@ pgrep -f ttyd
 
 1. **State Consistency**: `.agent-farm/state.db` is the single source of truth for builder/util state. Never modify it manually.
 
-2. **Port Isolation**: Each project gets a 100-port block (4200-4299, 4300-4399, etc.). Port assignments are tracked in `~/.agent-farm/ports.json`.
+2. **Port Isolation**: Each project gets a 100-port block (4200-4299, 4300-4399, etc.). Port assignments are tracked in `~/.agent-farm/global.db`.
 
 3. **Worktree Integrity**: Worktrees in `.builders/` are managed by Agent Farm. Never delete them manually (use `af cleanup`).
 
@@ -699,8 +698,7 @@ const CONFIG = {
 ### External Tools (Required)
 - **git**: Version control with worktree support for isolated builder environments
 - **gh**: GitHub CLI for PR creation and management
-- **At least one AI CLI**:
-<!-- REVIEW(@architect): We need all 3. -->
+- **AI CLIs** (all three required for full functionality):
   - **claude** (Claude Code): Primary builder CLI
   - **gemini** (Gemini CLI): Consultation and review
   - **codex** (Codex CLI): Consultation and review
