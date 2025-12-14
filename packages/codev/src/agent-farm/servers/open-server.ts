@@ -3,25 +3,31 @@
 /**
  * Open server for file viewing/editing.
  * Serves the file viewer and handles file saves.
- *
- * Usage: node open-server.js <port> <filepath>
  */
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Command } from 'commander';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Parse arguments
-const args = process.argv.slice(2);
-const port = parseInt(args[0] || '8080', 10);
+// Parse arguments with Commander
+const program = new Command()
+  .name('open-server')
+  .description('File viewer/editor server for Agent Farm')
+  .argument('<port>', 'Port to listen on')
+  .argument('<filepath>', 'File path to open')
+  .parse(process.argv);
+
+const args = program.args;
+const port = parseInt(args[0], 10);
 const filePath = args[1];
 
-if (!filePath) {
-  console.error('Usage: open-server.js <port> <filepath>');
+if (isNaN(port) || port < 1 || port > 65535) {
+  console.error(`Error: Invalid port "${args[0]}". Must be a number between 1 and 65535.`);
   process.exit(1);
 }
 

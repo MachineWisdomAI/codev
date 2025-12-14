@@ -248,7 +248,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0024"
     title: "Builder Event Notifications"
     summary: "Notify builders via tmux send-keys when events occur (PR review completed, file changes, etc.)"
-    status: specified
+    status: abandoned
     priority: high
     release: null
     files:
@@ -265,7 +265,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "Use tmux send-keys to notify builders of events. Example: architect completes PR review → builder gets notified. Complements 0020 (instructions) with event-driven notifications."
+    notes: "Abandoned 2025-12-13. Manual notification via af send is sufficient."
 
 # Medium Priority
   - id: "0010"
@@ -405,7 +405,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Extend af open to display images (PNG, JPG, GIF, WebP, SVG) with zoom controls"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.3.0"
     files:
       spec: codev/specs/0053-af-open-image-support.md
       plan: codev/plans/0053-af-open-image-support.md
@@ -427,7 +427,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Comprehensive arch.md section on af internals: ports, tmux, state, worktrees, dashboard"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.2.0"
     files:
       spec: codev/specs/0052-agent-farm-internals-docs.md
       plan: null
@@ -449,7 +449,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Comprehensive cheatsheet with philosophies, concepts (protocols, roles, hierarchy), and tools reference"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.2.0"
     files:
       spec: codev/specs/0051-codev-cheatsheet.md
       plan: codev/plans/0051-codev-cheatsheet.md
@@ -471,7 +471,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "UX improvements: clickable title only for expand, show TICKs in project view, poll for projectlist.md creation"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.2.0"
     files:
       spec: codev/specs/0050-dashboard-polish.md
       plan: codev/plans/0050-dashboard-polish.md
@@ -493,7 +493,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Rename CLEANUP to MAINTAIN, expand scope to include documentation maintenance (arch.md, lessons-learned.md, CLAUDE.md/AGENTS.md sync)"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.2.0"
     files:
       spec: codev/specs/0035-maintenance-framework.md
       plan: null
@@ -582,7 +582,7 @@ Projects currently in development (conceived through committed), sorted by prior
     summary: "Cleaner dashboard UI by removing the tmux status bar from embedded terminals"
     status: integrated
     priority: low
-    release: null
+    release: "v1.2.0"
     files:
       spec: codev/specs/0012-hide-tmux-status-bar.md
       plan: codev/plans/0012-hide-tmux-status-bar.md
@@ -602,7 +602,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0017"
     title: "Platform Portability Layer"
     summary: "Implement transpilation from .codev/ source to platform-specific configs (CLAUDE.md, GEMINI.md, AGENTS.md)"
-    status: specified
+    status: abandoned
     priority: low
     release: null
     files:
@@ -619,7 +619,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implemented_at: null
       committed_at: null
       integrated_at: null
-    notes: "SPIDER protocol. HIGH COMPLEXITY WARNING: May be premature (YAGNI). One-way transpilation. Consulted GPT-5 and Gemini Pro."
+    notes: "Abandoned 2025-12-13. YAGNI - dual-writing CLAUDE.md and AGENTS.md is simpler and sufficient."
 
   - id: "0029"
     title: "Overview Dashboard"
@@ -760,9 +760,15 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v1.3.0"
+    name: "Doric"
+    status: released
+    target_date: "2025-12-13"
+    notes: "Image generation, file browser, media viewer, documentation"
+
   - version: "v1.2.0"
     name: "Cordoba"
-    status: active
+    status: released
     target_date: "2025-12-11"
     notes: "Documentation, cheatsheet, agent farm internals, codev import command"
 
@@ -1383,7 +1389,7 @@ Projects that are paused or canceled.
     summary: "CLI tool for AI image generation using Nano Banana Pro (gemini-3-pro-image-preview)"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.3.0"
     files:
       spec: codev/specs/0054-generate-image-tool.md
       plan: codev/plans/0054-generate-image-tool.md
@@ -1405,7 +1411,7 @@ Projects that are paused or canceled.
     summary: "VSCode-like file browser tab with collapsible tree and expand/collapse all controls"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.3.0"
     files:
       spec: codev/specs/0055-dashboard-file-browser.md
       plan: codev/plans/0055-dashboard-file-browser.md

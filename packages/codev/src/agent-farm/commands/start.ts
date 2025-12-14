@@ -168,6 +168,32 @@ exec ${cmd} --append-system-prompt "$(cat '${roleFile}')"
 }
 
 /**
+ * Wait for a server to respond on a given port
+ * Returns true if server responds, false if timeout
+ */
+async function waitForServer(port: number, timeoutMs: number = 5000): Promise<boolean> {
+  const startTime = Date.now();
+  const pollInterval = 100;
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const response = await fetch(`http://localhost:${port}/`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(500),
+      });
+      if (response.ok || response.status === 404) {
+        return true; // Server is responding
+      }
+    } catch {
+      // Server not ready yet, continue polling
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  }
+
+  return false;
+}
+
+/**
  * Start the dashboard HTTP server
  */
 async function startDashboard(projectRoot: string, port: number, _architectPort: number): Promise<void> {
@@ -193,11 +219,21 @@ async function startDashboard(projectRoot: string, port: number, _architectPort:
     return;
   }
 
+  logger.debug(`Starting dashboard: ${command} ${args.join(' ')}`);
+
   const serverProcess = spawnDetached(command, args, {
     cwd: projectRoot,
   });
 
   if (!serverProcess.pid) {
     logger.warn('Failed to start dashboard server');
+    return;
+  }
+
+  // Wait for server to actually be ready
+  const isReady = await waitForServer(port, 5000);
+  if (!isReady) {
+    logger.warn(`Dashboard server did not respond on port ${port} within 5 seconds`);
+    logger.warn('Check for errors above or run with DEBUG=1 for more details');
   }
 }

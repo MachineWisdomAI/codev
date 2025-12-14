@@ -37,18 +37,55 @@ export async function run(
 }
 
 /**
- * Spawn a detached process that continues after parent exits
+ * Spawn a detached process that continues after parent exits.
+ * Now always captures stderr for error reporting.
  */
 export function spawnDetached(
   command: string,
   args: string[],
   options: { cwd?: string; logFile?: string } = {}
 ): ChildProcess {
+  // Always capture stderr for error reporting, even when not logging
   const child = spawn(command, args, {
     cwd: options.cwd,
     detached: true,
-    stdio: options.logFile ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'], // Always capture stdout/stderr
   });
+
+  // Buffer stderr for error reporting (keeps last 4KB)
+  let stderrBuffer = '';
+  const maxStderrSize = 4096;
+
+  if (child.stderr) {
+    child.stderr.on('data', (data: Buffer) => {
+      stderrBuffer += data.toString();
+      if (stderrBuffer.length > maxStderrSize) {
+        stderrBuffer = stderrBuffer.slice(-maxStderrSize);
+      }
+    });
+  }
+
+  // Log early crashes to help diagnose issues
+  child.on('exit', (code, signal) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[spawnDetached] Process exited with code ${code}: ${command} ${args.join(' ')}`);
+      if (stderrBuffer) {
+        console.error(`[spawnDetached] stderr:\n${stderrBuffer.trim()}`);
+      }
+    } else if (signal) {
+      console.error(`[spawnDetached] Process killed by signal ${signal}: ${command} ${args.join(' ')}`);
+    }
+  });
+
+  child.on('error', (err: Error) => {
+    console.error(`[spawnDetached] Failed to spawn: ${command} ${args.join(' ')}`);
+    console.error(`[spawnDetached] Error: ${err.message}`);
+  });
+
+  // If stdout should be piped but not logged, just drain it
+  if (child.stdout && !options.logFile) {
+    child.stdout.on('data', () => {}); // Drain to prevent buffer filling
+  }
 
   child.unref();
   return child;

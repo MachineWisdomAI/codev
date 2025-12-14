@@ -286,43 +286,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Tower command (now also available at codev tower)
-  const towerCmd = program
-    .command('tower')
-    .description('Manage the tower dashboard');
-
-  towerCmd
-    .command('start')
-    .description('Start the tower dashboard')
-    .option('-p, --port <port>', 'Port to run on (default: 4100)')
-    .action(async (options) => {
-      const { towerStart } = await import('./commands/tower.js');
-      try {
-        await towerStart({
-          port: options.port ? parseInt(options.port, 10) : undefined,
-        });
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
-  towerCmd
-    .command('stop')
-    .description('Stop the tower dashboard')
-    .option('-p, --port <port>', 'Port to stop (default: 4100)')
-    .action(async (options) => {
-      const { towerStop } = await import('./commands/tower.js');
-      try {
-        await towerStop({
-          port: options.port ? parseInt(options.port, 10) : undefined,
-        });
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
   // Database commands
   const dbCmd = program
     .command('db')

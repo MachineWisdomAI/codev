@@ -3,8 +3,6 @@
 /**
  * Dashboard server for Agent Farm.
  * Serves the split-pane dashboard UI and provides state/tab management APIs.
- *
- * Usage: node dashboard-server.js <port>
  */
 
 import http from 'node:http';
@@ -14,6 +12,7 @@ import net from 'node:net';
 import { spawn, execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { Command } from 'commander';
 import type { DashboardState, Annotation, UtilTerminal, Builder } from '../types.js';
 import {
   loadState,
@@ -39,8 +38,25 @@ const __dirname = path.dirname(__filename);
 // Default dashboard port
 const DEFAULT_DASHBOARD_PORT = 4200;
 
-// Parse arguments (override default port if provided)
-const port = parseInt(process.argv[2] || String(DEFAULT_DASHBOARD_PORT), 10);
+// Parse arguments with Commander for proper --help and validation
+const program = new Command()
+  .name('dashboard-server')
+  .description('Dashboard server for Agent Farm')
+  .argument('[port]', 'Port to listen on', String(DEFAULT_DASHBOARD_PORT))
+  .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
+  .parse(process.argv);
+
+const opts = program.opts();
+const args = program.args;
+
+// Support both positional arg and --port flag (flag takes precedence)
+const portArg = opts.port || args[0] || String(DEFAULT_DASHBOARD_PORT);
+const port = parseInt(portArg, 10);
+
+if (isNaN(port) || port < 1 || port > 65535) {
+  console.error(`Error: Invalid port "${portArg}". Must be a number between 1 and 65535.`);
+  process.exit(1);
+}
 
 // Configuration - ports are relative to the dashboard port
 // This ensures multi-project support (e.g., dashboard on 4300 uses 4350 for annotations)

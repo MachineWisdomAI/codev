@@ -3,8 +3,6 @@
 /**
  * Tower server for Agent Farm.
  * Provides a centralized view of all agent-farm instances across projects.
- *
- * Usage: node tower-server.js <port>
  */
 
 import http from 'node:http';
@@ -14,6 +12,7 @@ import net from 'node:net';
 import { spawn, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { Command } from 'commander';
 import { getGlobalDb } from '../db/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,8 +21,23 @@ const __dirname = path.dirname(__filename);
 // Default port for tower dashboard
 const DEFAULT_PORT = 4100;
 
-// Parse arguments
-const port = parseInt(process.argv[2] || String(DEFAULT_PORT), 10);
+// Parse arguments with Commander
+const program = new Command()
+  .name('tower-server')
+  .description('Tower dashboard for Agent Farm - centralized view of all instances')
+  .argument('[port]', 'Port to listen on', String(DEFAULT_PORT))
+  .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
+  .parse(process.argv);
+
+const opts = program.opts();
+const args = program.args;
+const portArg = opts.port || args[0] || String(DEFAULT_PORT);
+const port = parseInt(portArg, 10);
+
+if (isNaN(port) || port < 1 || port > 65535) {
+  console.error(`Error: Invalid port "${portArg}". Must be a number between 1 and 65535.`);
+  process.exit(1);
+}
 
 // Interface for port registry entries (from SQLite)
 interface PortAllocation {
