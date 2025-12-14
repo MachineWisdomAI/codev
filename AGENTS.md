@@ -37,6 +37,51 @@ Codev releases are named after **great examples of architecture** from around th
 
 Future releases will continue this tradition, drawing from architectural wonders across cultures and eras.
 
+### Release Process
+
+Follow this checklist when preparing a release:
+
+1. **Pre-flight checks**
+   - Ensure all changes are committed and pushed
+   - Verify no running builders: `af status`
+   - Check projectlist for any incomplete work: `cat codev/projectlist.md | grep -E "status: (implementing|implemented|committed)"`
+
+2. **Run MAINTAIN cycle**
+   - Execute the MAINTAIN protocol to clean up code and sync docs
+   - Ensure arch.md, lessons-learned.md, and CLAUDE.md/AGENTS.md are current
+
+3. **Run all e2e tests**
+   ```bash
+   bats tests/e2e/
+   ```
+
+4. **Tag the release**
+   ```bash
+   cd packages/codev
+   npm version <major|minor|patch> --no-git-tag-version
+   git add package.json package-lock.json
+   git commit -m "Release @cluesmith/codev@X.Y.Z (Codename)"
+   git tag -a vX.Y.Z -m "vX.Y.Z Codename - Brief description"
+   git push && git push origin vX.Y.Z
+   ```
+
+5. **Create GitHub release**
+   ```bash
+   gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX.Y.Z.md
+   ```
+
+6. **Write release notes**
+   - Create `docs/releases/vX.Y.Z.md` with:
+     - Summary of changes
+     - New features (with spec IDs)
+     - Breaking changes (if any)
+     - Migration notes (if any)
+
+7. **Publish to npm**
+   ```bash
+   cd packages/codev && npm publish
+   ```
+
 ## Quick Start
 
 > **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.
