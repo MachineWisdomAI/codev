@@ -117,7 +117,29 @@ gh release create vX.Y.Z --title "vX.Y.Z Codename" --notes-file docs/releases/vX
 cd packages/codev && npm publish
 ```
 
-### 8. Update projectlist.md
+### 8. Post to Discussion Forum
+
+Announce the release in GitHub Discussions (Announcements category):
+
+```bash
+gh api graphql -f query='
+mutation {
+  createDiscussion(input: {
+    repositoryId: "R_kgDOPzIlIw",
+    categoryId: "DIC_kwDOPzIlI84CwZYV",
+    title: "vX.Y.Z Codename Released",
+    body: "<release notes content>"
+  }) {
+    discussion {
+      url
+    }
+  }
+}'
+```
+
+Include: summary, new features, breaking changes, migration notes, and install command.
+
+### 9. Update projectlist.md
 
 Update the releases section to mark the new release and assign integrated projects:
 
