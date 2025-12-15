@@ -760,6 +760,12 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
+  - version: "v1.4.0"
+    name: "Eichler"
+    status: released
+    target_date: "2025-12-15"
+    notes: "Dashboard overhaul, documentation improvements, AI-guided release process"
+
   - version: "v1.3.0"
     name: "Doric"
     status: released
@@ -1323,7 +1329,7 @@ Projects that are paused or canceled.
     summary: "Practical tips page for getting the most out of Codev and Agent Farm"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.4.0"
     files:
       spec: codev/specs/0047-tips-page.md
       plan: codev/plans/0047-tips-page.md
@@ -1433,7 +1439,7 @@ Projects that are paused or canceled.
     summary: "Move consult review types from roles/review-types/ to consult-types/ for better discoverability"
     status: integrated
     priority: medium
-    release: null
+    release: "v1.4.0"
     files:
       spec: codev/specs/0056-consult-types-refactor.md
       plan: codev/plans/0056-consult-types-refactor.md
@@ -1455,7 +1461,7 @@ Projects that are paused or canceled.
     summary: "Rename Projects tab to Dashboard, add Tabs and Files columns, replace welcome page"
     status: integrated
     priority: high
-    release: null
+    release: "v1.4.0"
     files:
       spec: codev/specs/0057-dashboard-tab-overhaul.md
       plan: codev/plans/0057-dashboard-tab-overhaul.md
