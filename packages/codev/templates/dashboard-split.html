@@ -3305,13 +3305,26 @@
       } else {
         filesTreeExpanded.add(path);
       }
-      renderFilesTabContent();
+      rerenderFilesBrowser();
+    }
+
+    // Re-render file browser in current context (dashboard or files tab)
+    function rerenderFilesBrowser() {
+      if (activeTabId === 'dashboard') {
+        // Re-render just the files column in dashboard
+        const filesListEl = document.getElementById('dashboard-files-list');
+        if (filesListEl) {
+          filesListEl.innerHTML = renderDashboardFilesBrowser();
+        }
+      } else if (activeTabId === 'files') {
+        renderFilesTabContent();
+      }
     }
 
     // Collapse all folders
     function collapseAllFolders() {
       filesTreeExpanded.clear();
-      renderFilesTabContent();
+      rerenderFilesBrowser();
     }
 
     // Expand all folders
@@ -3327,13 +3340,13 @@
         }
       }
       collectPaths(filesTreeData);
-      renderFilesTabContent();
+      rerenderFilesBrowser();
     }
 
     // Refresh files tree
     async function refreshFilesTree() {
       await loadFilesTree();
-      renderFilesTabContent();
+      rerenderFilesBrowser();
       showToast('Files refreshed', 'success');
     }
 

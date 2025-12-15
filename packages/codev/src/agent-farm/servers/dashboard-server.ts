@@ -891,6 +891,18 @@ const server = http.createServer(async (req, res) => {
             gitCmd = `git worktree add "${worktreePath}" --detach`;
           }
           execSync(gitCmd, { cwd: projectRoot, stdio: 'pipe' });
+
+          // Symlink .env from project root into worktree (if it exists)
+          const rootEnvPath = path.join(projectRoot, '.env');
+          const worktreeEnvPath = path.join(worktreePath, '.env');
+          if (fs.existsSync(rootEnvPath) && !fs.existsSync(worktreeEnvPath)) {
+            try {
+              fs.symlinkSync(rootEnvPath, worktreeEnvPath);
+            } catch {
+              // Non-fatal: continue without .env symlink
+            }
+          }
+
           cwd = worktreePath;
         } catch (gitError: unknown) {
           const errorMsg = gitError instanceof Error
@@ -945,6 +957,7 @@ const server = http.createServer(async (req, res) => {
           port: candidatePort,
           pid: spawnedPid,
           tmuxSession: sessionName,
+          worktreePath: worktreePath, // Track for cleanup on tab close
         };
 
         if (tryAddUtil(util)) {
@@ -1005,6 +1018,20 @@ const server = http.createServer(async (req, res) => {
         const util = tabUtils.find((u) => u.id === utilId);
         if (util) {
           await killProcessGracefully(util.pid, util.tmuxSession);
+
+          // Clean up worktree if this was a worktree shell
+          if (util.worktreePath && fs.existsSync(util.worktreePath)) {
+            try {
+              execSync(`git worktree remove "${util.worktreePath}" --force`, {
+                cwd: projectRoot,
+                stdio: 'pipe',
+              });
+            } catch {
+              // Non-fatal: worktree may have uncommitted changes
+              // User can manually clean up with `git worktree prune`
+            }
+          }
+
           removeUtil(utilId);
           found = true;
         }
