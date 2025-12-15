@@ -1018,20 +1018,8 @@ const server = http.createServer(async (req, res) => {
         const util = tabUtils.find((u) => u.id === utilId);
         if (util) {
           await killProcessGracefully(util.pid, util.tmuxSession);
-
-          // Clean up worktree if this was a worktree shell
-          if (util.worktreePath && fs.existsSync(util.worktreePath)) {
-            try {
-              execSync(`git worktree remove "${util.worktreePath}" --force`, {
-                cwd: projectRoot,
-                stdio: 'pipe',
-              });
-            } catch {
-              // Non-fatal: worktree may have uncommitted changes
-              // User can manually clean up with `git worktree prune`
-            }
-          }
-
+          // Note: worktrees are NOT cleaned up on tab close - they may contain useful context
+          // Users can manually clean up with `git worktree list` and `git worktree remove`
           removeUtil(utilId);
           found = true;
         }
