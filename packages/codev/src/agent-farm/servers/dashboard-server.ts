@@ -725,7 +725,9 @@ function getModifiedFiles(projectRoot: string): string[] {
  */
 function getGitHubPRs(projectRoot: string): PullRequest[] {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // Use local time for the date (spec says "today" means local machine time)
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const output = execSync(
       `gh pr list --author "@me" --state all --search "created:>=${today}" --json number,title,state,url`,
       { cwd: projectRoot, encoding: 'utf-8', timeout: 10000 }
@@ -749,22 +751,19 @@ function getGitHubPRs(projectRoot: string): PullRequest[] {
 
 /**
  * Get builder activity from state.db for today
+ * Note: state.json doesn't track timestamps, so we can only report current builders
+ * without duration. They'll be counted as activity points, not time intervals.
  */
 function getBuilderActivity(): BuilderActivity[] {
   try {
-    const midnight = new Date();
-    midnight.setHours(0, 0, 0, 0);
-    const midnightISO = midnight.toISOString();
-
     const builders = getBuilders();
 
-    // Filter to builders active today (created or updated since midnight)
-    // Note: Builder objects don't have created_at/updated_at timestamps in state.json
-    // So we return all current builders as "today's activity"
+    // Return current builders without time tracking (state.json lacks timestamps)
+    // Time tracking will rely primarily on git commits
     return builders.map(b => ({
       id: b.id,
       status: b.status || 'unknown',
-      startTime: midnightISO, // Approximate - state.json doesn't track this
+      startTime: '', // Unknown - not tracked in state.json
       endTime: undefined,
     }));
   } catch (err) {
