@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
+import { version } from '../version.js';
 
 /**
  * Run agent-farm CLI with given arguments
@@ -19,7 +20,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   program
     .name('af')
     .description('Agent Farm - Multi-agent orchestration for software development')
-    .version('1.0.0');
+    .version(version);
 
   // Global options for command overrides
   program

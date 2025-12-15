@@ -199,6 +199,78 @@
       outline: none;
     }
 
+    /* Search bar */
+    .search-bar {
+      display: none;
+      position: fixed;
+      top: 10px;
+      right: 20px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 8px 12px;
+      z-index: 250;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .search-bar.active {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .search-bar input {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #fff;
+      padding: 6px 10px;
+      font-size: 14px;
+      width: 250px;
+      outline: none;
+    }
+    .search-bar input:focus {
+      border-color: #3b82f6;
+    }
+    .search-bar .search-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .search-bar .search-nav button {
+      background: #444;
+      border: none;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .search-bar .search-nav button:hover {
+      background: #555;
+    }
+    .search-bar .search-count {
+      color: #888;
+      font-size: 12px;
+      min-width: 60px;
+    }
+    .search-bar .search-close {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 0 4px;
+    }
+    .search-bar .search-close:hover {
+      color: #fff;
+    }
+    .search-highlight {
+      background: rgba(250, 204, 21, 0.4);
+      border-radius: 2px;
+    }
+    .search-highlight.current {
+      background: rgba(59, 130, 246, 0.6);
+    }
+
     /* Notification toast */
     .notification {
       position: fixed;
@@ -400,6 +472,17 @@
 
   <!-- Editor mode -->
   <textarea id="editor" spellcheck="false"></textarea>
+
+  <!-- Search Bar -->
+  <div class="search-bar" id="searchBar">
+    <input type="text" id="searchInput" placeholder="Search..." autocomplete="off" />
+    <div class="search-nav">
+      <span class="search-count" id="searchCount"></span>
+      <button onclick="searchPrev()" title="Previous (Shift+Enter)">↑</button>
+      <button onclick="searchNext()" title="Next (Enter)">↓</button>
+    </div>
+    <button class="search-close" onclick="closeSearch()" title="Close (Esc)">×</button>
+  </div>
 
   <!-- Comment Dialog -->
   <div class="overlay" id="overlay">
@@ -1374,6 +1457,201 @@
         }
       } else {
         consecutiveEnters = 0;
+      }
+    });
+
+    // ==================== Search Functions ====================
+
+    let searchMatches = [];
+    let currentMatchIndex = -1;
+    let searchActive = false;
+
+    function openSearch() {
+      const searchBar = document.getElementById('searchBar');
+      const searchInput = document.getElementById('searchInput');
+      searchBar.classList.add('active');
+      searchInput.focus();
+      searchInput.select();
+      searchActive = true;
+    }
+
+    function closeSearch() {
+      const searchBar = document.getElementById('searchBar');
+      searchBar.classList.remove('active');
+      clearSearchHighlights();
+      searchMatches = [];
+      currentMatchIndex = -1;
+      searchActive = false;
+      document.getElementById('searchCount').textContent = '';
+    }
+
+    function clearSearchHighlights() {
+      document.querySelectorAll('.search-highlight').forEach(el => {
+        const parent = el.parentNode;
+        parent.replaceChild(document.createTextNode(el.textContent), el);
+        parent.normalize();
+      });
+    }
+
+    function performSearch(query) {
+      clearSearchHighlights();
+      searchMatches = [];
+      currentMatchIndex = -1;
+
+      if (!query) {
+        document.getElementById('searchCount').textContent = '';
+        return;
+      }
+
+      const viewMode = document.getElementById('viewMode');
+      const codeLines = viewMode.querySelectorAll('.code-line');
+      const queryLower = query.toLowerCase();
+
+      codeLines.forEach((codeLine, lineIndex) => {
+        const walker = document.createTreeWalker(codeLine, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        while (walker.nextNode()) {
+          textNodes.push(walker.currentNode);
+        }
+
+        textNodes.forEach(textNode => {
+          const text = textNode.textContent;
+          const textLower = text.toLowerCase();
+          let startIndex = 0;
+          let index;
+
+          while ((index = textLower.indexOf(queryLower, startIndex)) !== -1) {
+            searchMatches.push({
+              node: textNode,
+              index: index,
+              length: query.length,
+              lineIndex: lineIndex
+            });
+            startIndex = index + 1;
+          }
+        });
+      });
+
+      // Highlight matches (in reverse to preserve indices)
+      const processedNodes = new Set();
+      searchMatches.slice().reverse().forEach((match, reverseIdx) => {
+        const idx = searchMatches.length - 1 - reverseIdx;
+        if (processedNodes.has(match.node)) return;
+
+        const text = match.node.textContent;
+        const parent = match.node.parentNode;
+
+        // Find all matches in this node
+        const nodeMatches = searchMatches.filter(m => m.node === match.node);
+        processedNodes.add(match.node);
+
+        // Build new content with highlights
+        let lastEnd = 0;
+        const fragment = document.createDocumentFragment();
+
+        nodeMatches.forEach((m, i) => {
+          // Text before match
+          if (m.index > lastEnd) {
+            fragment.appendChild(document.createTextNode(text.substring(lastEnd, m.index)));
+          }
+          // Highlighted match
+          const span = document.createElement('span');
+          span.className = 'search-highlight';
+          span.textContent = text.substring(m.index, m.index + m.length);
+          span.dataset.matchIndex = searchMatches.indexOf(m);
+          fragment.appendChild(span);
+          lastEnd = m.index + m.length;
+        });
+
+        // Text after last match
+        if (lastEnd < text.length) {
+          fragment.appendChild(document.createTextNode(text.substring(lastEnd)));
+        }
+
+        parent.replaceChild(fragment, match.node);
+      });
+
+      updateSearchCount();
+
+      // Jump to first match
+      if (searchMatches.length > 0) {
+        currentMatchIndex = 0;
+        highlightCurrentMatch();
+      }
+    }
+
+    function updateSearchCount() {
+      const countEl = document.getElementById('searchCount');
+      if (searchMatches.length === 0) {
+        countEl.textContent = 'No results';
+      } else {
+        countEl.textContent = `${currentMatchIndex + 1} of ${searchMatches.length}`;
+      }
+    }
+
+    function highlightCurrentMatch() {
+      // Remove current class from all
+      document.querySelectorAll('.search-highlight.current').forEach(el => {
+        el.classList.remove('current');
+      });
+
+      // Add current class to current match
+      const currentHighlight = document.querySelector(`.search-highlight[data-match-index="${currentMatchIndex}"]`);
+      if (currentHighlight) {
+        currentHighlight.classList.add('current');
+        currentHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      updateSearchCount();
+    }
+
+    function searchNext() {
+      if (searchMatches.length === 0) return;
+      currentMatchIndex = (currentMatchIndex + 1) % searchMatches.length;
+      highlightCurrentMatch();
+    }
+
+    function searchPrev() {
+      if (searchMatches.length === 0) return;
+      currentMatchIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+      highlightCurrentMatch();
+    }
+
+    // Search input handlers
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      performSearch(e.target.value);
+    });
+
+    document.getElementById('searchInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          searchPrev();
+        } else {
+          searchNext();
+        }
+      } else if (e.key === 'Escape') {
+        closeSearch();
+      }
+    });
+
+    // Cmd/Ctrl+F to open search, Cmd/Ctrl+G for next match
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        openSearch();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+        e.preventDefault();
+        if (searchActive) {
+          if (e.shiftKey) {
+            searchPrev();
+          } else {
+            searchNext();
+          }
+        } else {
+          openSearch();
+        }
       }
     });
 
