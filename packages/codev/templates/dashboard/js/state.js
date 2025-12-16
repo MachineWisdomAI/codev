@@ -85,6 +85,7 @@ let pollInterval = null;
 let starterModePollingInterval = null;
 
 // Hot reload state (Spec 0060)
-let hotReloadEnabled = true;  // Enable by default for development
+// Hot reload only activates in dev mode (localhost or ?dev=1 query param)
+let hotReloadEnabled = true;
 let hotReloadInterval = null;
 let hotReloadMtimes = {};  // Track file modification times
