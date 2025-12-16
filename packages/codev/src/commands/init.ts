@@ -149,6 +149,15 @@ projects:
   console.log(chalk.green('  +'), 'codev/projectlist.md');
   fileCount++;
 
+  // Create projectlist-archive.md from skeleton template
+  const projectlistArchivePath = path.join(targetDir, 'codev', 'projectlist-archive.md');
+  const projectlistArchiveTemplatePath = path.join(skeletonDir, 'templates', 'projectlist-archive.md');
+  if (fs.existsSync(projectlistArchiveTemplatePath)) {
+    fs.copyFileSync(projectlistArchiveTemplatePath, projectlistArchivePath);
+    console.log(chalk.green('  +'), 'codev/projectlist-archive.md');
+    fileCount++;
+  }
+
   // Create resources directory and copy templates
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   if (!fs.existsSync(resourcesDir)) {

@@ -166,6 +166,17 @@ projects:
     fileCount++;
   }
 
+  // Create projectlist-archive.md from skeleton template if it doesn't exist
+  const projectlistArchivePath = path.join(targetDir, 'codev', 'projectlist-archive.md');
+  if (!fs.existsSync(projectlistArchivePath)) {
+    const projectlistArchiveTemplatePath = path.join(skeletonDir, 'templates', 'projectlist-archive.md');
+    if (fs.existsSync(projectlistArchiveTemplatePath)) {
+      fs.copyFileSync(projectlistArchiveTemplatePath, projectlistArchivePath);
+      console.log(chalk.green('  +'), 'codev/projectlist-archive.md');
+      fileCount++;
+    }
+  }
+
   // Create resources directory and copy templates if they don't exist
   const resourcesDir = path.join(targetDir, 'codev', 'resources');
   if (!fs.existsSync(resourcesDir)) {
