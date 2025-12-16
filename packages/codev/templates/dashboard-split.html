@@ -1895,8 +1895,9 @@
         // Check if file is already open
         const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
         if (existingTab) {
-          // Just switch to the existing tab
+          // Switch to the existing tab and refresh content
           selectTab(existingTab.id);
+          refreshFileTab(existingTab.id); // Refresh content in case file changed
           showToast(`Switched to ${getFileName(filePath)}`, 'success');
           // TODO: scroll to line if lineNumber provided
           return;
@@ -2218,6 +2219,22 @@
         currentTabPort = tab.port;
         currentTabType = tab.type;
         content.innerHTML = `<iframe src="http://localhost:${tab.port}" title="${tab.name}" allow="clipboard-read; clipboard-write"></iframe>`;
+      }
+    }
+
+    // Force refresh the iframe for a file tab (reloads content from server)
+    function refreshFileTab(tabId) {
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab || tab.type !== 'file' || !tab.port) return;
+
+      // If this tab is currently active, force iframe reload
+      if (activeTabId === tabId) {
+        const content = document.getElementById('tab-content');
+        const iframe = content.querySelector('iframe');
+        if (iframe) {
+          // Add cache-busting query param to force reload
+          iframe.src = `http://localhost:${tab.port}?t=${Date.now()}`;
+        }
       }
     }
 
@@ -3697,6 +3714,7 @@
       const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
       if (existingTab) {
         selectTab(existingTab.id);
+        refreshFileTab(existingTab.id); // Refresh content in case file changed
       } else {
         openFileFromTree(filePath);
       }
@@ -3855,6 +3873,7 @@
         const existingTab = tabs.find(t => t.type === 'file' && t.path === filePath);
         if (existingTab) {
           selectTab(existingTab.id);
+          refreshFileTab(existingTab.id); // Refresh content in case file changed
           return;
         }
 
