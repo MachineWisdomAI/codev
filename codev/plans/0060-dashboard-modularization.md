@@ -294,9 +294,127 @@ Modify `findTemplatePath()` or the dashboard serving logic to:
 
 Keep `dashboard-split.html` during transition. Can be removed after validation.
 
-## Phase 6: Testing and Validation
+## Phase 6: Hot Reloading
 
-### 6.1 Functional testing
+### 6.1 Add file watcher to server
+
+**File:** `packages/codev/src/agent-farm/servers/dashboard-server.ts`
+
+```typescript
+import { watch } from 'fs';
+
+// Watch dashboard directory for changes
+const dashboardDir = path.join(__dirname, '../../../templates/dashboard');
+const watchers: fs.FSWatcher[] = [];
+
+function setupFileWatcher() {
+  const watchDirs = ['css', 'js'].map(d => path.join(dashboardDir, d));
+
+  for (const dir of watchDirs) {
+    if (fs.existsSync(dir)) {
+      const watcher = watch(dir, (event, filename) => {
+        if (filename && (filename.endsWith('.css') || filename.endsWith('.js'))) {
+          broadcastFileChange(filename);
+        }
+      });
+      watchers.push(watcher);
+    }
+  }
+}
+```
+
+### 6.2 Add SSE endpoint for file changes
+
+```typescript
+// Track connected clients
+const sseClients: http.ServerResponse[] = [];
+
+// SSE endpoint
+if (req.method === 'GET' && url.pathname === '/api/dashboard-changes') {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  sseClients.push(res);
+  req.on('close', () => {
+    const idx = sseClients.indexOf(res);
+    if (idx >= 0) sseClients.splice(idx, 1);
+  });
+  return;
+}
+
+function broadcastFileChange(filename: string) {
+  const type = filename.endsWith('.css') ? 'css' : 'js';
+  const data = JSON.stringify({ type, filename });
+  for (const client of sseClients) {
+    client.write(`data: ${data}\n\n`);
+  }
+}
+```
+
+### 6.3 Add hot reload client code
+
+**File:** `packages/codev/templates/dashboard/js/hot-reload.js`
+
+```javascript
+// Connect to SSE for file changes
+function setupHotReload() {
+  const evtSource = new EventSource('/api/dashboard-changes');
+
+  evtSource.onmessage = (event) => {
+    const { type, filename } = JSON.parse(event.data);
+
+    if (type === 'css') {
+      // Hot swap CSS without page reload
+      const link = document.querySelector(`link[href*="${filename}"]`);
+      if (link) {
+        link.href = link.href.split('?')[0] + '?t=' + Date.now();
+        console.log(`[hot-reload] CSS updated: ${filename}`);
+      }
+    } else if (type === 'js') {
+      // Save state and reload
+      saveStateForReload();
+      location.reload();
+    }
+  };
+}
+
+function saveStateForReload() {
+  sessionStorage.setItem('hotReloadState', JSON.stringify({
+    activeTabId,
+    sectionState,
+    scrollTop: document.querySelector('.tab-content')?.scrollTop || 0,
+  }));
+}
+
+function restoreStateAfterReload() {
+  const saved = sessionStorage.getItem('hotReloadState');
+  if (saved) {
+    sessionStorage.removeItem('hotReloadState');
+    const state = JSON.parse(saved);
+    activeTabId = state.activeTabId;
+    sectionState = state.sectionState;
+    // Restore scroll after render
+    requestAnimationFrame(() => {
+      const content = document.querySelector('.tab-content');
+      if (content) content.scrollTop = state.scrollTop;
+    });
+  }
+}
+```
+
+### 6.4 Add to init.js
+
+```javascript
+// In init()
+setupHotReload();
+restoreStateAfterReload();
+```
+
+## Phase 7: Testing and Validation
+
+### 7.1 Functional testing
 - [ ] Dashboard loads without errors
 - [ ] All tabs work (Dashboard, Files, builders, shells)
 - [ ] Cmd+P palette opens and works
@@ -308,22 +426,28 @@ Keep `dashboard-split.html` during transition. Can be removed after validation.
 - [ ] Builder/shell spawning works
 - [ ] State persists across refreshes
 
-### 6.2 Cross-browser testing
+### 7.2 Cross-browser testing
 - [ ] Chrome
 - [ ] Safari
 - [ ] Firefox
 
-### 6.3 Performance check
+### 7.3 Performance check
 - [ ] No FOUC (flash of unstyled content)
 - [ ] JS loads in correct order
 - [ ] No console errors
 
-## Phase 7: Cleanup
+### 7.4 Hot reload testing
+- [ ] CSS change triggers instant update (no page reload)
+- [ ] JS change triggers reload with state preserved
+- [ ] Active tab restored after JS reload
+- [ ] Scroll position restored after JS reload
 
-### 7.1 Remove old file
+## Phase 8: Cleanup
+
+### 8.1 Remove old file
 After validation, delete `dashboard-split.html`.
 
-### 7.2 Update copy-skeleton
+### 8.2 Update copy-skeleton
 Ensure the new `dashboard/` directory is included in skeleton copying.
 
 ## Estimated Effort
@@ -335,9 +459,10 @@ Ensure the new `dashboard/` directory is included in skeleton copying.
 | Phase 3: Extract JS | 2 hours |
 | Phase 4: Create index.html | 30 min |
 | Phase 5: Update server | 30 min |
-| Phase 6: Testing | 1 hour |
-| Phase 7: Cleanup | 15 min |
-| **Total** | **~6 hours** |
+| Phase 6: Hot reloading | 1 hour |
+| Phase 7: Testing | 1 hour |
+| Phase 8: Cleanup | 15 min |
+| **Total** | **~7 hours** |
 
 ## File Checklist
 
@@ -352,7 +477,7 @@ Ensure the new `dashboard/` directory is included in skeleton copying.
 - [ ] files.css
 - [ ] utilities.css
 
-### JS Files (13)
+### JS Files (14)
 - [ ] utils.js
 - [ ] state.js
 - [ ] dialogs.js
@@ -365,9 +490,12 @@ Ensure the new `dashboard/` directory is included in skeleton copying.
 - [ ] activity.js
 - [ ] spawn.js
 - [ ] broadcast.js
+- [ ] hot-reload.js
 - [ ] init.js
 
 ### Other
 - [ ] index.html
 - [ ] Server routes updated
+- [ ] SSE endpoint added
+- [ ] File watcher added
 - [ ] Old file removed

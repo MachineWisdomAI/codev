@@ -106,6 +106,45 @@ init.js           # All above (initialization)
 
 Files are loaded in order via `<script>` tags (no module system needed).
 
+## Hot Reloading
+
+Automatic browser refresh when CSS/JS files change during development.
+
+### How It Works
+
+1. **File watcher**: Server watches `templates/dashboard/` for changes
+2. **SSE endpoint**: `/api/dashboard-changes` sends events when files change
+3. **Browser listener**: Connects to SSE, reloads appropriate files
+
+### CSS Hot Reload (no page refresh)
+
+```javascript
+// On CSS file change, just swap the stylesheet
+const link = document.querySelector(`link[href*="${filename}"]`);
+link.href = link.href.split('?')[0] + '?t=' + Date.now();
+```
+
+No page refresh needed - avoids "Reload site?" warning from terminal iframes.
+
+### JS Hot Reload (soft refresh)
+
+For JS changes, we need to reload but preserve state:
+
+1. Save state to `sessionStorage` before reload
+2. Reload page
+3. Restore state from `sessionStorage` on init
+
+This preserves: active tab, expanded sections, scroll positions.
+
+### Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| State loss on JS reload | Persist to sessionStorage, restore on init |
+| Race conditions during reload | Only reload when idle (no pending fetches) |
+| Memory leaks from old listeners | Full page reload for JS clears everything |
+| Terminal iframe disruption | Iframes survive CSS reload; JS reload reconnects |
+
 ## Acceptance Criteria
 
 1. Dashboard functions identically after refactoring
@@ -114,7 +153,9 @@ Files are loaded in order via `<script>` tags (no module system needed).
 4. Each JS file < 400 lines
 5. Clear separation of concerns between modules
 6. Browser DevTools show separate files for debugging
-7. All existing functionality preserved:
+7. CSS changes hot reload without page refresh
+8. JS changes trigger soft refresh with state preservation
+9. All existing functionality preserved:
    - Tab management
    - Projects tab
    - Files tree and search
@@ -154,4 +195,3 @@ Files are loaded in order via `<script>` tags (no module system needed).
 - Convert JS to TypeScript modules
 - Add ES modules with import/export
 - Consider CSS custom properties consolidation
-- Add hot reloading for development
