@@ -241,14 +241,11 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log(chalk.cyan('  Launching Claude to merge conflicts...'));
     console.log(chalk.cyan('═══════════════════════════════════════════════════════════'));
     console.log('');
-    console.log(chalk.bold('Tell Claude:'));
-    console.log('');
-    console.log(chalk.white(`  Merge ${result.rootConflicts.join(' and ')} from the .codev-new versions.`));
-    console.log(chalk.white('  Add new sections, preserve my customizations, then delete the .codev-new files.'));
-    console.log('');
 
-    // Spawn Claude fully interactive
-    const claude = spawn('claude', [], {
+    const mergePrompt = `Merge ${result.rootConflicts.join(' and ')} from the .codev-new versions. Add new sections from the .codev-new files, preserve my customizations, then delete the .codev-new files when done.`;
+
+    // Spawn Claude interactively with merge instructions as initial prompt
+    const claude = spawn('claude', [mergePrompt], {
       stdio: 'inherit',
       cwd: targetDir,
     });
