@@ -298,13 +298,59 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Now start using codev af (avoids npx caching issues)
+    // Capture output to detect errors
     const child = spawn('codev', ['af', 'start'], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       cwd: projectPath,
     });
-    child.unref();
 
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (data) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    // Wait a moment for the process to start (or fail)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Check if the dashboard port is listening
+    // Resolve symlinks (macOS /tmp -> /private/tmp)
+    const resolvedPath = fs.realpathSync(projectPath);
+    const db = getGlobalDb();
+    const allocation = db
+      .prepare('SELECT base_port FROM port_allocations WHERE project_path = ? OR project_path = ?')
+      .get(projectPath, resolvedPath) as { base_port: number } | undefined;
+
+    if (allocation) {
+      const dashboardPort = allocation.base_port;
+      const isRunning = await isPortListening(dashboardPort);
+
+      if (!isRunning) {
+        // Process failed to start - try to get error info
+        const errorInfo = stderr || stdout || 'Unknown error - check codev installation';
+        child.unref();
+        return {
+          success: false,
+          error: `Failed to start: ${errorInfo.trim().split('\n')[0]}`,
+        };
+      }
+    } else {
+      // No allocation found - process might have failed before registering
+      if (stderr || stdout) {
+        const errorInfo = stderr || stdout;
+        child.unref();
+        return {
+          success: false,
+          error: `Failed to start: ${errorInfo.trim().split('\n')[0]}`,
+        };
+      }
+    }
+
+    child.unref();
     return { success: true, adopted };
   } catch (err) {
     return { success: false, error: `Failed to launch: ${(err as Error).message}` };
