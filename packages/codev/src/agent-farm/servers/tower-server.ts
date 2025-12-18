@@ -275,49 +275,34 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     }
   }
 
-  // Determine which agent-farm CLI to use:
-  // 1. Local install: codev/bin/agent-farm (if exists)
-  // 2. Global: npx agent-farm (fallback)
-  const localScript = path.join(projectPath, 'codev', 'bin', 'agent-farm');
-  const useLocal = fs.existsSync(localScript);
+  // Use codev af command (avoids npx cache issues)
+  // Falls back to npx codev af if codev not in PATH
 
   // SECURITY: Use spawn with cwd option to avoid command injection
   // Do NOT use bash -c with string concatenation
   try {
     // First, stop any existing (possibly stale) instance
-    if (useLocal) {
-      const stopChild = spawn(localScript, ['stop'], {
-        cwd: projectPath,
-        stdio: 'ignore',
-      });
-      // Wait for stop to complete
-      await new Promise<void>((resolve) => {
-        stopChild.on('close', () => resolve());
-        stopChild.on('error', () => resolve());
-        // Timeout after 3 seconds
-        setTimeout(() => resolve(), 3000);
-      });
-    }
+    const stopChild = spawn('codev', ['af', 'stop'], {
+      cwd: projectPath,
+      stdio: 'ignore',
+    });
+    // Wait for stop to complete
+    await new Promise<void>((resolve) => {
+      stopChild.on('close', () => resolve());
+      stopChild.on('error', () => resolve());
+      // Timeout after 3 seconds
+      setTimeout(() => resolve(), 3000);
+    });
 
     // Small delay to ensure cleanup
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Now start
-    let child;
-    if (useLocal) {
-      child = spawn(localScript, ['start'], {
-        detached: true,
-        stdio: 'ignore',
-        cwd: projectPath,
-      });
-    } else {
-      // Use npx to run global agent-farm
-      child = spawn('npx', ['agent-farm', 'start'], {
-        detached: true,
-        stdio: 'ignore',
-        cwd: projectPath,
-      });
-    }
+    // Now start using codev af (avoids npx caching issues)
+    const child = spawn('codev', ['af', 'start'], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: projectPath,
+    });
     child.unref();
 
     return { success: true, adopted };
