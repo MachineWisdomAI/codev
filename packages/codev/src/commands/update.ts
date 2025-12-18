@@ -4,6 +4,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import {
   getTemplatesDir,
@@ -25,6 +26,7 @@ interface UpdateResult {
   skipped: string[];
   conflicts: string[];
   newFiles: string[];
+  rootConflicts: string[]; // CLAUDE.md, AGENTS.md conflicts
 }
 
 /**
@@ -57,6 +59,7 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     skipped: [],
     conflicts: [],
     newFiles: [],
+    rootConflicts: [],
   };
 
   for (const relativePath of templateFiles) {
@@ -137,6 +140,63 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     saveHashStore(targetDir, newHashes);
   }
 
+  // Handle root-level files (CLAUDE.md, AGENTS.md)
+  const rootFiles = ['CLAUDE.md', 'AGENTS.md'];
+  const skeletonTemplatesDir = path.join(templatesDir, 'templates');
+
+  for (const fileName of rootFiles) {
+    const srcPath = path.join(skeletonTemplatesDir, fileName);
+    const destPath = path.join(targetDir, fileName);
+
+    // Skip if source doesn't exist
+    if (!fs.existsSync(srcPath)) {
+      continue;
+    }
+
+    // New file - copy it (replacing {{PROJECT_NAME}} placeholder)
+    if (!fs.existsSync(destPath)) {
+      if (!dryRun) {
+        const projectName = path.basename(targetDir);
+        let content = fs.readFileSync(srcPath, 'utf-8');
+        content = content.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+        fs.writeFileSync(destPath, content);
+      }
+      result.newFiles.push(fileName);
+      console.log(chalk.green('  + (new)'), fileName);
+      continue;
+    }
+
+    // File exists - check if template has changed
+    const currentContent = fs.readFileSync(destPath, 'utf-8');
+    const projectName = path.basename(targetDir);
+    let templateContent = fs.readFileSync(srcPath, 'utf-8');
+    templateContent = templateContent.replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+
+    // If content is identical, skip
+    if (currentContent === templateContent) {
+      result.skipped.push(fileName);
+      continue;
+    }
+
+    // If force mode, overwrite
+    if (force) {
+      if (!dryRun) {
+        fs.writeFileSync(destPath, templateContent);
+      }
+      result.updated.push(fileName);
+      console.log(chalk.blue('  ~ (force)'), fileName);
+      continue;
+    }
+
+    // Content differs - save as .codev-new for merge
+    if (!dryRun) {
+      fs.writeFileSync(destPath + '.codev-new', templateContent);
+    }
+    result.rootConflicts.push(fileName);
+    console.log(chalk.yellow('  ! (conflict)'), fileName);
+    console.log(chalk.dim('    New version saved as:'), `${fileName}.codev-new`);
+  }
+
   // Summary
   console.log('');
   console.log(chalk.bold('Summary:'));
@@ -164,12 +224,48 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log('Please review and merge manually, then delete the .codev-new files.');
   }
 
-  if (result.newFiles.length === 0 && result.updated.length === 0 && result.conflicts.length === 0) {
+  if (result.newFiles.length === 0 && result.updated.length === 0 && result.conflicts.length === 0 && result.rootConflicts.length === 0) {
     console.log(chalk.dim('  No updates available - already up to date!'));
   }
 
   if (dryRun) {
     console.log('');
     console.log(chalk.yellow('Dry run complete. Run without --dry-run to apply changes.'));
+    return;
+  }
+
+  // If there are root conflicts (CLAUDE.md, AGENTS.md), spawn Claude to merge
+  if (result.rootConflicts.length > 0) {
+    console.log('');
+    console.log(chalk.cyan('Launching Claude to merge conflicts...'));
+    console.log('');
+
+    const mergeInstructions = `You need to merge updates into the following files:
+
+${result.rootConflicts.map(f => `- ${f} (new version in ${f}.codev-new)`).join('\n')}
+
+For each file:
+1. Read the current file and the .codev-new version
+2. Merge the new sections (like "CLI Commands" and "Configuration") into the existing file
+3. Preserve any user customizations
+4. Delete the .codev-new file after successful merge
+5. Report what you merged
+
+Focus on adding new sections that don't exist in the current file, and updating sections that have changed.`;
+
+    // Spawn Claude interactively (no --print so it can use tools)
+    const claude = spawn('claude', ['-p', mergeInstructions], {
+      stdio: 'inherit',
+      cwd: targetDir,
+    });
+
+    claude.on('error', (err) => {
+      console.error(chalk.red('Failed to launch Claude:'), err.message);
+      console.log('');
+      console.log('Please merge the conflicts manually:');
+      for (const file of result.rootConflicts) {
+        console.log(chalk.dim(`  ${file} ← ${file}.codev-new`));
+      }
+    });
   }
 }
