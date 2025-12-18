@@ -44,6 +44,34 @@ Commit messages format:
 [Spec 0001][Phase: implement] feat: Add feature
 ```
 
+## CLI Commands
+
+Codev provides three CLI tools:
+
+- **codev**: Project management (init, adopt, update, doctor)
+- **af**: Agent Farm orchestration (start, spawn, status, cleanup)
+- **consult**: AI consultation for reviews (pr, spec, plan)
+
+For complete reference, see `codev/resources/commands/`:
+- `codev/resources/commands/overview.md` - Quick start
+- `codev/resources/commands/codev.md` - Project commands
+- `codev/resources/commands/agent-farm.md` - Agent Farm commands
+- `codev/resources/commands/consult.md` - Consultation commands
+
+## Configuration
+
+Customize Agent Farm behavior in `codev/config.json`:
+
+```json
+{
+  "shell": {
+    "architect": "claude",
+    "builder": "claude",
+    "shell": "bash"
+  }
+}
+```
+
 ## For More Info
 
 Read the full protocol documentation in `codev/protocols/`.

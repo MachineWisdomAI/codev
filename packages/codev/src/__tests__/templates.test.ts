@@ -112,6 +112,9 @@ describe('template utilities', () => {
       expect(isUserDataPath('protocols/spider/protocol.md')).toBe(false);
       expect(isUserDataPath('roles/architect.md')).toBe(false);
       expect(isUserDataPath('agents/builder.md')).toBe(false);
+      expect(isUserDataPath('resources/commands/codev.md')).toBe(false);
+      expect(isUserDataPath('resources/workflow-reference.md')).toBe(false);
+      expect(isUserDataPath('config.json')).toBe(false);
     });
   });
 
@@ -126,7 +129,16 @@ describe('template utilities', () => {
 
     it('should not match non-updatable files', () => {
       expect(isUpdatableFile('specs/0001-feature.md')).toBe(false);
-      expect(isUpdatableFile('config.json')).toBe(false);
+      expect(isUpdatableFile('plans/0001-feature.md')).toBe(false);
+    });
+
+    it('should match config.json as updatable', () => {
+      expect(isUpdatableFile('config.json')).toBe(true);
+    });
+
+    it('should match resources/commands as updatable', () => {
+      expect(isUpdatableFile('resources/commands/codev.md')).toBe(true);
+      expect(isUpdatableFile('resources/workflow-reference.md')).toBe(true);
     });
   });
 

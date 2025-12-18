@@ -80,7 +80,8 @@ export const USER_DATA_PATTERNS = [
   'specs/',
   'plans/',
   'reviews/',
-  'resources/',
+  'resources/arch.md',
+  'resources/lessons-learned.md',
   '.update-hashes.json',
 ];
 
@@ -238,6 +239,9 @@ export const UPDATABLE_PREFIXES = [
   'agents/',
   'bin/',
   'templates/',
+  'resources/commands/',
+  'resources/workflow-reference.md',
+  'config.json',
 ];
 
 /**
