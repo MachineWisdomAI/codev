@@ -230,6 +230,21 @@ The Architect monitors progress and provides guidance when the builder is blocke
 
 **Spikes are short, focused experiments that validate technical assumptions before full implementation.**
 
+### What is a Spike?
+
+The term comes from Extreme Programming (XP), coined in the late 1990s. The metaphor: a spike is like driving a railroad spike through all layers of a problem to see what's underneath. You're not building the whole foundation - you're just poking through to answer a specific question.
+
+**Key characteristics:**
+- **Time-boxed** - Has a hard stop, not open-ended research
+- **Throwaway** - The code is discarded; only the knowledge is kept
+- **Focused** - Answers ONE specific question
+- **Reduces risk** - Done before committing to full implementation
+
+| Type | Question |
+|------|----------|
+| Spike | "Can we?" / "Does it work?" |
+| Implementation | "Build it" |
+
 ### When to Use Spikes
 
 Use spikes when a spec has:
