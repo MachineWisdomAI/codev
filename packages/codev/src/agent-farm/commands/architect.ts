@@ -116,8 +116,74 @@ exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
   attachToSession(SESSION_NAME);
 }
 
+const LAYOUT_SESSION_NAME = 'af-layout';
+
+/**
+ * Create a two-pane tmux layout with architect and utility shell
+ *
+ * Layout:
+ * ┌────────────────────────────────┬──────────────────────────────┐
+ * │                                │                              │
+ * │   Architect Session (60%)      │   Utility Shell (40%)        │
+ * │                                │                              │
+ * └────────────────────────────────┴──────────────────────────────┘
+ */
+async function createLayoutAndAttach(args: string[]): Promise<void> {
+  const config = getConfig();
+
+  // Ensure state directory exists for launch script
+  await ensureDirectories(config);
+
+  // Load architect role
+  const role = loadRolePrompt(config, 'architect');
+  if (!role) {
+    fatal('Architect role not found. Expected at: codev/roles/architect.md');
+  }
+
+  logger.info(`Loaded architect role (${role.source})`);
+
+  // Create launch script for architect
+  const launchScript = resolve(config.stateDir, 'launch-architect-cli.sh');
+
+  let argsStr = '';
+  if (args.length > 0) {
+    argsStr = ' ' + args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+  }
+
+  writeFileSync(launchScript, `#!/bin/bash
+cd "${config.projectRoot}"
+exec claude --append-system-prompt "$(cat '${role.path}')"${argsStr}
+`, { mode: 0o755 });
+
+  logger.info('Creating layout session...');
+
+  // Create main session with architect pane (left, 70% width)
+  await run(
+    `tmux new-session -d -s "${LAYOUT_SESSION_NAME}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
+  );
+
+  // Configure tmux session
+  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" status off`);
+  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g mouse on`);
+  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g set-clipboard on`);
+  await run(`tmux set-option -t "${LAYOUT_SESSION_NAME}" -g allow-passthrough on`);
+
+  // Split right: create utility shell pane (40% width)
+  await run(`tmux split-window -h -t "${LAYOUT_SESSION_NAME}" -p 40 -c "${config.projectRoot}"`);
+
+  // Focus back on architect pane (left)
+  await run(`tmux select-pane -t "${LAYOUT_SESSION_NAME}:0.0"`);
+
+  logger.info('Layout: Architect (left) | Shell (right)');
+  logger.info('Navigation: Ctrl+B ←/→ | Detach: Ctrl+B d');
+
+  // Attach to the session
+  attachToSession(LAYOUT_SESSION_NAME);
+}
+
 export interface ArchitectOptions {
   args?: string[];
+  layout?: boolean;
 }
 
 /**
@@ -125,6 +191,7 @@ export interface ArchitectOptions {
  */
 export async function architect(options: ArchitectOptions = {}): Promise<void> {
   const args = options.args ?? [];
+  const useLayout = options.layout ?? false;
 
   // Check dependencies
   if (!(await commandExists('tmux'))) {
@@ -134,13 +201,16 @@ export async function architect(options: ArchitectOptions = {}): Promise<void> {
     fatal('claude not found. Install with: npm install -g @anthropic-ai/claude-code');
   }
 
-  // Check if session already exists
-  const sessionExists = await tmuxSessionExists(SESSION_NAME);
+  // Determine which session to use
+  const sessionName = useLayout ? LAYOUT_SESSION_NAME : SESSION_NAME;
+  const sessionExists = await tmuxSessionExists(sessionName);
 
   if (sessionExists) {
-    logger.info(`Attaching to existing session: ${SESSION_NAME}`);
+    logger.info(`Attaching to existing session: ${sessionName}`);
     logger.info('Detach with Ctrl+B, D');
-    attachToSession(SESSION_NAME);
+    attachToSession(sessionName);
+  } else if (useLayout) {
+    await createLayoutAndAttach(args);
   } else {
     await createAndAttach(args);
   }

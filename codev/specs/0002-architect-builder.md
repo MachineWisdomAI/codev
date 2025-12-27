@@ -298,14 +298,28 @@ Power users often prefer terminal-first workflows without the browser overhead. 
 
 ```bash
 af architect              # Start/attach to architect tmux session
-af architect "Review spec 0042"  # With initial prompt
+af architect "prompt"     # With initial prompt
+af architect --layout     # Multi-pane layout with status and shell
 ```
 
-**Behavior**:
+**Basic Mode** (`af architect`):
 - If `af-architect` tmux session exists → attach to it
 - If no session exists → create new session with architect role
 - Session persists after detach (Ctrl+B, D)
-- Uses same tmux infrastructure as other af commands
+
+**Layout Mode** (`af architect --layout`):
+Creates a two-pane tmux layout:
+```
+┌────────────────────────────────┬──────────────────────────────┐
+│                                │                              │
+│   Architect Session            │   Utility Shell              │
+│   (60%)                        │   (40%)                      │
+│                                │                              │
+└────────────────────────────────┴──────────────────────────────┘
+```
+- Left pane: Architect Claude session (main workspace)
+- Right pane: Utility shell for running `af spawn`, `af status`, etc.
+- Navigate panes: Ctrl+B ←/→ | Zoom: Ctrl+B z | Detach: Ctrl+B d
 
 **Why tmux?** Consistency with other agent farm commands which all use tmux internally for session persistence.
 
@@ -314,6 +328,7 @@ af architect "Review spec 0042"  # With initial prompt
 ```bash
 # Direct CLI access to architect (power users)
 af architect              # Start/attach to architect tmux session
+af architect --layout     # Multi-pane layout
 
 # Spawn a new builder for a project (spec)
 architect spawn --project 0003
@@ -493,13 +508,15 @@ Git worktrees provide isolation without the overhead of full clones:
 
 ### TICK-001: Direct CLI Access (2025-12-27)
 
-**Summary**: Add `af architect` command for terminal-first access to architect role.
+**Summary**: Add `af architect` command for terminal-first access to architect role, with optional multi-pane layout mode.
 
 **Problem Addressed**:
 Power users prefer direct terminal access without browser overhead. Currently, accessing the architect requires either starting the full dashboard (`af start`) or knowing tmux internals (`tmux attach -t af-architect-4301`).
 
 **Spec Changes**:
 - Added "8. Direct CLI Access for Power Users" section
+- Basic mode: `af architect` for simple session
+- Layout mode: `af architect --layout` for multi-pane tmux layout
 - Updated CLI Interface to include `af architect` command
 
 **Plan Changes**:
