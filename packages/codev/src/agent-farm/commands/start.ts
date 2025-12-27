@@ -138,6 +138,7 @@ exec ${cmd} --append-system-prompt "$(cat '${roleFile}')"
   if (options.allowInsecureRemote) {
     logger.warn('⚠️  INSECURE MODE: Binding to 0.0.0.0 - accessible from any network!');
     logger.warn('   No authentication - anyone on your network can access the terminal.');
+    logger.warn('   DEPRECATED: Use `af tunnel` for secure remote access instead.');
   }
 
   const ttydProcess = spawnTtyd({

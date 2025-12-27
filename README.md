@@ -360,30 +360,29 @@ The `af` command is globally available after installing `@cluesmith/codev`.
 
 ### Remote Access
 
-Access your Agent Farm dashboard from another device (tablet, phone, or laptop):
+Access Agent Farm from another device (iPad, laptop, etc.) via SSH tunnel:
 
 ```bash
-# Enable remote access (binds to 0.0.0.0)
+# Step 1: Start Agent Farm
+af start
+
+# Step 2: Get SSH command (shows your local IPs)
+af tunnel
+
+# Step 3: Run the SSH command on your remote device
+# Example output: ssh -L 4200:localhost:4200 youruser@192.168.1.50
+
+# Step 4: Open http://localhost:4200 in your remote browser
+```
+
+The dashboard and all terminals work identically via the tunnel. SSH handles authentication and encryption.
+
+**Note**: Requires SSH server on the dev machine. On Windows, enable OpenSSH Server or use WSL2.
+
+**Legacy mode** (not recommended):
+```bash
+# DEPRECATED: Exposes dashboard without authentication
 af start --allow-insecure-remote
-```
-
-Then open `http://<your-machine-ip>:4200` from any device on your network.
-
-**Find your IP:**
-```bash
-# macOS
-ipconfig getifaddr en0
-
-# Linux
-hostname -I | awk '{print $1}'
-```
-
-**⚠️ Security Note:** The `--allow-insecure-remote` flag provides no authentication. Only use on trusted networks. For secure remote access, use SSH tunneling:
-
-```bash
-# From remote machine, create secure tunnel
-ssh -L 4200:localhost:4200 user@dev-machine
-# Then open http://localhost:4200
 ```
 
 See [CLI Reference](codev/resources/commands/agent-farm.md#remote-access) for full details.
