@@ -14,6 +14,7 @@ import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, spaw
 import { checkCoreDependencies } from '../utils/deps.js';
 import { loadState, setArchitect } from '../state.js';
 import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan-handler.js';
+import { getPortBlock } from '../utils/port-registry.js';
 
 /**
  * Parsed remote target
@@ -191,7 +192,16 @@ async function checkRemoteVersions(user: string, host: string): Promise<void> {
 async function startRemote(options: StartOptions): Promise<void> {
   const config = getConfig();
   const { user, host, remotePath } = parseRemote(options.remote!);
-  const localPort = options.port || config.dashboardPort;
+
+  // Determine local port - use specified, or get from port registry
+  let localPort: number;
+  if (options.port) {
+    localPort = Number(options.port);
+  } else {
+    // Use the port registry to get a consistent port block for this project
+    const basePort = getPortBlock(config.projectRoot);
+    localPort = basePort; // Dashboard port is the base port
+  }
 
   logger.header('Starting Remote Agent Farm');
   logger.kv('Host', `${user}@${host}`);
@@ -208,12 +218,6 @@ async function startRemote(options: StartOptions): Promise<void> {
   // Wrap in bash -l to source login environment (gets PATH from .profile)
   const innerCommand = `${cdCommand} && af start --port ${localPort} --no-browser`;
   const remoteCommand = `bash -l -c '${innerCommand.replace(/'/g, "'\\''")}'`;
-
-  // Check if local port is already in use
-  const portAvailable = await isPortAvailable(localPort);
-  if (!portAvailable) {
-    fatal(`Port ${localPort} is already in use locally. Stop the existing service or use --port to specify a different port.`);
-  }
 
   // Check passwordless SSH is configured
   logger.info('Checking SSH connection...');
