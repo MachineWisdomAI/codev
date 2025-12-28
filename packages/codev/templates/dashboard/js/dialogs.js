@@ -228,6 +228,7 @@ async function spawnBuilder() {
       id: `builder-${result.id}`,
       type: 'builder',
       name: result.name,
+      projectId: result.id,
       port: result.port
     };
     tabs.push(newTab);

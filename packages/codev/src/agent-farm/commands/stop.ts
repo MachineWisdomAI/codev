@@ -27,8 +27,16 @@ async function findOrphanProcesses(trackedPids: Set<number>): Promise<number[]> 
     const lines = result.stdout.split('\n');
 
     for (const line of lines) {
-      // Skip if doesn't contain our project path and agent-farm servers
-      if (!line.includes(projectRoot) || !line.includes('agent-farm/servers/')) {
+      // Skip tower-server entirely - it's a global service, not per-project
+      if (line.includes('tower-server')) {
+        continue;
+      }
+
+      // Only match processes that belong to THIS project
+      // Must contain projectRoot to be considered for orphan cleanup
+      const isProjectProcess = line.includes(projectRoot) && line.includes('agent-farm');
+
+      if (!isProjectProcess) {
         continue;
       }
 

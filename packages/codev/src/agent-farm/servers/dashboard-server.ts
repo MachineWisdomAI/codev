@@ -1994,6 +1994,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Annotation proxy route (Spec 0062 - Secure Remote Access)
+    // Routes /annotation/:id to the appropriate open-server instance
+    const annotationMatch = url.pathname.match(/^\/annotation\/([^/]+)(\/.*)?$/);
+    if (annotationMatch) {
+      const annotationId = annotationMatch[1];
+      const annotations = getAnnotations();
+      const annotation = annotations.find((a) => a.id === annotationId);
+
+      if (!annotation) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Annotation not found: ${annotationId}` }));
+        return;
+      }
+
+      // Rewrite the URL to strip the /annotation/:id prefix
+      req.url = annotationMatch[2] || '/';
+      terminalProxy.web(req, res, { target: `http://localhost:${annotation.port}` });
+      return;
+    }
+
     // Serve dashboard
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       try {

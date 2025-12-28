@@ -32,6 +32,7 @@ af start [options]
 - `--no-role` - Skip loading architect role prompt
 - `--no-browser` - Skip opening browser after start
 - `-r, --remote <target>` - Start Agent Farm on remote machine (see below)
+- `-a, --attach` - Stay attached to remote session (default is to detach and return shell)
 - `--allow-insecure-remote` - Bind to 0.0.0.0 for remote access (deprecated)
 
 **Description:**
@@ -81,8 +82,14 @@ This single command:
 4. Starts Agent Farm there with matching port
 5. Sets up SSH tunnel back to your local machine
 6. Opens the dashboard in your browser
+7. Returns your shell (tunnel runs in background)
 
-The dashboard and all terminals work identically to local development. Press Ctrl+C to disconnect.
+The dashboard and all terminals work identically to local development. The SSH tunnel PID is printed so you can kill it later with `kill <PID>`.
+
+To stay attached instead (old behavior), use `--attach`:
+```bash
+af start --remote user@host --attach  # Ctrl+C to disconnect
+```
 
 **Port Selection:**
 

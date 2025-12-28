@@ -82,6 +82,7 @@ export interface StartOptions {
   noBrowser?: boolean;  // Skip opening browser after start
   allowInsecureRemote?: boolean;  // Bind to 0.0.0.0 instead of localhost
   remote?: string;  // user@host or user@host:/path for remote access
+  attach?: boolean;  // Stay attached (default is to detach for remote mode)
 }
 
 export interface SpawnOptions {

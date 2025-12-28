@@ -3,7 +3,8 @@
 // Load the file tree from the API
 async function loadFilesTree() {
   try {
-    const response = await fetch('/api/files');
+    // Add cache-busting param to ensure fresh data
+    const response = await fetch(`/api/files?t=${Date.now()}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }

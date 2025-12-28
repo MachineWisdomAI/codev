@@ -48,6 +48,23 @@ function generateShortId(): string {
 }
 
 /**
+ * Rename a Claude session after it starts
+ * Sends /rename command to the tmux session after a brief delay
+ */
+function renameClaudeSession(sessionName: string, displayName: string): void {
+  // Wait for Claude to be ready, then send /rename command
+  setTimeout(async () => {
+    try {
+      // Escape any quotes in the display name
+      const safeName = displayName.replace(/"/g, '\\"');
+      await run(`tmux send-keys -t "${sessionName}" "/rename ${safeName}" C-m`);
+    } catch {
+      // Non-fatal - session naming is a nice-to-have
+    }
+  }, 2000); // 2 second delay for Claude to initialize
+}
+
+/**
  * Validate spawn options - ensure exactly one mode is selected
  */
 function validateSpawnOptions(options: SpawnOptions): void {
@@ -308,6 +325,9 @@ exec ${baseCmd} "$(cat '${promptFile}')"
     fatal('Failed to start ttyd process for builder');
   }
 
+  // Rename Claude session for better history tracking
+  renameClaudeSession(sessionName, `Builder ${builderId}`);
+
   return { port, pid: ttydProcess.pid, sessionName };
 }
 
@@ -352,6 +372,9 @@ async function startShellSession(
   if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process for shell');
   }
+
+  // Rename Claude session for better history tracking
+  renameClaudeSession(sessionName, `Shell ${shellId}`);
 
   return { port, pid: ttydProcess.pid, sessionName };
 }

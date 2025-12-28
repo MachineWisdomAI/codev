@@ -29,9 +29,9 @@ function getTerminalUrl(tab) {
     return `/terminal/util-${tab.utilId}`;
   }
 
-  // File tabs still use direct port access (open-server, not ttyd)
-  if (tab.type === 'file' && tab.port) {
-    return getBaseUrl(tab.port);
+  // File/annotation tabs - use the annotation ID for proxy routing
+  if (tab.type === 'file' && tab.annotationId) {
+    return `/annotation/${tab.annotationId}`;
   }
 
   // Fallback for backward compatibility
@@ -300,13 +300,14 @@ function renderTabContent() {
 // Force refresh the iframe for a file tab (reloads content from server)
 function refreshFileTab(tabId) {
   const tab = tabs.find(t => t.id === tabId);
-  if (!tab || tab.type !== 'file' || !tab.port) return;
+  if (!tab || tab.type !== 'file') return;
 
   if (activeTabId === tabId) {
     const content = document.getElementById('tab-content');
     const iframe = content.querySelector('iframe');
     if (iframe) {
-      iframe.src = `${getBaseUrl(tab.port)}?t=${Date.now()}`;
+      const baseUrl = getTerminalUrl(tab);
+      iframe.src = baseUrl ? `${baseUrl}?t=${Date.now()}` : iframe.src;
     }
   }
 }

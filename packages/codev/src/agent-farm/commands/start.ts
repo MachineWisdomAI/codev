@@ -17,6 +17,22 @@ import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan
 import { getPortBlock } from '../utils/port-registry.js';
 
 /**
+ * Rename a Claude session after it starts
+ * Sends /rename command to the tmux session after a brief delay
+ */
+function renameClaudeSession(sessionName: string, displayName: string): void {
+  // Wait for Claude to be ready, then send /rename command
+  setTimeout(async () => {
+    try {
+      const safeName = displayName.replace(/"/g, '\\"');
+      await run(`tmux send-keys -t "${sessionName}" "/rename ${safeName}" C-m`);
+    } catch {
+      // Non-fatal - session naming is a nice-to-have
+    }
+  }, 2000);
+}
+
+/**
  * Parsed remote target
  */
 interface ParsedRemote {
@@ -79,10 +95,10 @@ function loadRolePrompt(config: { codevDir: string; bundledRolesDir: string }, r
  * Check if passwordless SSH is configured for a host
  * Returns true if SSH works without password, false otherwise
  */
-async function checkPasswordlessSSH(user: string, host: string): Promise<boolean> {
+async function checkPasswordlessSSH(user: string, host: string): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const ssh = spawn('ssh', [
-      '-o', 'ConnectTimeout=5',
+      '-o', 'ConnectTimeout=10',
       '-o', 'BatchMode=yes',  // Fail immediately if password required
       '-o', 'StrictHostKeyChecking=accept-new',
       `${user}@${host}`,
@@ -96,14 +112,20 @@ async function checkPasswordlessSSH(user: string, host: string): Promise<boolean
       stderr += data.toString();
     });
 
-    ssh.on('error', () => resolve(false));
-    ssh.on('exit', (code) => resolve(code === 0));
+    ssh.on('error', (err) => resolve({ ok: false, error: err.message }));
+    ssh.on('exit', (code) => {
+      if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, error: stderr.trim() || `exit code ${code}` });
+      }
+    });
 
-    // Timeout after 10 seconds
+    // Timeout after 15 seconds
     setTimeout(() => {
       ssh.kill();
-      resolve(false);
-    }, 10000);
+      resolve({ ok: false, error: 'connection timeout' });
+    }, 15000);
   });
 }
 
@@ -221,10 +243,10 @@ async function startRemote(options: StartOptions): Promise<void> {
 
   // Check passwordless SSH is configured
   logger.info('Checking SSH connection...');
-  const sshOk = await checkPasswordlessSSH(user, host);
-  if (!sshOk) {
+  const sshResult = await checkPasswordlessSSH(user, host);
+  if (!sshResult.ok) {
     logger.blank();
-    fatal(`Cannot connect to ${user}@${host} without a password.
+    fatal(`Cannot connect to ${user}@${host}: ${sshResult.error}
 
 Passwordless SSH is required for remote access. Set it up with:
   ssh-copy-id ${user}@${host}
@@ -273,10 +295,27 @@ Then verify with:
         logger.blank();
         logger.success('Remote Agent Farm connected!');
         logger.kv('Dashboard', `http://localhost:${localPort}`);
-        logger.info('Press Ctrl+C to disconnect');
 
         if (!options.noBrowser) {
           await openBrowser(`http://localhost:${localPort}`);
+        }
+
+        if (options.attach) {
+          // Attach mode: stay connected, user must Ctrl+C to disconnect
+          logger.info('Press Ctrl+C to disconnect');
+        } else {
+          // Default: detach and return shell to user, SSH tunnel runs in background
+          logger.kv('SSH PID', String(ssh.pid));
+          logger.info('Tunnel running in background. Kill with: kill ' + ssh.pid);
+
+          // Unref to allow parent to exit while SSH keeps running
+          ssh.unref();
+          if (ssh.stdout) (ssh.stdout as unknown as { unref: () => void }).unref();
+          if (ssh.stderr) (ssh.stderr as unknown as { unref: () => void }).unref();
+          process.stdin.unref();
+
+          // Exit after a brief delay to let output flush
+          setTimeout(() => process.exit(0), 100);
         }
       }, 1000);
     }
@@ -351,8 +390,17 @@ export async function start(options: StartOptions = {}): Promise<void> {
   // Check if already running
   const state = loadState();
   if (state.architect) {
+    // Dashboard port is architect port - 1 (architect runs on base+1, dashboard on base)
+    const runningDashboardPort = state.architect.port - 1;
     logger.warn(`Architect already running on port ${state.architect.port}`);
-    logger.info(`Dashboard: http://localhost:${config.dashboardPort}`);
+    logger.info(`Dashboard: http://localhost:${runningDashboardPort}`);
+
+    // In remote mode (--no-browser), keep process alive so SSH tunnel stays connected
+    if (options.noBrowser) {
+      logger.info('Keeping connection alive for remote tunnel...');
+      // Block forever - SSH disconnect will kill us
+      await new Promise(() => {});
+    }
     return;
   }
 
@@ -462,6 +510,10 @@ exec ${cmd} --append-system-prompt "$(cat '${roleFile}')"
   if (!ttydProcess?.pid) {
     fatal('Failed to start ttyd process');
   }
+
+  // Rename Claude session for better history tracking
+  const projectName = basename(config.projectRoot);
+  renameClaudeSession(sessionName, `Architect ${projectName}`);
 
   // Save architect state
   const architectState: ArchitectState = {
