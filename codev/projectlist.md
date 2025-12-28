@@ -133,8 +133,27 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
-
-
+  - id: "0063"
+    title: "Tower Dashboard Improvements"
+    summary: "Better project management UI with tools for starting local/remote services"
+    status: conceived
+    priority: high
+    release: v1.6.0
+    files:
+      spec: codev/specs/0063-tower-dashboard-improvements.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [tower, ui, dashboard]
+    timestamps:
+      conceived_at: "2025-12-28T08:20:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Single row per dashboard, action buttons for local/remote start, init/adopt/update commands with terminal output."
 
 
 
