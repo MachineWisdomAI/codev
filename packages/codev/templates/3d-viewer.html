@@ -485,9 +485,9 @@
       axesHelper.visible = showAxes;
       scene.add(axesHelper);
 
-      // Set camera to look at model center, default front view
+      // Set camera to look at model center, default isometric view
       controls.target.copy(modelCenter);
-      setView(0, -1, 0);  // Front view
+      setView(1, -1, 0.8);  // Isometric-ish: see X going right, Y going back, Z going up
 
       // Hide loading
       loading.classList.add('hidden');
