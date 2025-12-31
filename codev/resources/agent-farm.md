@@ -2,12 +2,15 @@
 
 The `agent-farm` CLI (`af`) orchestrates multi-agent development with git worktrees, tmux sessions, and a web dashboard.
 
-## Quick Setup
+## Installation
+
+The `af` command is installed globally via npm:
 
 ```bash
-# Add alias to ~/.bashrc or ~/.zshrc
-alias af='./codev/bin/agent-farm'
+npm install -g @cluesmith/codev
 ```
+
+No aliases needed - `af`, `consult`, and `codev` work from any directory.
 
 ## Commands
 
@@ -182,4 +185,3 @@ Agent-farm uses SQLite databases for state:
 - `codev/config.json` - Project configuration
 - `codev/templates/` - Dashboard and annotation templates
 - `codev/roles/` - Architect and builder role prompts
-- `codev/bin/agent-farm` - CLI wrapper script

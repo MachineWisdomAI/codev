@@ -54,8 +54,8 @@ SPIDER works in phases. The Builder is responsible for **IDER** (the Architect h
    - Self-review: Do the tests adequately cover the requirements?
    - **Consult external reviewers** on the complete implementation + tests:
      ```bash
-     ./codev/bin/consult gemini "Review spec XXXX implementation and tests: <summary>"
-     ./codev/bin/consult codex "Review spec XXXX implementation and tests: <summary>"
+     consult --model gemini --type impl-review spec XXXX
+     consult --model codex --type impl-review spec XXXX
      ```
    - Address concerns raised before proceeding to Review
 
@@ -74,9 +74,9 @@ SPIDER works in phases. The Builder is responsible for **IDER** (the Architect h
 
      Give verdict: APPROVE or REQUEST_CHANGES."
 
-     ./codev/bin/consult gemini "$QUERY" &
-     ./codev/bin/consult codex "$QUERY" &
-     ./codev/bin/consult claude "$QUERY" &
+     consult --model gemini --type pr-ready pr $PR_NUMBER &
+     consult --model codex --type pr-ready pr $PR_NUMBER &
+     consult --model claude --type pr-ready pr $PR_NUMBER &
      wait
      ```
    - Address any REQUEST_CHANGES feedback before creating the PR

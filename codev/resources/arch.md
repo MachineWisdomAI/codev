@@ -1164,23 +1164,9 @@ af spawn -p 0003 --builder-cmd "claude --model sonnet"
 - When and how to report blocked status
 - Deliverables and constraints
 
-#### Thin Wrapper Script
+#### Global CLI Commands
 
-**Location**: `codev/bin/agent-farm`
-
-```bash
-#!/bin/bash
-# Thin wrapper - forwards all commands to agent-farm TypeScript
-SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
-SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-exec node "$PROJECT_ROOT/agent-farm/dist/index.js" "$@"
-```
-
-**Features**:
-- Symlink-safe (uses `readlink -f` with fallbacks)
-- Portable across macOS and Linux
-- No npm distribution required
+The `af`, `consult`, and `codev` commands are installed globally via `npm install -g @cluesmith/codev` and work from any directory. No aliases or local scripts needed.
 
 ### 4. Test Infrastructure
 

@@ -20,10 +20,7 @@ The `af` command orchestrates builders, manages worktrees, and coordinates devel
 
 **Full reference:** See [codev/resources/agent-farm.md](../resources/agent-farm.md)
 
-**Quick setup:**
-```bash
-alias af='./codev/bin/agent-farm'
-```
+**Note:** `af`, `consult`, and `codev` are global commands installed via npm. They work from any directory - no aliases or paths needed.
 
 ### Consult Tool
 
@@ -158,8 +155,8 @@ The Architect uses SPIDER or TICK protocols. The Architect is responsible for th
 4. Create a detailed specification (incorporating lessons learned)
 5. **Consult external reviewers** using the consult tool:
    ```bash
-   ./codev/bin/consult gemini "Review spec 0034: <summary>"
-   ./codev/bin/consult codex "Review spec 0034: <summary>"
+   consult --model gemini --type spec-review spec 0034
+   consult --model codex --type spec-review spec 0034
    ```
 5. Address concerns raised by the reviewers
 6. **Present to human** for final review:
@@ -175,8 +172,8 @@ The Architect uses SPIDER or TICK protocols. The Architect is responsible for th
 4. Specify acceptance criteria
 5. **Consult external reviewers** using the consult tool:
    ```bash
-   ./codev/bin/consult gemini "Review plan 0034: <summary>"
-   ./codev/bin/consult codex "Review plan 0034: <summary>"
+   consult --model gemini --type plan-review plan 0034
+   consult --model codex --type plan-review plan 0034
    ```
 5. Address concerns raised by the reviewers
 6. **Present to human** for final review:
@@ -248,9 +245,9 @@ Focus on:
 
 Give verdict: APPROVE or REQUEST_CHANGES with specific integration feedback."
 
-./codev/bin/consult gemini "$QUERY" &
-./codev/bin/consult codex "$QUERY" &
-./codev/bin/consult claude "$QUERY" &
+consult --model gemini --type integration-review pr 35 &
+consult --model codex --type integration-review pr 35 &
+consult --model claude --type integration-review pr 35 &
 wait
 ```
 

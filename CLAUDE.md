@@ -305,34 +305,36 @@ The Architect-Builder pattern enables parallel AI-assisted development by separa
 
 ### CLI Commands
 
+**Note:** `af`, `consult`, and `codev` are global commands installed via `npm install -g @cluesmith/codev`. They work from any directory.
+
 ```bash
 # Start the architect dashboard
-./codev/bin/agent-farm start
+af start
 
 # Spawn a builder for a spec
-./codev/bin/agent-farm spawn --project 0003
+af spawn --project 0003
 
 # Check status of all builders
-./codev/bin/agent-farm status
+af status
 
 # Open a utility shell
-./codev/bin/agent-farm util
+af util
 
 # Open files in annotation viewer
-./codev/bin/agent-farm open src/auth/login.ts
+af open src/auth/login.ts
 
 # Clean up a builder (checks for uncommitted work first)
-./codev/bin/agent-farm cleanup --project 0003
+af cleanup --project 0003
 
 # Force cleanup (WARNING: may lose uncommitted work)
-./codev/bin/agent-farm cleanup --project 0003 --force
+af cleanup --project 0003 --force
 
 # Stop all agent-farm processes
-./codev/bin/agent-farm stop
+af stop
 
 # Manage port allocations (for multi-project support)
-./codev/bin/agent-farm ports list
-./codev/bin/agent-farm ports cleanup
+af ports list
+af ports cleanup
 ```
 
 ### Remote Access
@@ -403,12 +405,11 @@ Comments are stored directly in files using language-appropriate syntax:
 
 ### Key Files
 
-- `.agent-farm/state.json` - Runtime state (builders, ports, processes)
-- `~/.agent-farm/ports.json` - Global port registry
+- `.agent-farm/state.db` - Runtime state (SQLite: builders, ports, processes)
+- `~/.agent-farm/global.db` - Global port registry (SQLite)
 - `codev/config.json` - Project configuration
 - `codev/templates/` - Dashboard and annotation templates
 - `codev/roles/` - Architect and builder role prompts
-- `codev/bin/agent-farm` - CLI wrapper script
 
 See `codev/specs/0002-architect-builder.md` for full documentation.
 
@@ -655,7 +656,6 @@ The consultant role (`codev/roles/consultant.md`) defines a collaborative partne
 ### Key Files
 
 - `packages/codev/src/commands/consult/index.ts` - TypeScript implementation
-- `codev/bin/consult` - Backwards-compatible shim (delegates to TypeScript)
 - `codev/roles/consultant.md` - Role definition
 - `.consult/history.log` - Query history with timing (gitignored)
 
