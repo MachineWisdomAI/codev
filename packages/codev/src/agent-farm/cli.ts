@@ -54,7 +54,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--no-browser', 'Skip opening browser after start')
     .option('--allow-insecure-remote', 'Bind to 0.0.0.0 for remote access (WARNING: no auth)')
     .option('-r, --remote <target>', 'Start Agent Farm on remote machine (user@host or user@host:/path)')
-    .option('-a, --attach', 'Stay attached to remote session (default is to detach and return shell)')
     .action(async (options) => {
       try {
         const commands = getResolvedCommands();
@@ -65,7 +64,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           noBrowser: !options.browser,
           allowInsecureRemote: options.allowInsecureRemote,
           remote: options.remote,
-          attach: options.attach,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
