@@ -231,14 +231,15 @@ async function startRemote(options: StartOptions): Promise<void> {
   // Clean up stale port allocations (handles machine restarts, killed processes)
   cleanupStaleEntries();
 
-  // Determine local port - use specified, or get from port registry
+  // Determine local port - use specified, or find an available one
+  // Note: Don't use port registry here - we're forwarding to a REMOTE project,
+  // not starting a local one. The local port just needs to be free.
   let localPort: number;
   if (options.port) {
     localPort = Number(options.port);
   } else {
-    // Use the port registry to get a consistent port block for this project
-    const basePort = getPortBlock(config.projectRoot);
-    localPort = basePort; // Dashboard port is the base port
+    // Find an available local port for the tunnel
+    localPort = await findAvailablePort(4200);
   }
 
   logger.header('Starting Remote Agent Farm');
