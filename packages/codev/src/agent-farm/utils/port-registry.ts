@@ -58,8 +58,8 @@ export function cleanupStaleEntries(): { removed: string[]; remaining: number } 
 
   const cleanup = db.transaction(() => {
     for (const alloc of allocations) {
-      // Remove if project doesn't exist
-      if (!projectExists(alloc.project_path)) {
+      // Remove if project doesn't exist (skip synthetic keys like "remote:...")
+      if (!alloc.project_path.startsWith('remote:') && !projectExists(alloc.project_path)) {
         removed.push(alloc.project_path);
         db.prepare('DELETE FROM port_allocations WHERE project_path = ?').run(alloc.project_path);
         continue;
@@ -90,7 +90,8 @@ export function cleanupStaleEntries(): { removed: string[]; remaining: number } 
  */
 export function getPortBlock(projectRoot: string): number {
   // Normalize path for consistent keys
-  const normalizedPath = resolve(projectRoot);
+  // Don't resolve synthetic keys like "remote:..." - they're not real paths
+  const normalizedPath = projectRoot.startsWith('remote:') ? projectRoot : resolve(projectRoot);
 
   const db = getGlobalDb();
 
