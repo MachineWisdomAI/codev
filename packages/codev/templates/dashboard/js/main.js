@@ -116,10 +116,6 @@ function renderDashboardTabContent() {
         <div class="dashboard-section section-tabs ${sectionState.tabs ? '' : 'collapsed'}">
           <div class="dashboard-section-header" onclick="toggleSection('tabs')">
             <h3><span class="collapse-icon">▼</span> Tabs</h3>
-            <div class="header-actions" onclick="event.stopPropagation()">
-              <button onclick="spawnBuilder()" title="New Worktree">+ Worktree</button>
-              <button onclick="spawnShell()" title="New Shell">+ Shell</button>
-            </div>
           </div>
           <div class="dashboard-section-content">
             <div class="dashboard-tabs-list" id="dashboard-tabs-list">
@@ -173,11 +169,23 @@ function renderDashboardTabContent() {
 function renderDashboardTabsList() {
   const terminalTabs = tabs.filter(t => t.type !== 'dashboard' && t.type !== 'files');
 
+  // Action items at the top of the list
+  const actionItems = `
+    <div class="dashboard-tab-item dashboard-tab-action" onclick="spawnShell()">
+      <span class="tab-icon">+</span>
+      <span class="tab-name">Create new shell</span>
+    </div>
+    <div class="dashboard-tab-item dashboard-tab-action" onclick="spawnBuilder()">
+      <span class="tab-icon">+</span>
+      <span class="tab-name">Create new worktree + shell</span>
+    </div>
+  `;
+
   if (terminalTabs.length === 0) {
-    return '<div class="dashboard-empty-state">No tabs open</div>';
+    return actionItems;
   }
 
-  return terminalTabs.map(tab => {
+  const tabItems = terminalTabs.map(tab => {
     const isActive = tab.id === activeTabId;
     const icon = getTabIcon(tab.type);
     const statusIndicator = getDashboardStatusIndicator(tab);
@@ -190,6 +198,8 @@ function renderDashboardTabsList() {
       </div>
     `;
   }).join('');
+
+  return actionItems + tabItems;
 }
 
 // Get status indicator for dashboard tab list
