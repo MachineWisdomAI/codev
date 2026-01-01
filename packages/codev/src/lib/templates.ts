@@ -241,7 +241,7 @@ export const UPDATABLE_PREFIXES = [
   'templates/',
   'resources/commands/',
   'resources/workflow-reference.md',
-  'config.json',
+  // Note: config.json is intentionally NOT here - it's user configuration
 ];
 
 /**
