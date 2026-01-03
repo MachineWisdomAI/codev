@@ -260,7 +260,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0065"
     title: "BUGFIX Protocol and CLI Support"
     summary: "Lightweight protocol for minor bugfixes with af spawn --issue support"
-    status: planned
+    status: implemented
     priority: high
     release: v1.6.0
     files:
