@@ -16,18 +16,23 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     options.protocol,
     options.shell,
     options.worktree,
+    options.issue,
   ].filter(Boolean);
 
   if (modes.length === 0) {
-    return 'Must specify one of: --project (-p), --task, --protocol, --shell, --worktree';
+    return 'Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree';
   }
 
   if (modes.length > 1) {
-    return 'Flags --project, --task, --protocol, --shell, --worktree are mutually exclusive';
+    return 'Flags --project, --issue, --task, --protocol, --shell, --worktree are mutually exclusive';
   }
 
   if (options.files && !options.task) {
     return '--files requires --task';
+  }
+
+  if ((options.noComment || options.force) && !options.issue) {
+    return '--no-comment and --force require --issue';
   }
 
   return null; // Valid
@@ -35,11 +40,22 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
 
 function getSpawnMode(options: SpawnOptions): BuilderType {
   if (options.project) return 'spec';
+  if (options.issue) return 'bugfix';
   if (options.task) return 'task';
   if (options.protocol) return 'protocol';
   if (options.shell) return 'shell';
   if (options.worktree) return 'worktree';
   throw new Error('No mode specified');
+}
+
+// Slugify function for issue titles
+function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 30);
 }
 
 function generateShortId(): string {
@@ -88,6 +104,26 @@ describe('Spawn Command', () => {
         const options: SpawnOptions = { worktree: true };
         expect(validateSpawnOptions(options)).toBeNull();
       });
+
+      it('should accept --issue alone', () => {
+        const options: SpawnOptions = { issue: 42 };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --no-comment', () => {
+        const options: SpawnOptions = { issue: 42, noComment: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --force', () => {
+        const options: SpawnOptions = { issue: 42, force: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with both --no-comment and --force', () => {
+        const options: SpawnOptions = { issue: 42, noComment: true, force: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
     });
 
     describe('invalid options', () => {
@@ -131,6 +167,30 @@ describe('Spawn Command', () => {
         const options: SpawnOptions = { project: '0009', worktree: true };
         const error = validateSpawnOptions(options);
         expect(error).toContain('mutually exclusive');
+      });
+
+      it('should reject --issue + --project', () => {
+        const options: SpawnOptions = { issue: 42, project: '0009' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('mutually exclusive');
+      });
+
+      it('should reject --issue + --task', () => {
+        const options: SpawnOptions = { issue: 42, task: 'Fix bug' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('mutually exclusive');
+      });
+
+      it('should reject --no-comment without --issue', () => {
+        const options: SpawnOptions = { project: '0009', noComment: true };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--no-comment and --force require --issue');
+      });
+
+      it('should reject --force without --issue', () => {
+        const options: SpawnOptions = { task: 'Fix bug', force: true };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--no-comment and --force require --issue');
       });
 
       it('should reject --files without --task', () => {

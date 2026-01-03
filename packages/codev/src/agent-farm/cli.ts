@@ -118,23 +118,30 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('spawn')
     .description('Spawn a new builder')
     .option('-p, --project <id>', 'Spawn builder for a spec')
+    .option('-i, --issue <number>', 'Spawn builder for a GitHub issue (bugfix mode)')
     .option('--task <text>', 'Spawn builder with a task description')
     .option('--protocol <name>', 'Spawn builder to run a protocol')
     .option('--shell', 'Spawn a bare Claude session')
     .option('--worktree', 'Spawn worktree session')
     .option('--files <files>', 'Context files (comma-separated)')
+    .option('--no-comment', 'Skip commenting on issue (bugfix mode only)')
+    .option('--force', 'Override collision detection (bugfix mode only)')
     .option('--no-role', 'Skip loading role prompt')
     .action(async (options) => {
       const { spawn } = await import('./commands/spawn.js');
       try {
         const files = options.files ? options.files.split(',').map((f: string) => f.trim()) : undefined;
+        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
         await spawn({
           project: options.project,
+          issue,
           task: options.task,
           protocol: options.protocol,
           shell: options.shell,
           worktree: options.worktree,
           files,
+          noComment: !options.comment,
+          force: options.force,
           noRole: !options.role,
         });
       } catch (error) {
@@ -196,12 +203,22 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   program
     .command('cleanup')
     .description('Clean up a builder worktree and branch')
-    .requiredOption('-p, --project <id>', 'Builder ID to clean up')
+    .option('-p, --project <id>', 'Builder ID to clean up')
+    .option('-i, --issue <number>', 'Cleanup bugfix builder for a GitHub issue')
     .option('-f, --force', 'Force cleanup even if branch not merged')
     .action(async (options) => {
       const { cleanup } = await import('./commands/cleanup.js');
       try {
-        await cleanup({ project: options.project, force: options.force });
+        const issue = options.issue ? parseInt(options.issue, 10) : undefined;
+        if (!options.project && !issue) {
+          logger.error('Must specify either --project (-p) or --issue (-i)');
+          process.exit(1);
+        }
+        if (options.project && issue) {
+          logger.error('--project and --issue are mutually exclusive');
+          process.exit(1);
+        }
+        await cleanup({ project: options.project, issue, force: options.force });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

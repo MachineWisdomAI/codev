@@ -2,7 +2,7 @@
  * Core types for Agent Farm
  */
 
-export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree';
+export type BuilderType = 'spec' | 'task' | 'protocol' | 'shell' | 'worktree' | 'bugfix';
 
 export interface Builder {
   id: string;
@@ -17,6 +17,7 @@ export interface Builder {
   type: BuilderType;
   taskText?: string;      // For task mode (display in dashboard)
   protocolName?: string;  // For protocol mode
+  issueNumber?: number;   // For bugfix mode
 }
 
 export interface UtilTerminal {
@@ -92,9 +93,14 @@ export interface SpawnOptions {
   protocol?: string;    // Protocol mode: --protocol
   shell?: boolean;      // Shell mode: --shell (no worktree, no prompt)
   worktree?: boolean;   // Worktree mode: --worktree (worktree, no prompt)
+  issue?: number;       // Bugfix mode: --issue / -i
 
   // Task mode options
   files?: string[];     // Context files for task mode: --files
+
+  // Bugfix mode options
+  noComment?: boolean;  // Skip "On it" comment on issue: --no-comment
+  force?: boolean;      // Override collision detection: --force
 
   // General options
   noRole?: boolean;

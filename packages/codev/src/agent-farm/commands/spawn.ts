@@ -103,18 +103,23 @@ function validateSpawnOptions(options: SpawnOptions): void {
     options.protocol,
     options.shell,
     options.worktree,
+    options.issue,
   ].filter(Boolean);
 
   if (modes.length === 0) {
-    fatal('Must specify one of: --project (-p), --task, --protocol, --shell, --worktree\n\nRun "af spawn --help" for examples.');
+    fatal('Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree\n\nRun "af spawn --help" for examples.');
   }
 
   if (modes.length > 1) {
-    fatal('Flags --project, --task, --protocol, --shell, --worktree are mutually exclusive');
+    fatal('Flags --project, --issue, --task, --protocol, --shell, --worktree are mutually exclusive');
   }
 
   if (options.files && !options.task) {
     fatal('--files requires --task');
+  }
+
+  if ((options.noComment || options.force) && !options.issue) {
+    fatal('--no-comment and --force require --issue');
   }
 }
 
@@ -123,6 +128,7 @@ function validateSpawnOptions(options: SpawnOptions): void {
  */
 function getSpawnMode(options: SpawnOptions): BuilderType {
   if (options.project) return 'spec';
+  if (options.issue) return 'bugfix';
   if (options.task) return 'task';
   if (options.protocol) return 'protocol';
   if (options.shell) return 'shell';
@@ -737,6 +743,199 @@ exec ${commands.builder}
   logger.kv('Terminal', `http://localhost:${port}`);
 }
 
+/**
+ * Generate a slug from an issue title (max 30 chars, lowercase, alphanumeric + hyphens)
+ */
+function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with hyphens
+    .replace(/-+/g, '-')          // Collapse multiple hyphens
+    .replace(/^-|-$/g, '')        // Trim leading/trailing hyphens
+    .slice(0, 30);                // Max 30 chars
+}
+
+/**
+ * GitHub issue structure from gh issue view --json
+ */
+interface GitHubIssue {
+  title: string;
+  body: string;
+  state: string;
+  comments: Array<{
+    body: string;
+    createdAt: string;
+    author: { login: string };
+  }>;
+}
+
+/**
+ * Fetch a GitHub issue via gh CLI
+ */
+async function fetchGitHubIssue(issueNumber: number): Promise<GitHubIssue> {
+  try {
+    const result = await run(`gh issue view ${issueNumber} --json title,body,state,comments`);
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    fatal(`Failed to fetch issue #${issueNumber}. Ensure 'gh' CLI is installed and authenticated.`);
+    throw error; // TypeScript doesn't know fatal() never returns
+  }
+}
+
+/**
+ * Check for collision conditions before spawning bugfix
+ */
+async function checkBugfixCollisions(
+  issueNumber: number,
+  worktreePath: string,
+  issue: GitHubIssue,
+  force: boolean,
+): Promise<void> {
+  // 1. Check if worktree already exists
+  if (existsSync(worktreePath)) {
+    fatal(`Worktree already exists at ${worktreePath}\nRun: af cleanup --issue ${issueNumber}`);
+  }
+
+  // 2. Check for recent "On it" comments (< 24h old)
+  const onItComments = issue.comments.filter((c) =>
+    c.body.toLowerCase().includes('on it'),
+  );
+  if (onItComments.length > 0) {
+    const lastComment = onItComments[onItComments.length - 1];
+    const age = Date.now() - new Date(lastComment.createdAt).getTime();
+    const hoursAgo = Math.round(age / (1000 * 60 * 60));
+
+    if (hoursAgo < 24) {
+      if (!force) {
+        fatal(`Issue #${issueNumber} has "On it" comment from ${hoursAgo}h ago (by @${lastComment.author.login}).\nSomeone may already be working on this. Use --force to override.`);
+      }
+      logger.warn(`Warning: "On it" comment from ${hoursAgo}h ago - proceeding with --force`);
+    } else {
+      logger.warn(`Warning: Stale "On it" comment (${hoursAgo}h ago). Proceeding.`);
+    }
+  }
+
+  // 3. Check for open PRs referencing this issue
+  try {
+    const prResult = await run(`gh pr list --search "in:body #${issueNumber}" --json number,title --limit 5`);
+    const openPRs = JSON.parse(prResult.stdout);
+    if (openPRs.length > 0) {
+      if (!force) {
+        const prList = openPRs.map((pr: { number: number; title: string }) => `  - PR #${pr.number}: ${pr.title}`).join('\n');
+        fatal(`Found ${openPRs.length} open PR(s) referencing issue #${issueNumber}:\n${prList}\nUse --force to proceed anyway.`);
+      }
+      logger.warn(`Warning: Found ${openPRs.length} open PR(s) referencing issue - proceeding with --force`);
+    }
+  } catch {
+    // Non-fatal: continue if PR check fails
+  }
+
+  // 4. Warn if issue is already closed
+  if (issue.state === 'CLOSED') {
+    logger.warn(`Warning: Issue #${issueNumber} is already closed`);
+  }
+}
+
+/**
+ * Spawn builder for a GitHub issue (bugfix mode)
+ */
+async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void> {
+  const issueNumber = options.issue!;
+
+  logger.header(`Spawning Bugfix Builder for Issue #${issueNumber}`);
+
+  // Fetch issue from GitHub
+  logger.info('Fetching issue from GitHub...');
+  const issue = await fetchGitHubIssue(issueNumber);
+
+  const slug = slugify(issue.title);
+  const builderId = `bugfix-${issueNumber}`;
+  const branchName = `builder/bugfix-${issueNumber}-${slug}`;
+  const worktreePath = resolve(config.buildersDir, builderId);
+
+  logger.kv('Title', issue.title);
+  logger.kv('Branch', branchName);
+  logger.kv('Worktree', worktreePath);
+
+  // Check for collisions
+  await checkBugfixCollisions(issueNumber, worktreePath, issue, !!options.force);
+
+  await ensureDirectories(config);
+  await checkDependencies();
+  await createWorktree(config, branchName, worktreePath);
+
+  // Comment on the issue (unless --no-comment)
+  if (!options.noComment) {
+    logger.info('Commenting on issue...');
+    try {
+      await run(`gh issue comment ${issueNumber} --body "On it! Working on a fix now."`);
+    } catch {
+      logger.warn('Warning: Failed to comment on issue (continuing anyway)');
+    }
+  }
+
+  // Build the prompt with issue context
+  const prompt = `You are a Builder working on a BUGFIX task.
+
+## Protocol
+Follow the BUGFIX protocol: codev/protocols/bugfix/protocol.md
+
+## Issue #${issueNumber}
+**Title**: ${issue.title}
+
+**Description**:
+${issue.body || '(No description provided)'}
+
+## Your Mission
+1. Reproduce the bug
+2. Identify root cause
+3. Implement fix (< 300 LOC)
+4. Add regression test
+5. Run CMAP review (3-way parallel: Gemini, Codex, Claude)
+6. Create PR with "Fixes #${issueNumber}" in body
+
+If the fix is too complex (> 300 LOC or architectural changes), notify the Architect via:
+  af send architect "Issue #${issueNumber} is more complex than expected. [Reason]. Recommend escalating to SPIDER/TICK."
+
+Start by reading the issue and reproducing the bug.`;
+
+  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
+
+  // Load role
+  const role = options.noRole ? null : loadRolePrompt(config, 'builder');
+  const commands = getResolvedCommands();
+
+  const { port, pid, sessionName } = await startBuilderSession(
+    config,
+    builderId,
+    worktreePath,
+    commands.builder,
+    builderPrompt,
+    role?.content ?? null,
+    role?.source ?? null,
+  );
+
+  const builder: Builder = {
+    id: builderId,
+    name: `Bugfix #${issueNumber}: ${issue.title.substring(0, 40)}${issue.title.length > 40 ? '...' : ''}`,
+    port,
+    pid,
+    status: 'spawning',
+    phase: 'init',
+    worktree: worktreePath,
+    branch: branchName,
+    tmuxSession: sessionName,
+    type: 'bugfix',
+    issueNumber,
+  };
+
+  upsertBuilder(builder);
+
+  logger.blank();
+  logger.success(`Bugfix builder for issue #${issueNumber} spawned!`);
+  logger.kv('Terminal', `http://localhost:${port}`);
+}
+
 // =============================================================================
 // Main entry point
 // =============================================================================
@@ -762,6 +961,9 @@ export async function spawn(options: SpawnOptions): Promise<void> {
   switch (mode) {
     case 'spec':
       await spawnSpec(options, config);
+      break;
+    case 'bugfix':
+      await spawnBugfix(options, config);
       break;
     case 'task':
       await spawnTask(options, config);

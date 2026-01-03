@@ -19,7 +19,8 @@ function getSessionName(config: Config, builderId: string): string {
 }
 
 export interface CleanupOptions {
-  project: string;
+  project?: string;
+  issue?: number;
   force?: boolean;
 }
 
@@ -64,33 +65,66 @@ async function hasUncommittedChanges(worktreePath: string): Promise<{ dirty: boo
 }
 
 /**
+ * Delete a remote branch
+ */
+async function deleteRemoteBranch(branch: string, config: Config): Promise<void> {
+  logger.info('Deleting remote branch...');
+  try {
+    await run(`git push origin --delete "${branch}"`, { cwd: config.projectRoot });
+    logger.info('Remote branch deleted');
+  } catch {
+    logger.warn('Warning: Failed to delete remote branch (may not exist on remote)');
+  }
+}
+
+/**
  * Cleanup a builder's worktree and branch
  */
 export async function cleanup(options: CleanupOptions): Promise<void> {
   const config = getConfig();
-  const projectId = options.project;
 
   // Load state to find the builder
   const state = loadState();
-  const builder = state.builders.find((b) => b.id === projectId);
+  let builder: Builder | undefined;
 
-  if (!builder) {
-    // Try to find by name pattern
-    const byName = state.builders.find((b) => b.name.includes(projectId));
-    if (byName) {
-      return cleanupBuilder(byName, options.force);
+  if (options.issue) {
+    // Find bugfix builder by issue number
+    const builderId = `bugfix-${options.issue}`;
+    builder = state.builders.find((b) => b.id === builderId);
+
+    if (!builder) {
+      // Also check by issueNumber field (in case ID format differs)
+      builder = state.builders.find((b) => b.issueNumber === options.issue);
     }
-    fatal(`Builder not found for project: ${projectId}`);
+
+    if (!builder) {
+      fatal(`Bugfix builder not found for issue #${options.issue}`);
+    }
+  } else if (options.project) {
+    const projectId = options.project;
+    builder = state.builders.find((b) => b.id === projectId);
+
+    if (!builder) {
+      // Try to find by name pattern
+      const byName = state.builders.find((b) => b.name.includes(projectId));
+      if (byName) {
+        return cleanupBuilder(byName, options.force, options.issue);
+      }
+      fatal(`Builder not found for project: ${projectId}`);
+    }
+  } else {
+    fatal('Must specify either --project or --issue');
   }
 
-  await cleanupBuilder(builder, options.force);
+  await cleanupBuilder(builder, options.force, options.issue);
 }
 
-async function cleanupBuilder(builder: Builder, force?: boolean): Promise<void> {
+async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: number): Promise<void> {
   const config = getConfig();
   const isShellMode = builder.type === 'shell';
+  const isBugfixMode = builder.type === 'bugfix';
 
-  logger.header(`Cleaning up ${isShellMode ? 'Shell' : 'Builder'} ${builder.id}`);
+  logger.header(`Cleaning up ${isShellMode ? 'Shell' : isBugfixMode ? 'Bugfix Builder' : 'Builder'} ${builder.id}`);
   logger.kv('Name', builder.name);
   if (!isShellMode) {
     logger.kv('Worktree', builder.worktree);
@@ -124,18 +158,71 @@ async function cleanupBuilder(builder: Builder, force?: boolean): Promise<void> 
     // Session may not exist
   }
 
-  // Note: worktrees are NOT automatically removed - they may contain useful context
-  // Users can manually clean up with: git worktree remove <path>
-  if (!isShellMode && existsSync(builder.worktree)) {
-    logger.info(`Worktree preserved at: ${builder.worktree}`);
-    logger.info('To remove: git worktree remove "' + builder.worktree + '"');
-  }
+  // For bugfix mode: actually remove worktree and delete remote branch
+  if (isBugfixMode && !isShellMode) {
+    // Remove worktree
+    if (existsSync(builder.worktree)) {
+      logger.info('Removing worktree...');
+      try {
+        await run(`git worktree remove "${builder.worktree}" --force`, { cwd: config.projectRoot });
+        logger.info('Worktree removed');
+      } catch {
+        logger.warn('Warning: Failed to remove worktree');
+      }
+    }
 
-  // Note: branches are NOT automatically deleted - they may be needed for reference
-  // Users can manually delete with: git branch -d <branch>
-  if (!isShellMode && builder.branch) {
-    logger.info(`Branch preserved: ${builder.branch}`);
-    logger.info('To delete: git branch -d "' + builder.branch + '"');
+    // Delete local branch
+    if (builder.branch) {
+      logger.info('Deleting local branch...');
+      try {
+        await run(`git branch -D "${builder.branch}"`, { cwd: config.projectRoot });
+        logger.info('Local branch deleted');
+      } catch {
+        // Branch may not exist locally
+      }
+    }
+
+    // Delete remote branch (verify PR is merged first unless --force)
+    if (builder.branch) {
+      if (!force) {
+        // Check if there's a merged PR for this branch
+        try {
+          const prStatus = await run(`gh pr list --head "${builder.branch}" --state merged --json number --limit 1`, { cwd: config.projectRoot });
+          const mergedPRs = JSON.parse(prStatus.stdout);
+          if (mergedPRs.length === 0) {
+            // Check for open PRs
+            const openPRStatus = await run(`gh pr list --head "${builder.branch}" --state open --json number --limit 1`, { cwd: config.projectRoot });
+            const openPRs = JSON.parse(openPRStatus.stdout);
+            if (openPRs.length > 0) {
+              logger.warn(`Warning: Branch ${builder.branch} has an open PR. Skipping remote deletion.`);
+              logger.info('Use --force to delete anyway.');
+            } else {
+              logger.warn(`Warning: No merged PR found for ${builder.branch}. Skipping remote deletion.`);
+              logger.info('Use --force to delete anyway.');
+            }
+          } else {
+            // PR is merged, safe to delete remote
+            await deleteRemoteBranch(builder.branch, config);
+          }
+        } catch {
+          logger.warn('Warning: Could not verify PR status. Skipping remote deletion.');
+        }
+      } else {
+        // --force: delete remote branch without checking PR status
+        await deleteRemoteBranch(builder.branch, config);
+      }
+    }
+  } else if (!isShellMode) {
+    // Non-bugfix mode: preserve worktree and branch (existing behavior)
+    if (existsSync(builder.worktree)) {
+      logger.info(`Worktree preserved at: ${builder.worktree}`);
+      logger.info('To remove: git worktree remove "' + builder.worktree + '"');
+    }
+
+    if (builder.branch) {
+      logger.info(`Branch preserved: ${builder.branch}`);
+      logger.info('To delete: git branch -d "' + builder.branch + '"');
+    }
   }
 
   // Remove from state
