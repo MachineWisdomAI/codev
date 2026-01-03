@@ -277,41 +277,94 @@ function checkDependency(dep: Dependency): CheckResult {
 }
 
 /**
- * Verify an AI model is operational by running a quick consult command
+ * CLI-specific verification commands
+ * Each CLI has its own way to verify authentication without running a full query
+ */
+interface VerifyConfig {
+  command: string;
+  args: string[];
+  timeout: number;
+  successCheck: (result: { status: number | null; stdout: string; stderr: string }) => boolean;
+  authHint: string;
+}
+
+const VERIFY_CONFIGS: Record<string, VerifyConfig> = {
+  'Codex': {
+    // codex login status exits 0 when logged in
+    command: 'codex',
+    args: ['login', 'status'],
+    timeout: 10000,
+    successCheck: (r) => r.status === 0,
+    authHint: 'Try running "codex" in this directory to debug',
+  },
+  'Claude': {
+    // claude --version is a quick check that the CLI is functional
+    // If API key is invalid, even --version will fail on some setups
+    // We use a minimal --print query for a more reliable check
+    command: 'claude',
+    args: ['--print', '-p', 'Reply OK', '--max-turns', '1'],
+    timeout: 30000,
+    successCheck: (r) => r.status === 0,
+    authHint: 'Run: claude /login or set ANTHROPIC_API_KEY',
+  },
+  'Gemini': {
+    // gemini --version verifies the CLI works, but not auth
+    // A minimal query is needed to verify API connectivity
+    command: 'gemini',
+    args: ['--yolo', 'Reply with just OK'],
+    timeout: 30000,
+    successCheck: (r) => r.status === 0,
+    authHint: 'Run: gemini (interactive) then /auth, or set GOOGLE_API_KEY',
+  },
+};
+
+/**
+ * Verify an AI model is operational using CLI-specific auth checks
  */
 function verifyAiModel(modelName: string): CheckResult {
-  const modelMap: Record<string, string> = {
-    'Claude': 'claude',
-    'Gemini': 'gemini',
-    'Codex': 'codex',
-  };
-
-  const model = modelMap[modelName];
-  if (!model) {
+  const config = VERIFY_CONFIGS[modelName];
+  if (!config) {
     return { status: 'skip', version: 'unknown model' };
   }
 
   try {
-    // Use consult to verify the model is operational
-    const result = spawnSync(
-      'consult',
-      ['--model', model, 'general', 'Reply with just OK if operational'],
-      { encoding: 'utf-8', timeout: 60000, stdio: 'pipe' }
-    );
+    const result = spawnSync(config.command, config.args, {
+      encoding: 'utf-8',
+      timeout: config.timeout,
+      stdio: 'pipe',
+    });
 
-    if (result.status === 0 && result.stdout) {
+    const stdout = result.stdout || '';
+    const stderr = result.stderr || '';
+
+    if (config.successCheck({ status: result.status, stdout, stderr })) {
       return { status: 'ok', version: 'operational' };
     }
 
-    // Check for common auth errors in stderr
-    const stderr = result.stderr || '';
-    if (stderr.includes('auth') || stderr.includes('API key') || stderr.includes('token')) {
-      return { status: 'fail', version: 'auth error', note: 'check API key/auth' };
+    // Check for common auth-related error patterns
+    const combined = (stdout + stderr).toLowerCase();
+    if (combined.includes('not logged in') ||
+        combined.includes('authentication') ||
+        combined.includes('api key') ||
+        combined.includes('api_key') ||
+        combined.includes('unauthorized') ||
+        combined.includes('invalid key') ||
+        combined.includes('credential')) {
+      return { status: 'fail', version: 'auth error', note: config.authHint };
     }
 
-    return { status: 'fail', version: 'not responding', note: 'check configuration' };
-  } catch {
-    return { status: 'fail', version: 'error', note: 'consult command failed' };
+    // Check for timeout
+    if (result.signal === 'SIGTERM' || combined.includes('timeout')) {
+      return { status: 'fail', version: 'timeout', note: 'check network connection' };
+    }
+
+    // Generic failure - include a snippet of the error for debugging
+    const errorSnippet = (stderr || stdout).trim().split('\n').slice(-2).join(' ').substring(0, 60);
+    const note = errorSnippet ? `${config.authHint} (${errorSnippet}...)` : config.authHint;
+    return { status: 'fail', version: 'not responding', note };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'unknown error';
+    return { status: 'fail', version: 'error', note: `${config.authHint} (${errMsg})` };
   }
 }
 
