@@ -239,7 +239,7 @@ export function copyResourceTemplates(
     fs.mkdirSync(resourcesDir, { recursive: true });
   }
 
-  const templates = ['lessons-learned.md', 'arch.md'];
+  const templates = ['lessons-learned.md', 'arch.md', 'cheatsheet.md', 'lifecycle.md'];
   for (const template of templates) {
     const destPath = path.join(resourcesDir, template);
     const srcPath = path.join(skeletonDir, 'templates', template);

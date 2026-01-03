@@ -46,6 +46,14 @@ describe('Scaffold Utilities', () => {
       '# Architecture\n\nArch template'
     );
     fs.writeFileSync(
+      path.join(mockSkeletonDir, 'templates', 'cheatsheet.md'),
+      '# Codev Cheatsheet\n\nCheatsheet template'
+    );
+    fs.writeFileSync(
+      path.join(mockSkeletonDir, 'templates', 'lifecycle.md'),
+      '# Lifecycle\n\nLifecycle template'
+    );
+    fs.writeFileSync(
       path.join(mockSkeletonDir, 'templates', 'CLAUDE.md'),
       '# {{PROJECT_NAME}} Instructions\n\nClaude template'
     );
@@ -211,7 +219,7 @@ describe('Scaffold Utilities', () => {
   });
 
   describe('copyResourceTemplates', () => {
-    it('should copy lessons-learned.md and arch.md', () => {
+    it('should copy lessons-learned.md, arch.md, cheatsheet.md, and lifecycle.md', () => {
       const targetDir = path.join(tempDir, 'project');
       fs.mkdirSync(targetDir, { recursive: true });
 
@@ -219,8 +227,12 @@ describe('Scaffold Utilities', () => {
 
       expect(result.copied).toContain('lessons-learned.md');
       expect(result.copied).toContain('arch.md');
+      expect(result.copied).toContain('cheatsheet.md');
+      expect(result.copied).toContain('lifecycle.md');
       expect(fs.existsSync(path.join(targetDir, 'codev', 'resources', 'lessons-learned.md'))).toBe(true);
       expect(fs.existsSync(path.join(targetDir, 'codev', 'resources', 'arch.md'))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'resources', 'cheatsheet.md'))).toBe(true);
+      expect(fs.existsSync(path.join(targetDir, 'codev', 'resources', 'lifecycle.md'))).toBe(true);
     });
 
     it('should skip existing files in adopt mode', () => {
@@ -231,7 +243,22 @@ describe('Scaffold Utilities', () => {
       const result = copyResourceTemplates(targetDir, mockSkeletonDir, { skipExisting: true });
 
       expect(result.copied).toContain('lessons-learned.md');
+      expect(result.copied).toContain('cheatsheet.md');
+      expect(result.copied).toContain('lifecycle.md');
       expect(result.skipped).toContain('arch.md');
+    });
+
+    // Regression test for issue #130: cheatsheet.md missing after codev adopt
+    it('should copy cheatsheet.md for dashboard documentation links (issue #130)', () => {
+      const targetDir = path.join(tempDir, 'project');
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      const result = copyResourceTemplates(targetDir, mockSkeletonDir);
+
+      // cheatsheet.md is linked from dashboard info header - must be copied
+      expect(result.copied).toContain('cheatsheet.md');
+      const cheatsheetPath = path.join(targetDir, 'codev', 'resources', 'cheatsheet.md');
+      expect(fs.existsSync(cheatsheetPath)).toBe(true);
     });
   });
 
