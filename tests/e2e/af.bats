@@ -102,3 +102,78 @@ teardown() {
   # Should fail gracefully with helpful message
   [[ "$status" -eq 0 ]] || [[ "$status" -eq 1 ]]
 }
+
+# === Stale State Recovery (Issue #148) ===
+
+@test "af status shows stopped for dead PID" {
+  # Issue #148: When architect process dies but state.db retains the record,
+  # af status should correctly identify the process as stopped
+
+  # Initialize a codev project
+  ./node_modules/.bin/codev init test-project --yes
+  cd test-project
+
+  # Create stale architect state with a definitely-dead PID
+  # PID 999999 is very unlikely to exist on any system
+  mkdir -p .agent-farm
+  sqlite3 .agent-farm/state.db "
+    CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS architect (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      pid INTEGER NOT NULL,
+      port INTEGER NOT NULL,
+      cmd TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      tmux_session TEXT
+    );
+    INSERT OR REPLACE INTO _migrations (version) VALUES (1);
+    INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session)
+    VALUES (1, 999999, 4501, 'claude', '2024-01-01T00:00:00Z', 'af-architect-4501');
+  "
+
+  # Verify stale state exists
+  run sqlite3 .agent-farm/state.db "SELECT pid FROM architect WHERE id = 1"
+  assert_success
+  assert_output "999999"
+
+  # af status should show the architect as "stopped" (not "running")
+  run ../node_modules/.bin/af status
+  assert_success
+
+  # The output should show the architect as stopped
+  assert_output --partial "stopped"
+  # Should still show the PID for reference
+  assert_output --partial "999999"
+}
+
+@test "af status shows running for live PID" {
+  # This test verifies that when a valid architect IS running,
+  # af status correctly shows it as running
+
+  # Initialize a codev project
+  ./node_modules/.bin/codev init test-project --yes
+  cd test-project
+
+  # Create architect state with current shell's PID (which IS alive)
+  mkdir -p .agent-farm
+  sqlite3 .agent-farm/state.db "
+    CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS architect (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      pid INTEGER NOT NULL,
+      port INTEGER NOT NULL,
+      cmd TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      tmux_session TEXT
+    );
+    INSERT OR REPLACE INTO _migrations (version) VALUES (1);
+    INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session)
+    VALUES (1, $$, 4501, 'claude', '2024-01-01T00:00:00Z', 'af-architect-4501');
+  "
+
+  # af status should show this architect as running
+  run ../node_modules/.bin/af status
+  assert_success
+  # Should show "running" since the PID is alive
+  assert_output --partial "running"
+}

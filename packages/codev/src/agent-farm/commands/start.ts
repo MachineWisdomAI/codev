@@ -12,7 +12,7 @@ import type { StartOptions, ArchitectState } from '../types.js';
 import { version as localVersion } from '../../version.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, spawnTtyd } from '../utils/shell.js';
+import { spawnDetached, commandExists, findAvailablePort, openBrowser, run, spawnTtyd, isProcessRunning } from '../utils/shell.js';
 import { checkCoreDependencies } from '../utils/deps.js';
 import { loadState, setArchitect } from '../state.js';
 import { handleOrphanedSessions, warnAboutStaleArtifacts } from '../utils/orphan-handler.js';
@@ -340,18 +340,27 @@ export async function start(options: StartOptions = {}): Promise<void> {
   // Check if already running
   const state = loadState();
   if (state.architect) {
-    // Dashboard port is architect port - 1 (architect runs on base+1, dashboard on base)
-    const runningDashboardPort = state.architect.port - 1;
-    logger.warn(`Architect already running on port ${state.architect.port}`);
-    logger.info(`Dashboard: http://localhost:${runningDashboardPort}`);
+    // Validate that the architect process is actually alive
+    const isAlive = await isProcessRunning(state.architect.pid);
 
-    // In remote mode (--no-browser), keep process alive so SSH tunnel stays connected
-    if (options.noBrowser) {
-      logger.info('Keeping connection alive for remote tunnel...');
-      // Block forever - SSH disconnect will kill us
-      await new Promise(() => {});
+    if (isAlive) {
+      // Dashboard port is architect port - 1 (architect runs on base+1, dashboard on base)
+      const runningDashboardPort = state.architect.port - 1;
+      logger.warn(`Architect already running on port ${state.architect.port}`);
+      logger.info(`Dashboard: http://localhost:${runningDashboardPort}`);
+
+      // In remote mode (--no-browser), keep process alive so SSH tunnel stays connected
+      if (options.noBrowser) {
+        logger.info('Keeping connection alive for remote tunnel...');
+        // Block forever - SSH disconnect will kill us
+        await new Promise(() => {});
+      }
+      return;
+    } else {
+      // PID is dead but state exists - clear stale state and continue
+      logger.info('Clearing stale architect state (process no longer running)');
+      setArchitect(null);
     }
-    return;
   }
 
   // Ensure directories exist
