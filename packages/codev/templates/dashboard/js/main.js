@@ -233,6 +233,9 @@ async function renderDashboardTab() {
     loadFilesTreeIfNeeded()
   ]);
 
+  // Start auto-polling for file changes
+  startFilesPolling();
+
   renderDashboardTabContent();
   checkStarterMode();
 }

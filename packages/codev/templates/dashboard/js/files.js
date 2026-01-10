@@ -1,5 +1,43 @@
 // File Tree Browser and Search (Spec 0055, 0058)
 
+// Auto-refresh interval (5 seconds)
+const FILES_POLL_INTERVAL = 5000;
+let filesLastHash = null;
+let filesPollTimer = null;
+
+// Start auto-polling for file changes
+function startFilesPolling() {
+  if (filesPollTimer) return; // Already polling
+  filesPollTimer = setInterval(checkFilesForChanges, FILES_POLL_INTERVAL);
+}
+
+// Stop auto-polling
+function stopFilesPolling() {
+  if (filesPollTimer) {
+    clearInterval(filesPollTimer);
+    filesPollTimer = null;
+  }
+}
+
+// Check if files have changed and refresh if needed
+async function checkFilesForChanges() {
+  try {
+    const response = await fetch(`/api/files/hash?t=${Date.now()}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (filesLastHash === null) {
+      filesLastHash = data.hash;
+    } else if (data.hash !== filesLastHash) {
+      filesLastHash = data.hash;
+      await loadFilesTree();
+      rerenderFilesBrowser();
+    }
+  } catch (err) {
+    // Ignore errors - server may be restarting
+  }
+}
+
 // Load the file tree from the API
 async function loadFilesTree() {
   try {

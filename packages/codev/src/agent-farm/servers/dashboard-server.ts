@@ -1873,6 +1873,54 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Get hash of file tree for change detection (auto-refresh)
+    if (req.method === 'GET' && url.pathname === '/api/files/hash') {
+      // Build a lightweight hash based on directory mtimes
+      // This is faster than building the full tree
+      function getTreeHash(dirPath: string): string {
+        const EXCLUDED_DIRS = new Set([
+          'node_modules', '.git', 'dist', '__pycache__', '.next',
+          '.nuxt', '.turbo', 'coverage', '.nyc_output', '.cache',
+          '.parcel-cache', 'build', '.svelte-kit', 'vendor', '.venv', 'venv', 'env',
+        ]);
+
+        let hash = '';
+        function walk(dir: string): void {
+          try {
+            const stat = fs.statSync(dir);
+            hash += `${dir}:${stat.mtimeMs};`;
+
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+              if (EXCLUDED_DIRS.has(item.name)) continue;
+              if (item.isDirectory()) {
+                walk(path.join(dir, item.name));
+              } else if (item.isFile()) {
+                // Include file mtime for change detection
+                const fileStat = fs.statSync(path.join(dir, item.name));
+                hash += `${item.name}:${fileStat.mtimeMs};`;
+              }
+            }
+          } catch {
+            // Ignore errors
+          }
+        }
+
+        walk(dirPath);
+        // Simple hash: sum of char codes
+        let sum = 0;
+        for (let i = 0; i < hash.length; i++) {
+          sum = ((sum << 5) - sum + hash.charCodeAt(i)) | 0;
+        }
+        return sum.toString(16);
+      }
+
+      const hash = getTreeHash(projectRoot);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ hash }));
+      return;
+    }
+
     // API: Create a new file (Bugfix #131)
     if (req.method === 'POST' && url.pathname === '/api/files') {
       const body = await parseJsonBody(req);

@@ -21,6 +21,8 @@
     }
     body.preview-active {
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .header {
       padding: 15px 20px;
@@ -29,6 +31,7 @@
       position: sticky;
       top: 0;
       z-index: 100;
+      flex-shrink: 0; /* Don't shrink in preview flex layout */
     }
     .header h1.path { font-size: 14px; font-weight: 500; font-family: monospace; color: #fff; }
     .header .subtitle { color: #888; font-size: 12px; margin-top: 4px; }
@@ -109,6 +112,9 @@
       color: #fff;
       max-width: 900px;
       margin: 0 auto;
+      /* Fixes #143: use flex to fill remaining height instead of fixed calc */
+      flex: 1;
+      min-height: 0; /* Allow flex shrinking for overflow to work */
     }
 
     #preview-container h1,
@@ -468,7 +474,7 @@
   </div>
 
   <!-- Markdown preview mode -->
-  <div id="preview-container" style="display: none; padding: 20px; overflow: auto; height: calc(100vh - 80px);"></div>
+  <div id="preview-container" style="display: none; padding: 20px; overflow: auto;"></div>
 
   <!-- Image viewer mode -->
   <div id="image-viewer">
@@ -837,6 +843,8 @@
     function configureMarked() {
       if (typeof marked !== 'undefined' && !marked._configured) {
         marked.use({
+          // Enable breaks: single newlines become <br> (fixes #141)
+          breaks: true,
           renderer: {
             link(href, title, text) {
               const titleAttr = title ? ` title="${title}"` : '';
