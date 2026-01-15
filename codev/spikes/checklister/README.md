@@ -3,8 +3,9 @@
 **Goal**: Build an agent that enforces SPIDER protocol compliance by maintaining a checklist state and blocking progression until all required items are complete.
 
 **Time-box**: 2-4 hours
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 **Started**: 2026-01-16
+**Completed**: 2026-01-16
 
 ## Hypothesis
 
@@ -241,3 +242,98 @@ This is intentionally small to test the protocol overhead, not implementation co
 - Start simple: file-based state, manual marking
 - Don't over-engineer: this is a spike, not production
 - Focus on learning what friction points exist
+
+---
+
+## Spike Findings
+
+### Key Decisions Made
+
+1. **State Management**: File-based (Option B: `.spider-state.json`)
+   - Simple JSON format
+   - Persists across sessions
+   - Human-readable and editable
+   - Can be version controlled
+
+2. **Integration**: Claude Code skill (Option D)
+   - Created `.claude/commands/checklister.md`
+   - Invoked via `/checklister <command>`
+   - Claude interprets the skill and acts on state
+
+3. **Granularity**: Per-phase detailed checklists
+   - All items from protocol.md
+   - Blocking vs non-blocking distinction preserved
+   - Dynamic implementation phases (added as plan defines them)
+
+### Files Created
+
+1. **`.claude/commands/checklister.md`** - Skill definition with:
+   - Command syntax (init, status, complete, gate, reset)
+   - State file format
+   - Complete checklist item definitions for all phases
+   - Gate logic rules
+
+2. **`.spider-state.json`** - State file with:
+   - Project metadata (id, protocol, started_at)
+   - Current phase tracking
+   - Completed items with timestamps and evidence
+   - Dynamic implementation_phases section
+
+### Success Criteria Results
+
+1. **PASS**: Checklister blocks phase transition when items incomplete
+   - Gate command checks all blocking items
+   - Returns BLOCKED with list of missing items
+
+2. **PASS**: Checklister allows transition when all blocking items complete
+   - Gate command returns ALLOWED
+   - Updates current_phase in state
+
+3. **PASS**: State persists across sessions
+   - JSON file persists on disk
+   - Read/write on each command
+
+4. **PASS**: Clear feedback about what's missing
+   - Status shows checklist with checkboxes
+   - Gate lists specific missing items
+
+5. **TBD**: Overhead feels reasonable (not annoying)
+   - Need real-world testing to assess friction
+   - Potential friction points identified below
+
+### Friction Points Identified
+
+1. **Manual marking is verbose**
+   - Every item needs explicit `/checklister complete <id>`
+   - Could be annoying if many items per phase
+   - **Mitigation**: Auto-detect from git commits (future)
+
+2. **Evidence is optional but valuable**
+   - Without evidence, hard to verify later
+   - **Mitigation**: Make evidence required for certain items
+
+3. **Implementation phases are dynamic**
+   - Need to add phases to state as plan defines them
+   - Could add `/checklister add-phase <name>` command
+
+4. **No undo mechanism**
+   - Once marked complete, can't easily undo
+   - **Mitigation**: Reset command exists for full reset
+
+### Recommendations for Next Steps
+
+1. **Test with real SPIDER workflow**
+   - Use checklister for an actual spec (e.g., tower theme toggle)
+   - Measure actual friction
+
+2. **Consider auto-completion triggers**
+   - Watch git commits for certain patterns
+   - Auto-mark items when evidence detected
+
+3. **Add progress visualization**
+   - Show progress bar in status output
+   - Track time spent per phase
+
+4. **Integration with af dashboard**
+   - Show checklister status in builder panel
+   - Visual progress indicator

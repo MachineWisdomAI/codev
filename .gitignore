@@ -21,3 +21,6 @@ codev/cleanup/.trash/
 packages/codev/dist/
 packages/codev/node_modules/
 packages/codev/skeleton/
+
+# Checklister runtime state
+.spider-state.json
