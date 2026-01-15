@@ -133,6 +133,50 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
+  - id: "0070"
+    title: "CODEV_HQ Minimal Implementation Spike"
+    summary: "Spike to validate CODEV_HQ architecture: WebSocket connection, status sync, remote approvals"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0070-codev-hq-spike.md
+      plan: null
+      review: null
+    dependencies: ["0068"]
+    tags: [spike, architecture, cloud, v2]
+    timestamps:
+      conceived_at: "2026-01-16T07:54:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Time-boxed spike (4-6h) to validate CODEV_HQ core concepts before full implementation."
+
+  - id: "0069"
+    title: "Checklister Agent Spike"
+    summary: "Spike to build a checklister agent that enforces SPIDER protocol compliance"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0069-checklister-spike.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [spike, workflow, protocol, v2]
+    timestamps:
+      conceived_at: "2026-01-16T07:54:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Time-boxed spike (2-4h) to build deterministic SPIDER enforcement via checklister state machine."
+
   - id: "0068"
     title: "Codev 2.0 - Cloud Tower + Deterministic Core"
     summary: "Major platform rewrite: cloud-hosted tower, mobile access, deterministic SPIDER enforcement"
@@ -681,7 +725,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0067** - Reserve this number for your next project
+**0071** - Reserve this number for your next project
 
 ---
 
