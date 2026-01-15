@@ -133,6 +133,72 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
+  - id: "0068"
+    title: "Codev 2.0 - Cloud Tower + Deterministic Core"
+    summary: "Major platform rewrite: cloud-hosted tower, mobile access, deterministic SPIDER enforcement"
+    status: conceived
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0068-codev-2.0.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [architecture, cloud, mobile, workflow, v2]
+    timestamps:
+      conceived_at: "2026-01-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Meta-spec for Codev 2.0. Three pillars: (1) Terminal/Dashboard rewrite, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIDER enforcement. Supersedes 0066/0067."
+
+  - id: "0067"
+    title: "Agent Farm Architecture Rewrite"
+    summary: "Replace ttyd/tmux with node-pty, modernize dashboard with React/Svelte"
+    status: conceived
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0067-agent-farm-architecture-rewrite.md
+      plan: null
+      review: null
+    dependencies: ["0068"]
+    tags: [architecture, agent-farm, terminal, dashboard]
+    timestamps:
+      conceived_at: "2026-01-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Subsumed into 0068 (Codev 2.0). Covers Pillar 1: Terminal/Dashboard rewrite."
+
+  - id: "0066"
+    title: "VSCode Companion Extension"
+    summary: "Thin VSCode extension providing IDE integration with Agent Farm backend"
+    status: abandoned
+    priority: low
+    release: null
+    files:
+      spec: codev/specs/0066-vscode-companion-extension.md
+      plan: null
+      review: null
+    dependencies: []
+    tags: [vscode, extension, ui, dx]
+    timestamps:
+      conceived_at: "2026-01-12T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "ABANDONED: Superseded by 0068 Cloud Tower approach. Instead of IDE-specific extension, we're building cloud-hosted tower with mobile PWA that works from any device."
+
   - id: "0063"
     title: "Tower Dashboard Improvements"
     summary: "Better project management UI with tools for starting local/remote services"
@@ -274,11 +340,17 @@ Projects currently in development (conceived through committed), sorted by prior
 
 ```yaml
 releases:
-  - version: "v1.6.0"
+  - version: "v2.0.0"
     name: "TBD"
     status: planning
-    target_date: null
-    notes: "Key features: BUGFIX protocol (af spawn --issue), CMAP 3-way parallel reviews, Tower Dashboard improvements"
+    target_date: "2026-Q3"
+    notes: "Major platform rewrite. Three pillars: (1) node-pty terminal layer, React dashboard, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIDER enforcement via workflow engine."
+
+  - version: "v1.6.0"
+    name: "Gothic"
+    status: released
+    target_date: "2026-01-12"
+    notes: "Key features: BUGFIX protocol (af spawn --issue), CMAP 3-way parallel reviews, git remote detection"
 
   - version: "v1.5.8"
     name: "Florence"
@@ -609,7 +681,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0066** - Reserve this number for your next project
+**0067** - Reserve this number for your next project
 
 ---
 
