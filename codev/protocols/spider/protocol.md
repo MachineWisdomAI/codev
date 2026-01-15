@@ -11,6 +11,46 @@
 
 ## Protocol Configuration
 
+### Checklister Enforcement (OPTIONAL)
+
+The checklister agent provides deterministic protocol compliance by tracking checklist state and blocking phase transitions until all required items are complete.
+
+**ENABLING CHECKLISTER:**
+To enable checklister enforcement, run at the start of any SPIDER project:
+```
+/checklister init <project_id>
+```
+
+**STATE STORAGE:**
+- State files are stored in `codev/checklists/<project_id>.json`
+- State persists across sessions
+- One file per project
+
+**COMMANDS:**
+| Command | When to Use |
+|---------|-------------|
+| `/checklister init <id>` | Start of project |
+| `/checklister status` | Check current progress |
+| `/checklister complete <item> --evidence "..."` | After completing a checkpoint |
+| `/checklister gate <target>` | Before phase/stage transitions |
+| `/checklister add-phase <name>` | After plan approval, for each impl phase |
+
+**GATE TARGETS:**
+- `plan` - S → P transition
+- `implement` - P → IDE transition
+- `defend` - I → D transition (within IDE)
+- `evaluate` - D → E transition (within IDE)
+- `next-phase` - E → next I transition (within IDE)
+- `review` - IDE → R transition
+
+**BEHAVIOR:**
+- When enabled: Phase transitions are BLOCKED until all items complete
+- Gates return `BLOCKED` with list of missing items, or `ALLOWED`
+- Evidence is optional but recommended for audit trail
+
+**DISABLING:**
+Checklister is optional. To run SPIDER without enforcement, simply don't initialize it.
+
 ### Multi-Agent Consultation (ENABLED BY DEFAULT)
 
 **DEFAULT BEHAVIOR:**
@@ -71,16 +111,23 @@ SPIDER is a structured development protocol that emphasizes specification-driven
 1. User provides a prompt describing what they want built
 2. Agent generates initial specification document
 3. **COMMIT**: "Initial specification draft"
+   - 🔲 `/checklister complete spec_draft --evidence "commit <hash>"`
 4. Multi-agent review (GPT-5 and Gemini Pro)
+   - 🔲 `/checklister complete spec_consult_1 --evidence "consulted GPT-5 and Gemini"`
 5. Agent updates spec with multi-agent feedback
 6. **COMMIT**: "Specification with multi-agent review"
+   - 🔲 `/checklister complete spec_feedback_commit --evidence "commit <hash>"`
 7. Human reviews and provides comments for changes
+   - 🔲 `/checklister complete spec_human_review --evidence "user approved"`
 8. Agent makes changes and lists what was modified
 9. **COMMIT**: "Specification with user feedback"
 10. Multi-agent review of updated document
+    - 🔲 `/checklister complete spec_consult_2 --evidence "second consultation"`
 11. Final updates based on second review
 12. **COMMIT**: "Final approved specification"
-13. Iterate steps 7-12 until user approves and says to proceed to planning
+    - 🔲 `/checklister complete spec_final --evidence "commit <hash>"`
+13. **GATE**: `/checklister gate plan` - Verify all Specify items complete
+14. Iterate steps 7-12 until user approves and says to proceed to planning
 
 **Important**: Keep documentation minimal - use only THREE core files with the same name:
 - `specs/####-descriptive-name.md` - The specification
@@ -160,16 +207,25 @@ SPIDER is a structured development protocol that emphasizes specification-driven
 **Workflow Overview**:
 1. Agent creates initial plan document
 2. **COMMIT**: "Initial plan draft"
+   - 🔲 `/checklister complete plan_draft --evidence "commit <hash>"`
 3. Multi-agent review (GPT-5 and Gemini Pro)
+   - 🔲 `/checklister complete plan_consult_1 --evidence "consulted GPT-5 and Gemini"`
 4. Agent updates plan with multi-agent feedback
 5. **COMMIT**: "Plan with multi-agent review"
+   - 🔲 `/checklister complete plan_feedback_commit --evidence "commit <hash>"`
 6. User reviews and requests modifications
+   - 🔲 `/checklister complete plan_human_review --evidence "user approved"`
 7. Agent updates plan based on user feedback
 8. **COMMIT**: "Plan with user feedback"
 9. Multi-agent review of updated plan
+   - 🔲 `/checklister complete plan_consult_2 --evidence "second consultation"`
 10. Final updates based on second review
 11. **COMMIT**: "Final approved plan"
-12. Iterate steps 6-11 until agreement is reached
+    - 🔲 `/checklister complete plan_final --evidence "commit <hash>"`
+12. **REGISTER PHASES**: For each phase in the plan:
+    - 🔲 `/checklister add-phase <phase_name>`
+13. **GATE**: `/checklister gate implement` - Verify all Plan items complete
+14. Iterate steps 6-11 until agreement is reached
 
 **Phase Design Goals**:
 Each phase should be:
@@ -234,10 +290,26 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 
 **Phase Completion Process**:
 1. **Implement** - Build the code for this phase
+   - 🔲 `/checklister complete {phase}_code_complete --evidence "implementation done"`
+   - 🔲 `/checklister complete {phase}_impl_consult --evidence "consulted experts"`
+   - 🔲 `/checklister complete {phase}_impl_feedback --evidence "feedback addressed"`
+   - **GATE**: `/checklister gate defend` - Verify Implement stage complete
 2. **Defend** - Write comprehensive tests that guard functionality
+   - 🔲 `/checklister complete {phase}_unit_tests --evidence "unit tests written"`
+   - 🔲 `/checklister complete {phase}_tests_passing --evidence "all tests pass"`
+   - 🔲 `/checklister complete {phase}_defend_consult --evidence "test review done"`
+   - 🔲 `/checklister complete {phase}_overmocking_check --evidence "no overmocking"`
+   - **GATE**: `/checklister gate evaluate` - Verify Defend stage complete
 3. **Evaluate** - Assess and discuss with user
+   - 🔲 `/checklister complete {phase}_acceptance_met --evidence "criteria verified"`
+   - 🔲 `/checklister complete {phase}_expert_approval --evidence "experts approved"`
+   - 🔲 `/checklister complete {phase}_user_evaluation --evidence "user reviewed"`
+   - 🔲 `/checklister complete {phase}_user_approval --evidence "user approved"`
 4. **Commit** - Single atomic commit for the phase (MANDATORY before next phase)
+   - 🔲 `/checklister complete {phase}_committed --evidence "commit <hash>"`
+   - 🔲 `/checklister complete {phase}_plan_updated --evidence "plan updated"`
 5. **Proceed** - Move to next phase only after commit
+   - **GATE**: `/checklister gate next-phase` or `/checklister gate review` (if last phase)
 
 **Handling Failures**:
 - If **Defend** phase reveals gaps → return to **Implement** to fix
@@ -474,6 +546,7 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 **Purpose**: Ensure overall coherence, capture learnings, improve the methodology, and perform systematic review.
 
 **Precondition**: All implementation phases must be committed (verify with `git log --oneline | grep "\[Phase"`)
+- 🔲 `/checklister complete review_all_committed --evidence "all phases committed"`
 
 **Process**:
 1. **Comprehensive Review**
@@ -519,6 +592,7 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
    - What would you do differently?
    - What methodology improvements are needed?
    - What systematic issues were identified?
+   - 🔲 `/checklister complete review_lessons_learned --evidence "lessons documented"`
 
 7. **Methodology Evolution**
    - Propose process improvements based on lessons
@@ -530,8 +604,11 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 
 **Output**:
 - Single review document in `codev/reviews/####-descriptive-name.md`
+  - 🔲 `/checklister complete review_doc_created --evidence "review doc committed"`
 - Same filename as spec/plan, captures review and learnings from this feature
 - Methodology improvement proposals (update protocol if needed)
+
+**Final Gate**: `/checklister gate done` - Verify all Review items complete
 
 **Review Required**: Yes - Team retrospective recommended
 

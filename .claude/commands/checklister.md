@@ -48,6 +48,7 @@ Targets:
 - `evaluate` - Gate from Defend to Evaluate (within IDE)
 - `next-phase` - Gate to next implementation phase (within IDE)
 - `review` - Gate from IDE to Review
+- `done` - Gate from Review to completion (project complete)
 
 **Action**:
 1. Read state file
