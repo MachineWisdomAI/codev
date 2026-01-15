@@ -283,25 +283,39 @@ This is intentionally small to test the protocol overhead, not implementation co
 
 ### Success Criteria Results
 
-1. **PASS**: Checklister blocks phase transition when items incomplete
-   - Gate command checks all blocking items
-   - Returns BLOCKED with list of missing items
+| Test | Result | Evidence |
+|------|--------|----------|
+| Blocks phase transition when incomplete | **PASS** | Gate returns BLOCKED with missing items |
+| Allows transition when complete | **PASS** | Gate returns ALLOWED, updates phase |
+| State persists across sessions | **PASS** | JSON file in codev/checklists/ |
+| Clear feedback about missing items | **PASS** | Lists specific item IDs and labels |
+| Overhead feels reasonable | **TBD** | Need more real-world usage |
 
-2. **PASS**: Checklister allows transition when all blocking items complete
-   - Gate command returns ALLOWED
-   - Updates current_phase in state
+### Protocol Integration
 
-3. **PASS**: State persists across sessions
-   - JSON file persists on disk
-   - Read/write on each command
+The SPIDER protocol (`codev/protocols/spider/protocol.md`) has been updated with:
+- Checklister configuration section
+- `/checklister` commands at each workflow checkpoint
+- Gate commands at all phase/stage transitions
 
-4. **PASS**: Clear feedback about what's missing
-   - Status shows checklist with checkboxes
-   - Gate lists specific missing items
+### Test Execution Log
 
-5. **TBD**: Overhead feels reasonable (not annoying)
-   - Need real-world testing to assess friction
-   - Potential friction points identified below
+```
+/checklister init 0069
+→ Created codev/checklists/0069.json
+
+/checklister status 0069
+→ Shows Specify phase (0/6 complete)
+
+/checklister complete spec_draft --evidence "commit 9c0a551"
+→ Marked complete, Progress: 1/6
+
+/checklister gate plan (with 1/6 complete)
+→ BLOCKED - Missing 5 items
+
+/checklister gate plan (with 6/6 complete)
+→ ALLOWED - Transitioned to Plan phase
+```
 
 ### Friction Points Identified
 
