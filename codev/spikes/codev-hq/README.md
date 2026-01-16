@@ -90,25 +90,236 @@ A minimal CODEV_HQ implementation can demonstrate:
 4. Create status file, verify sync
 5. Click approve, verify local file updated
 
-## Message Protocol (From Spec 0068)
+## Validated Protocol
 
-### Local → HQ
+This section documents the WebSocket protocol that was **implemented and tested** in this spike.
+
+### Message Envelope
+
+All messages use this JSON envelope:
+
 ```typescript
-// Register on connect
-{ type: "register", payload: { instance_id, projects } }
+interface Message {
+  type: string;      // Message type identifier
+  id: string;        // Unique ID for request/response correlation
+  ts: number;        // Unix timestamp (milliseconds)
+  payload: object;   // Type-specific data
+}
 
-// Status file changed
-{ type: "status_update", payload: { project_path, status_file, content } }
-
-// Gate completed locally
-{ type: "gate_completed", payload: { project_id, gate } }
+interface Response {
+  type: "response";
+  id: string;        // Same ID as request (correlation)
+  ts: number;
+  success: boolean;
+  error?: string;    // If success=false
+  payload?: object;
+}
 ```
 
-### HQ → Local
-```typescript
-// Human approved a gate
-{ type: "approval", payload: { project_id, gate, approved_by } }
+### Connection Lifecycle
+
 ```
+Local Agent Farm                           HQ Server
+      │                                        │
+      │──── WebSocket CONNECT ────────────────→│
+      │     ws://host:4300/ws?key=<api_key>    │
+      │                                        │
+      │←─── welcome ───────────────────────────│
+      │     { message: "Connected to HQ" }     │
+      │                                        │
+      │──── register ─────────────────────────→│
+      │     (see payload below)                │
+      │                                        │
+      │←─── response ──────────────────────────│
+      │     { success: true, session_id }      │
+      │                                        │
+      │──── ping (every 30s) ─────────────────→│
+      │←─── pong ──────────────────────────────│
+      │                                        │
+```
+
+### Message Types: Local → HQ
+
+**register** - Initial registration after welcome
+```typescript
+{
+  type: "register",
+  id: "1705412345-abc123",
+  ts: 1705412345000,
+  payload: {
+    instance_id: "uuid-generated-on-startup",
+    instance_name: "hostname-agent-farm",  // Human-readable
+    version: "1.6.1",                       // Codev version
+    projects: [{
+      path: "/Users/dev/myproject",         // Absolute local path
+      name: "myproject",                    // Directory name
+      git_remote: "git@github.com:..."      // Optional
+    }]
+  }
+}
+```
+
+**status_update** - Status file changed locally
+```typescript
+{
+  type: "status_update",
+  id: "...",
+  ts: 1705412345000,
+  payload: {
+    project_path: "/Users/dev/myproject",
+    status_file: "codev/status/0068-feature.md",  // Relative path
+    content: "---\nid: \"0068\"\ngates:\n  human_approval: { status: pending }\n---\n",
+    git_sha: "abc123def"  // Optional, commit SHA of file
+  }
+}
+```
+
+**builder_update** - Builder status changed
+```typescript
+{
+  type: "builder_update",
+  id: "...",
+  ts: 1705412345000,
+  payload: {
+    project_path: "/Users/dev/myproject",
+    builder_id: "0068",
+    status: "implementing",  // spawning|implementing|blocked|pr-ready|complete
+    phase: "phase-1",        // Optional
+    branch: "builder/0068-feature"  // Optional
+  }
+}
+```
+
+**ping** - Heartbeat (every 30 seconds)
+```typescript
+{
+  type: "ping",
+  id: "...",
+  ts: 1705412345000,
+  payload: { ts: 1705412345000 }
+}
+```
+
+### Message Types: HQ → Local
+
+**welcome** - Sent immediately after WebSocket connects
+```typescript
+{
+  type: "welcome",
+  id: "server-welcome",
+  ts: 1705412345000,
+  payload: { message: "Connected to CODEV_HQ" }
+}
+```
+
+**pong** - Response to ping
+```typescript
+{
+  type: "pong",
+  id: "...",
+  ts: 1705412345000,
+  payload: { ts: 1705412345000 }  // Echo back client's timestamp
+}
+```
+
+**approval** - Human approved a gate (from dashboard)
+```typescript
+{
+  type: "approval",
+  id: "...",
+  ts: 1705412345000,
+  payload: {
+    project_path: "/Users/dev/myproject",
+    project_id: "0068",
+    gate: "human_approval",           // Gate identifier
+    approved_by: "waleed",            // Who approved
+    approved_at: "2026-01-16T06:15:12.348Z",
+    comment: "Looks good"             // Optional
+  }
+}
+```
+
+**response** - Generic response to any request
+```typescript
+{
+  type: "response",
+  id: "same-as-request-id",
+  ts: 1705412345000,
+  success: true,  // or false
+  error: "Error message if success=false",
+  payload: { /* request-specific data */ }
+}
+```
+
+### REST API Endpoints
+
+**GET /api/state** - Get current HQ state snapshot
+```json
+{
+  "instances": [{
+    "instance_id": "uuid",
+    "instance_name": "hostname-agent-farm",
+    "version": "1.6.1",
+    "connected_at": "2026-01-16T06:00:00Z",
+    "last_ping": "2026-01-16T06:15:00Z",
+    "projects": [{ "path": "...", "name": "..." }],
+    "status_files": [{ "path": "...", "content": "..." }],
+    "builders": [{ "builder_id": "...", "status": "..." }]
+  }],
+  "timestamp": "2026-01-16T06:15:30Z"
+}
+```
+
+**POST /api/approve** - Send approval to connected instance
+```json
+// Request
+{
+  "instance_id": "uuid",
+  "project_path": "/Users/dev/myproject",
+  "project_id": "0068",
+  "gate": "human_approval",
+  "approved_by": "dashboard-user",
+  "comment": "Optional comment"
+}
+
+// Response
+{ "success": true, "message": "Approval sent" }
+// or
+{ "error": "Failed to send approval" }
+```
+
+**GET /health** - Health check
+```json
+{ "status": "ok", "timestamp": "2026-01-16T06:15:30Z" }
+```
+
+### Authentication
+
+For this spike, authentication is a simple API key:
+- Pass via query param: `ws://host:4300/ws?key=dev-key-spike`
+- Or header: `Authorization: Bearer dev-key-spike`
+
+Production would use proper API keys with user/team scoping.
+
+### Error Handling
+
+Connection errors trigger automatic reconnection with exponential backoff:
+- Initial delay: 1 second
+- Multiplier: 2x per attempt
+- Maximum delay: 60 seconds
+
+### What Was Validated
+
+| Protocol Element | Tested | Result |
+|-----------------|--------|--------|
+| WebSocket connection with auth | ✅ | Works |
+| Welcome → Register flow | ✅ | Works |
+| Ping/Pong heartbeat | ✅ | Works |
+| Status file sync | ✅ | Works |
+| Approval message delivery | ✅ | Works |
+| REST API /api/state | ✅ | Works |
+| REST API /api/approve | ✅ | Works |
+| Reconnection on disconnect | ✅ | Works |
 
 ## File Structure
 
