@@ -9,7 +9,7 @@
  */
 
 import { resolve, basename, join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, chmodSync, readdirSync, symlinkSync, unlinkSync, type Dirent } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, chmodSync, readdirSync, symlinkSync, unlinkSync, mkdirSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
@@ -91,6 +91,50 @@ function renameClaudeSession(sessionName: string, displayName: string): void {
       // Non-fatal - session naming is a nice-to-have
     }
   }, 5000); // 5 second delay for Claude to initialize
+}
+
+/**
+ * Initialize checklister state for a builder
+ * Builders start at the "implement" phase (Architect has already done S+P)
+ */
+function initBuilderChecklist(worktreePath: string, projectId: string, specName: string): void {
+  const checklistDir = resolve(worktreePath, 'codev', 'checklists');
+  const checklistFile = resolve(checklistDir, `${projectId}.json`);
+
+  // Create directory if needed
+  if (!existsSync(checklistDir)) {
+    mkdirSync(checklistDir, { recursive: true });
+  }
+
+  // Create initial state - builders start at implement phase
+  const initialState = {
+    project_id: projectId,
+    spec_name: specName,
+    protocol: 'spider',
+    current_phase: 'implement',
+    current_impl_phase: null,
+    current_stage: 'implement',
+    started_at: new Date().toISOString(),
+    completed: {
+      // Mark S+P phases as complete since Architect did them
+      spec_draft: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      spec_consult_1: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      spec_feedback_commit: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      spec_human_review: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      spec_consult_2: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      spec_final: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_draft: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_consult_1: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_feedback_commit: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_human_review: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_consult_2: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+      plan_final: { timestamp: new Date().toISOString(), evidence: 'Completed by Architect' },
+    },
+    implementation_phases: {},
+  };
+
+  writeFileSync(checklistFile, JSON.stringify(initialState, null, 2));
+  logger.info(`Initialized checklister at implement phase: ${checklistFile}`);
 }
 
 /**
@@ -429,6 +473,9 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   await ensureDirectories(config);
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
+
+  // Initialize checklister for the builder at implement phase
+  initBuilderChecklist(worktreePath, projectId, specName);
 
   // Build the prompt
   const specRelPath = `codev/specs/${specName}.md`;

@@ -11,6 +11,52 @@
 
 ## Protocol Configuration
 
+### Checklister Enforcement (AUTOMATIC)
+
+The checklister automatically tracks protocol compliance and blocks phase transitions until required items are complete. **This is not optional** - you MUST maintain the checklist state as you execute SPIDER.
+
+**HOW IT WORKS:**
+1. When starting SPIDER for a project, create `codev/checklists/<project_id>.json`
+2. After each checkpoint, update the state file to mark the item complete
+3. Before any phase/stage transition, verify all blocking items are complete
+4. If items are missing, STOP and list what's incomplete
+
+**STATE FILE LOCATION:**
+`codev/checklists/<project_id>.json` (e.g., `codev/checklists/0069.json`)
+
+**AUTOMATIC BEHAVIOR:**
+- At SPIDER start: Create state file if missing, show current status
+- After each COMMIT: Mark corresponding item complete in state file
+- After each consultation: Mark consultation item complete
+- After human approval: Mark approval item complete
+- Before phase transitions: Check all blocking items, refuse to proceed if incomplete
+
+**STATE FILE FORMAT:**
+```json
+{
+  "project_id": "0069",
+  "current_phase": "specify",
+  "current_stage": null,
+  "completed": {
+    "spec_draft": {"timestamp": "...", "evidence": "commit abc123"}
+  },
+  "implementation_phases": {}
+}
+```
+
+**BLOCKING BEHAVIOR:**
+When you reach a phase transition point:
+1. Read the state file
+2. Check all required items for current phase are marked complete
+3. If ANY blocking item is missing:
+   - Output: "⚠️ BLOCKED - Cannot proceed to [next phase]"
+   - List all missing items
+   - DO NOT continue until items are addressed
+4. If all items complete:
+   - Output: "✓ Gate passed - proceeding to [next phase]"
+   - Update current_phase in state file
+   - Continue with protocol
+
 ### Multi-Agent Consultation (ENABLED BY DEFAULT)
 
 **DEFAULT BEHAVIOR:**
@@ -69,18 +115,28 @@ SPIDER is a structured development protocol that emphasizes specification-driven
 
 **Workflow Overview**:
 1. User provides a prompt describing what they want built
+   - **Auto**: Create `codev/checklists/<project_id>.json` if not exists
 2. Agent generates initial specification document
 3. **COMMIT**: "Initial specification draft"
+   - **Auto**: Mark `spec_draft` complete with commit hash
 4. Multi-agent review (GPT-5 and Gemini Pro)
+   - **Auto**: Mark `spec_consult_1` complete
 5. Agent updates spec with multi-agent feedback
 6. **COMMIT**: "Specification with multi-agent review"
+   - **Auto**: Mark `spec_feedback_commit` complete
 7. Human reviews and provides comments for changes
+   - **Auto**: Mark `spec_human_review` complete when user approves
 8. Agent makes changes and lists what was modified
 9. **COMMIT**: "Specification with user feedback"
 10. Multi-agent review of updated document
+    - **Auto**: Mark `spec_consult_2` complete
 11. Final updates based on second review
 12. **COMMIT**: "Final approved specification"
-13. Iterate steps 7-12 until user approves and says to proceed to planning
+    - **Auto**: Mark `spec_final` complete
+13. **GATE CHECK**: Before proceeding to Plan, verify all `spec_*` items complete
+    - If incomplete: Output "⚠️ BLOCKED" with missing items, stop
+    - If complete: Output "✓ Gate passed", update state, proceed
+14. Iterate steps 7-12 until user approves and says to proceed to planning
 
 **Important**: Keep documentation minimal - use only THREE core files with the same name:
 - `specs/####-descriptive-name.md` - The specification
@@ -160,16 +216,27 @@ SPIDER is a structured development protocol that emphasizes specification-driven
 **Workflow Overview**:
 1. Agent creates initial plan document
 2. **COMMIT**: "Initial plan draft"
+   - **Auto**: Mark `plan_draft` complete with commit hash
 3. Multi-agent review (GPT-5 and Gemini Pro)
+   - **Auto**: Mark `plan_consult_1` complete
 4. Agent updates plan with multi-agent feedback
 5. **COMMIT**: "Plan with multi-agent review"
+   - **Auto**: Mark `plan_feedback_commit` complete
 6. User reviews and requests modifications
+   - **Auto**: Mark `plan_human_review` complete when user approves
 7. Agent updates plan based on user feedback
 8. **COMMIT**: "Plan with user feedback"
 9. Multi-agent review of updated plan
+   - **Auto**: Mark `plan_consult_2` complete
 10. Final updates based on second review
 11. **COMMIT**: "Final approved plan"
-12. Iterate steps 6-11 until agreement is reached
+    - **Auto**: Mark `plan_final` complete
+12. **REGISTER PHASES**: For each phase defined in the plan:
+    - **Auto**: Add phase to `implementation_phases` in state file
+13. **GATE CHECK**: Before proceeding to Implement, verify all `plan_*` items complete
+    - If incomplete: Output "⚠️ BLOCKED" with missing items, stop
+    - If complete: Output "✓ Gate passed", update state, proceed
+14. Iterate steps 6-11 until agreement is reached
 
 **Phase Design Goals**:
 Each phase should be:
@@ -234,10 +301,28 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 
 **Phase Completion Process**:
 1. **Implement** - Build the code for this phase
+   - **Auto**: Mark `{phase}_code_complete` when code is done
+   - **Auto**: Mark `{phase}_impl_consult` after expert consultation
+   - **Auto**: Mark `{phase}_impl_feedback` when feedback addressed
+   - **GATE CHECK**: Before Defend, verify all Implement items complete
 2. **Defend** - Write comprehensive tests that guard functionality
+   - **Auto**: Mark `{phase}_unit_tests` when tests written
+   - **Auto**: Mark `{phase}_tests_passing` when all tests pass
+   - **Auto**: Mark `{phase}_defend_consult` after test review
+   - **Auto**: Mark `{phase}_overmocking_check` when verified
+   - **GATE CHECK**: Before Evaluate, verify all Defend items complete
 3. **Evaluate** - Assess and discuss with user
+   - **Auto**: Mark `{phase}_acceptance_met` when criteria verified
+   - **Auto**: Mark `{phase}_expert_approval` when experts approve
+   - **Auto**: Mark `{phase}_user_evaluation` when user reviews
+   - **Auto**: Mark `{phase}_user_approval` when user approves
 4. **Commit** - Single atomic commit for the phase (MANDATORY before next phase)
+   - **Auto**: Mark `{phase}_committed` with commit hash
+   - **Auto**: Mark `{phase}_plan_updated` when plan reflects completion
 5. **Proceed** - Move to next phase only after commit
+   - **GATE CHECK**: Verify all items for current phase complete
+   - If more phases: Proceed to next phase's Implement stage
+   - If last phase: Proceed to Review
 
 **Handling Failures**:
 - If **Defend** phase reveals gaps → return to **Implement** to fix
@@ -474,6 +559,7 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 **Purpose**: Ensure overall coherence, capture learnings, improve the methodology, and perform systematic review.
 
 **Precondition**: All implementation phases must be committed (verify with `git log --oneline | grep "\[Phase"`)
+- **Auto**: Mark `review_all_committed` when verified
 
 **Process**:
 1. **Comprehensive Review**
@@ -519,6 +605,7 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
    - What would you do differently?
    - What methodology improvements are needed?
    - What systematic issues were identified?
+   - **Auto**: Mark `review_lessons_learned` when documented
 
 7. **Methodology Evolution**
    - Propose process improvements based on lessons
@@ -530,8 +617,13 @@ Execute for each phase in the plan. This is a strict cycle that must be complete
 
 **Output**:
 - Single review document in `codev/reviews/####-descriptive-name.md`
+  - **Auto**: Mark `review_doc_created` when committed
 - Same filename as spec/plan, captures review and learnings from this feature
 - Methodology improvement proposals (update protocol if needed)
+
+**FINAL GATE CHECK**: Before marking project complete, verify all `review_*` items complete
+- If incomplete: Output "⚠️ BLOCKED" with missing items
+- If complete: Output "✓ SPIDER protocol complete for project [id]"
 
 **Review Required**: Yes - Team retrospective recommended
 

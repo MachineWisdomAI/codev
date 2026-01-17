@@ -63,6 +63,43 @@ Full phases with self-review and testing:
 Fast autonomous implementation:
 - Understand → Implement → Verify → Done
 
+## Checklister Integration (SPIDER)
+
+When working on SPIDER tasks, the checklister enforces phase transitions. Your checklist is auto-initialized at `implement` phase since the Architect completed S+P.
+
+### Phase Gates
+
+Before transitioning between IDE stages, verify via gates:
+
+```bash
+# Before transitioning from Implement to Defend
+/checklister gate defend
+
+# Before transitioning from Defend to Evaluate
+/checklister gate evaluate
+
+# Before moving to next implementation phase
+/checklister gate next-phase
+
+# Before final Review phase
+/checklister gate review
+```
+
+### Enforcement
+
+- **Hooks block wrong file edits**: You cannot edit `codev/specs/` or `codev/plans/` - those are Architect's domain
+- **Track your progress**: Mark items complete as you work: `/checklister complete <item_id> --evidence "..."`
+- **Check status anytime**: `/checklister status`
+
+### If You Need Spec/Plan Changes
+
+Since you cannot edit specs or plans, notify the Architect:
+
+```bash
+af send architect "Spec needs update: Found edge case not covered - [details]"
+af send architect "Plan needs update: Phase 2 depends on library not available - [details]"
+```
+
 ## Status Lifecycle
 
 ```
