@@ -3,8 +3,9 @@
 **Goal**: Reimagine SPIDER using Ralph principles where the Builder owns the entire lifecycle in a worktree, with human gates as backpressure points.
 
 **Time-box**: 4-6 hours
-**Status**: IN_PROGRESS
+**Status**: COMPLETE
 **Started**: 2026-01-19
+**Completed**: 2026-01-19
 
 ## Background
 
@@ -317,3 +318,143 @@ gates:
 - [CODEV_HQ Spike](../codev-hq/README.md) - WebSocket approvals
 - [Ralph Orchestrator](https://github.com/mikeyobrien/ralph-orchestrator) - Loop patterns
 - [codev2/synthesis.md](../../../codev2/synthesis.md) - 3-way Ralph analysis
+
+---
+
+## Spike Findings
+
+### Deliverables Created
+
+| Deliverable | File | Status |
+|-------------|------|--------|
+| Loop orchestrator | `ralph-spider.sh` | COMPLETE |
+| Specify prompt | `prompts/specify.md` | COMPLETE |
+| Plan prompt | `prompts/plan.md` | COMPLETE |
+| Implement prompt | `prompts/implement.md` | COMPLETE |
+| Defend prompt | `prompts/defend.md` | COMPLETE |
+| Evaluate prompt | `prompts/evaluate.md` | COMPLETE |
+| Review prompt | `prompts/review.md` | COMPLETE |
+| Integration tests | `test-integration.sh` | COMPLETE |
+
+### Success Criteria Results
+
+| Criterion | Result | Evidence |
+|-----------|--------|----------|
+| Loop correctly transitions through all SPIDER phases | **PASS** | Integration test shows: specify→plan→implement→defend→evaluate→review→complete |
+| Human approval gates block until approved | **PASS** | Loop blocks at specify:review and plan:review, proceeds only after approval |
+| Test failures in Defend phase trigger retry | **PASS** | Loop checks `tests_pass` gate, stays in defend if failed |
+| State persists across Claude restarts | **PASS** | Status file in `codev/status/` survives process restart |
+| Documented learnings for production implementation | **PASS** | This section documents findings |
+
+### Key Implementation Decisions
+
+1. **Shell script over TypeScript**: Chose bash for rapid prototyping. TypeScript would be better for production (type safety, testing).
+
+2. **YAML status file format**: Uses YAML frontmatter with markdown body for human readability:
+   ```yaml
+   ---
+   current_state: implement
+   gates:
+     specify_approval:
+       human: { status: passed }
+   ---
+   ## Log
+   - timestamp: Event description
+   ```
+
+3. **Signal-based communication**: Claude outputs `<signal>PHASE_NAME</signal>` tags that the orchestrator detects to trigger state transitions.
+
+4. **Polling for approvals**: Simple polling loop checks status file every N seconds. Could be enhanced with HQ WebSocket integration.
+
+5. **Fresh context per iteration**: Each Claude invocation re-reads the status file, matching Ralph's "fresh context" principle.
+
+### Open Questions Answered
+
+1. **Should each phase be a separate Claude invocation?**
+   - **Answer**: YES. Each phase gets a fresh Claude invocation with the current status file context. This matches Ralph's fresh context principle and prevents context window bloat.
+
+2. **How to handle multi-phase implementation plans?**
+   - **Answer**: Track `current_phase` in status file. Evaluate phase can signal `NEXT_PHASE` to loop back to implement for the next phase.
+
+3. **Should we use checklister hooks for enforcement?**
+   - **Answer**: The loop orchestrator provides enforcement via state transitions. Checklister hooks would be complementary (blocking wrong file edits) but not required for basic operation.
+
+4. **How does consultation (Gemini/Codex) fit?**
+   - **Answer**: Could add consultation as a signal. After Claude outputs `IMPL_READY_FOR_CONSULT`, orchestrator invokes `consult` commands, then continues.
+
+### Friction Points Discovered
+
+1. **YAML parsing in bash**: Used `grep -A1` patterns which are fragile. Production should use proper YAML parsing (yq or TypeScript).
+
+2. **Signal extraction**: Regex extraction of `<signal>...</signal>` works but requires consistent output format from Claude.
+
+3. **Gate naming**: Dotted notation (`plan_approval.human`) required special handling in `check_gate` function.
+
+4. **No timeout on Claude invocations**: If Claude hangs, the loop blocks. Production should add timeouts.
+
+### Recommendations for Production
+
+1. **Rewrite in TypeScript**: Better error handling, type safety, easier testing.
+
+2. **Use proper YAML parsing**: Replace grep patterns with yaml library.
+
+3. **Add timeout handling**: Wrap Claude invocations with configurable timeouts.
+
+4. **Integrate with HQ**: Replace polling with WebSocket for instant approvals.
+
+5. **Add retry logic**: Automatic retries for transient failures (network, API limits).
+
+6. **Metrics/observability**: Track phase durations, failure rates, approval times.
+
+### Architecture Validation
+
+The spike validates the core Ralph-SPIDER architecture:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    LOOP ORCHESTRATOR                         │
+│                    (ralph-spider.sh)                         │
+│                                                              │
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐               │
+│   │ Read     │──▶│ Invoke   │──▶│ Update   │               │
+│   │ Status   │   │ Claude   │   │ State    │               │
+│   └──────────┘   └──────────┘   └──────────┘               │
+│        ▲                              │                     │
+│        └──────────────────────────────┘                     │
+│                  (loop)                                      │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    STATE FILE                                │
+│                    (codev/status/*)                          │
+│                                                              │
+│   - current_state: specify:draft → ... → complete           │
+│   - gates: human approvals, test results                    │
+│   - log: audit trail                                        │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    HUMAN GATES                               │
+│                                                              │
+│   - specify_approval: Approve spec before plan              │
+│   - plan_approval: Approve plan before implement            │
+│   - (via file edit or `approve` command)                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Conclusion
+
+The spike successfully demonstrates that Ralph-style loop orchestration works for SPIDER:
+
+- **Fresh context per iteration** prevents context window issues
+- **Human approval gates** provide necessary oversight
+- **State in files** enables resilience and auditability
+- **Signal-based transitions** enable flexible phase control
+
+The architecture is ready for production implementation. The main work is:
+1. TypeScript rewrite for robustness
+2. HQ integration for approvals
+3. Consultation integration at key phases
+4. Better error handling and observability

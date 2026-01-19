@@ -11,6 +11,7 @@ import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
 import { tower } from './commands/tower.js';
 import { consult } from './commands/consult/index.js';
+import { porch } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
 import { generateImage } from './commands/generate-image.js';
 import { runAgentFarm } from './agent-farm/cli.js';
@@ -137,6 +138,32 @@ program
         dryRun: options.dryRun,
         reviewType: options.type,
         role: options.role,
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  });
+
+// Porch command (Protocol Orchestrator)
+program
+  .command('porch')
+  .description('Protocol orchestrator - run development protocols')
+  .argument('<subcommand>', 'Subcommand: run, init, approve, status, list, show')
+  .argument('[args...]', 'Arguments for the subcommand')
+  .option('-n, --dry-run', 'Show what would execute without running')
+  .option('--no-claude', 'Skip Claude invocations (for testing)')
+  .option('-p, --poll-interval <seconds>', 'Override poll interval for gate checks')
+  .option('-d, --description <text>', 'Project description (for init)')
+  .action(async (subcommand, args, options) => {
+    try {
+      await porch({
+        subcommand,
+        args,
+        dryRun: options.dryRun,
+        noClaude: options.noClaude,
+        pollInterval: options.pollInterval ? parseInt(options.pollInterval, 10) : undefined,
+        description: options.description,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
