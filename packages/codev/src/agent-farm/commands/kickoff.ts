@@ -82,6 +82,53 @@ async function findSpecFile(codevDir: string, projectId: string): Promise<string
 }
 
 /**
+ * Find porch state for a project
+ */
+interface PorchState {
+  id: string;
+  title: string;
+  protocol: string;
+  state: string;
+  statusPath: string;
+}
+
+async function findPorchState(codevDir: string, projectId: string): Promise<PorchState | null> {
+  const projectsDir = resolve(codevDir, 'projects');
+
+  if (!existsSync(projectsDir)) {
+    return null;
+  }
+
+  const dirs = await readdir(projectsDir);
+
+  for (const dir of dirs) {
+    if (dir.startsWith(`${projectId}-`)) {
+      const statusPath = resolve(projectsDir, dir, 'status.yaml');
+      if (existsSync(statusPath)) {
+        const content = readFileSync(statusPath, 'utf-8');
+        // Simple YAML parsing for the fields we need
+        const idMatch = content.match(/^id:\s*"?([^"\n]+)"?/m);
+        const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?/m);
+        const protocolMatch = content.match(/^protocol:\s*"?([^"\n]+)"?/m);
+        const stateMatch = content.match(/^state:\s*"?([^"\n]+)"?/m);
+
+        if (idMatch && titleMatch) {
+          return {
+            id: idMatch[1],
+            title: titleMatch[1],
+            protocol: protocolMatch?.[1] || 'spider',
+            state: stateMatch?.[1] || 'unknown',
+            statusPath,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Create git branch and worktree
  */
 async function createWorktree(config: Config, branchName: string, worktreePath: string): Promise<void> {
@@ -147,29 +194,36 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
 
   const config = getConfig();
 
-  // Find spec file
+  // Find spec file OR porch state
   const specFile = await findSpecFile(config.codevDir, projectId);
-  if (!specFile) {
-    fatal(`Spec not found for project: ${projectId}`);
+  const porchState = await findPorchState(config.codevDir, projectId);
+
+  // Need either a spec or porch state to proceed
+  if (!specFile && !porchState) {
+    fatal(`No spec or porch state found for project: ${projectId}\n` +
+          `Either create a spec file (codev/specs/${projectId}-*.md) or initialize porch:\n` +
+          `  porch init ${protocolName} ${projectId} <project-name>`);
   }
 
-  const specName = basename(specFile, '.md');
+  // Derive names from spec or porch state
+  const specName = specFile ? basename(specFile, '.md') : `${projectId}-${porchState!.title}`;
   const builderId = projectId;
-  const safeName = specName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
-  const branchName = `builder/${safeName}`;
+  const safeName = specFile
+    ? specName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-')
+    : porchState!.title.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
+  const branchName = `builder/${projectId}-${safeName}`;
   const worktreePath = resolve(config.buildersDir, builderId);
 
-  // Check for plan file
-  const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
-  const hasPlan = existsSync(planFile);
+  // Check for plan file (only if spec exists)
+  const planFile = specFile ? resolve(config.codevDir, 'plans', `${basename(specFile, '.md')}.md`) : null;
+  const hasPlan = planFile ? existsSync(planFile) : false;
 
   // Check if porch state already exists
-  const porchStatusPath = resolve(config.projectRoot, 'codev', 'projects', `${projectId}-${safeName}`, 'status.yaml');
-  const hasExistingState = existsSync(porchStatusPath);
+  const hasExistingState = !!porchState;
 
   logger.header(`Kickoff Builder ${builderId}`);
-  logger.kv('Spec', specFile);
-  logger.kv('Protocol', protocolName.toUpperCase());
+  logger.kv('Spec', specFile || '(to be created)');
+  logger.kv('Protocol', (porchState?.protocol || protocolName).toUpperCase());
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
   logger.kv('Porch State', hasExistingState ? 'exists (resume)' : 'new');
@@ -205,28 +259,44 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   }
 
   // Build the prompt
-  const specRelPath = `codev/specs/${specName}.md`;
-  const planRelPath = `codev/plans/${specName}.md`;
-  const protocolPath = `codev/protocols/${protocolName.toLowerCase()}/protocol.md`;
+  const actualProtocol = porchState?.protocol || protocolName;
+  const specRelPath = specFile ? `codev/specs/${basename(specFile)}` : `codev/specs/${projectId}-${safeName}.md`;
+  const planRelPath = `codev/plans/${projectId}-${safeName}.md`;
+  const protocolPath = `codev/protocols/${actualProtocol.toLowerCase()}/protocol.md`;
 
   let initialPrompt = `## Protocol
-Follow the ${protocolName.toUpperCase()} protocol STRICTLY: ${protocolPath}
+Follow the ${actualProtocol.toUpperCase()} protocol STRICTLY: ${protocolPath}
 Read and internalize the protocol before starting any work.
 
 ## Porch Orchestration
 This builder is orchestrated by Porch. Check your current state with:
   porch status ${projectId}
 
-## Task
+Current porch state: ${porchState?.state || 'initializing'}
+
+## Task`;
+
+  if (specFile) {
+    initialPrompt += `
 Implement the feature specified in ${specRelPath}.`;
-
-  if (hasPlan) {
-    initialPrompt += ` Follow the implementation plan in ${planRelPath}.`;
-  }
-
-  initialPrompt += `
+    if (hasPlan) {
+      initialPrompt += ` Follow the implementation plan in ${planRelPath}.`;
+    }
+    initialPrompt += `
 
 Start by reading the protocol, spec${hasPlan ? ', and plan' : ''}, then begin implementation.`;
+  } else {
+    // No spec yet - builder starts from specify phase
+    initialPrompt += `
+Project: ${porchState?.title || safeName}
+
+You are starting from the SPECIFY phase. Your first task is to:
+1. Read the protocol (${protocolPath})
+2. Understand what "${porchState?.title || safeName}" means
+3. Create the specification file at ${specRelPath}
+
+The porch orchestrator will guide you through each phase. Follow the signals it expects.`;
+  }
 
   const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
 
