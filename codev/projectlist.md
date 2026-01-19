@@ -136,7 +136,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0072"
     title: "Ralph-SPIDER Integration Spike"
     summary: "Spike to reimagine SPIDER using Ralph principles: Builder owns entire lifecycle, human gates as backpressure"
-    status: conceived
+    status: implementing
     priority: high
     release: v2.0.0
     files:
