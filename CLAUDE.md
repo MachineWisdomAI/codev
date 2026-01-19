@@ -695,6 +695,112 @@ The consultant role (`codev/roles/consultant.md`) defines a collaborative partne
 - `codev/roles/consultant.md` - Role definition
 - `.consult/history.log` - Query history with timing (gitignored)
 
+## Porch - Protocol Orchestrator
+
+Porch is the protocol orchestration system that drives SPIDER, TICK, and BUGFIX protocols. It uses a state machine to enforce phase transitions, manage gates, run defense checks, and coordinate multi-agent consultations.
+
+### CLI Commands
+
+```bash
+# Initialize a new porch project
+porch init spider 0073 "feature-name" --worktree .builders/0073
+
+# Check current status
+porch status 0073
+
+# List pending gates
+porch pending
+
+# Approve a gate
+porch approve 0073 spec-approval
+
+# Run the protocol loop (single iteration)
+porch run 0073
+
+# Run with options
+porch run 0073 --dry-run        # Show what would happen
+porch run 0073 --no-claude      # Skip Claude invocations
+```
+
+### AF Kickoff (Porch-Driven Builders)
+
+Use `af kickoff` to spawn a builder with porch orchestration:
+
+```bash
+# Kickoff a porch-driven builder for a spec
+af kickoff -p 0073
+
+# With specific protocol
+af kickoff -p 0073 --protocol spider
+
+# Resume existing porch state
+af kickoff -p 0073 --resume
+
+# Without role prompt
+af kickoff -p 0073 --no-role
+```
+
+This combines:
+1. Creating a git worktree
+2. Initializing porch state
+3. Starting the builder with porch context
+
+### Project State
+
+Porch state is stored in `codev/projects/<id>-<name>/status.yaml`:
+
+```yaml
+id: "0073"
+title: "feature-name"
+protocol: "spider"
+current_state: "implement:coding"
+gates:
+  spec-approval:
+    status: passed
+    approved_at: "2026-01-19T10:30:00Z"
+phases:
+  phase-1:
+    status: complete
+    title: "Core Implementation"
+iteration: 3
+```
+
+### Protocol Definitions
+
+Protocols are defined in `codev-skeleton/protocols/<name>/protocol.json`:
+
+```json
+{
+  "name": "spider",
+  "version": "1.0.0",
+  "phases": [
+    {
+      "id": "specify",
+      "type": "once",
+      "consultation": { "models": ["gemini", "codex", "claude"] },
+      "gate": { "name": "spec-approval", "next": "plan" }
+    }
+  ]
+}
+```
+
+### Signal-Based Transitions
+
+Porch uses signals embedded in Claude output to drive state transitions:
+
+```
+<signal>PHASE_COMPLETE</signal>     # Move to next phase
+<signal>BLOCKED:reason</signal>     # Report blocker
+<signal>REVISION_NEEDED</signal>    # Request changes
+```
+
+### Key Files
+
+- `packages/codev/src/commands/porch/` - Porch implementation
+- `packages/codev/bin/porch.js` - Standalone binary
+- `codev-skeleton/protocols/` - Protocol JSON definitions
+- `codev/projects/` - Project state files
+
 ## Important Notes
 
 1. **ALWAYS check `codev/protocols/spider/protocol.md`** for detailed phase instructions
