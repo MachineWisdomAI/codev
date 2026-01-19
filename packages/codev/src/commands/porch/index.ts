@@ -872,6 +872,57 @@ export async function pending(): Promise<void> {
 }
 
 // ============================================================================
+// Auto-Detection
+// ============================================================================
+
+/**
+ * Auto-detect project ID from current directory
+ *
+ * Detection methods:
+ * 1. Check if cwd is a worktree matching pattern: .builders/<id> or worktrees/<protocol>_<id>_*
+ * 2. Check for a single project in codev/projects/
+ * 3. Check for .porch-project marker file
+ */
+function autoDetectProject(): string | null {
+  const cwd = process.cwd();
+
+  // Method 1: Check path pattern for builder worktree
+  // Pattern: .builders/<id> or .builders/<id>-<name>
+  const buildersMatch = cwd.match(/[/\\]\.builders[/\\](\d+)(?:-[^/\\]*)?(?:[/\\]|$)/);
+  if (buildersMatch) {
+    return buildersMatch[1];
+  }
+
+  // Pattern: worktrees/<protocol>_<id>_<name>
+  const worktreeMatch = cwd.match(/[/\\]worktrees[/\\]\w+_(\d+)_[^/\\]*(?:[/\\]|$)/);
+  if (worktreeMatch) {
+    return worktreeMatch[1];
+  }
+
+  // Method 2: Check for .porch-project marker file
+  const markerPath = path.join(cwd, '.porch-project');
+  if (fs.existsSync(markerPath)) {
+    const content = fs.readFileSync(markerPath, 'utf-8').trim();
+    if (content) {
+      return content;
+    }
+  }
+
+  // Method 3: Check if there's exactly one project in codev/projects/
+  try {
+    const projectRoot = findProjectRoot();
+    const projects = findProjects(projectRoot);
+    if (projects.length === 1) {
+      return projects[0].id;
+    }
+  } catch {
+    // Not in a codev project
+  }
+
+  return null;
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -893,10 +944,21 @@ export async function porch(options: PorchOptions): Promise<void> {
 
   switch (subcommand.toLowerCase()) {
     case 'run': {
-      if (args.length < 1) {
-        throw new Error('Usage: porch run <project-id>');
+      let projectId = args[0];
+
+      // Auto-detect project if not provided
+      if (!projectId) {
+        projectId = autoDetectProject();
+        if (!projectId) {
+          throw new Error(
+            'Usage: porch run <project-id>\n' +
+            'Or run from a project worktree to auto-detect.'
+          );
+        }
+        console.log(chalk.blue(`[porch] Auto-detected project: ${projectId}`));
       }
-      await run(args[0], { dryRun, noClaude, pollInterval });
+
+      await run(projectId, { dryRun, noClaude, pollInterval });
       break;
     }
 

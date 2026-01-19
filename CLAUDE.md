@@ -96,13 +96,24 @@ Key locations:
 
 ### Project Tracking
 
-**`codev/projectlist.md` is the canonical source of truth for all project information.**
+**Two complementary tracking systems:**
 
-When asked about project status, incomplete work, or what to work on next:
-1. Read `codev/projectlist.md` first
-2. It contains status, priority, dependencies, and notes for every project
-3. Update it when project status changes (e.g., implementing → implemented)
-4. Reserve project numbers there BEFORE creating spec files
+1. **`codev/projectlist.md`** - Master list of ALL projects (planning and history)
+   - Contains status, priority, dependencies, and notes for every project
+   - Reserve project numbers here BEFORE creating spec files
+   - Update when project lifecycle changes (conceived → specified → committed → integrated)
+
+2. **`codev/projects/<id>/status.yaml`** - Runtime state for ACTIVE porch projects
+   - Detailed phase tracking (specify:draft, plan:consult, implement:phase_1, etc.)
+   - Gate status (pending, passed, failed)
+   - Managed automatically by porch
+
+**When to use which:**
+- **Starting work**: Check `codev/projectlist.md` for priorities and incomplete work
+- **During implementation**: Use `porch status <id>` for detailed phase status
+- **After completion**: Update `codev/projectlist.md` status field
+
+**Note**: Porch state provides granular phase tracking during active development. Update projectlist.md when transitioning major lifecycle stages (conceived → specified → committed → integrated).
 
 **🚨 CRITICAL: Two human approval gates exist:**
 - **conceived → specified**: AI creates spec, but ONLY the human can approve it

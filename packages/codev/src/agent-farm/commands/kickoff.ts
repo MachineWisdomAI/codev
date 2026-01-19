@@ -249,19 +249,24 @@ ${initialPrompt}`;
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
   let scriptContent: string;
 
+  // Builder startup script runs porch, which orchestrates Claude sessions
+  // The role file is written for reference but porch handles the actual invocations
   if (role) {
     const roleFile = resolve(worktreePath, '.builder-role.md');
     const roleWithPort = role.content.replace(/\{PORT\}/g, String(config.dashboardPort));
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
-    scriptContent = `#!/bin/bash
-exec ${commands.builder} --append-system-prompt "$(cat '${roleFile}')" "$(cat '${promptFile}')"
-`;
-  } else {
-    scriptContent = `#!/bin/bash
-exec ${commands.builder} "$(cat '${promptFile}')"
-`;
   }
+
+  // Run porch as the main orchestrator
+  // Porch will invoke Claude for each phase with appropriate context
+  scriptContent = `#!/bin/bash
+cd "${worktreePath}"
+echo "Starting porch orchestrator for project ${projectId}..."
+echo "Protocol: ${protocolName.toUpperCase()}"
+echo ""
+exec ${porchCmd} run ${projectId}
+`;
 
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
