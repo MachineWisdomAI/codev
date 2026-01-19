@@ -461,6 +461,27 @@ export async function run(
     // Parse state into phase and substate
     const { phaseId, planPhaseId, substate } = parsePlanPhaseFromState(currentState.current_state);
 
+    // Re-attempt plan phase extraction if entering a phased phase without plan phases
+    // This handles the case where porch started during Specify phase (no plan file yet)
+    if (isPhasedPhase(protocol, phaseId) && (!currentState.plan_phases || currentState.plan_phases.length === 0)) {
+      const planFile = findPlanFile(projectRoot, projectId, currentState.title);
+      if (planFile) {
+        try {
+          const planPhases = extractPhasesFromPlanFile(planFile);
+          currentState = setPlanPhases(currentState, planPhases);
+          await writeState(statusFilePath, currentState);
+          console.log(chalk.blue(`[porch] Late discovery: Extracted ${planPhases.length} phases from plan`));
+          for (const phase of planPhases) {
+            console.log(chalk.blue(`  - ${phase.id}: ${phase.title}`));
+          }
+        } catch (e) {
+          console.log(chalk.yellow(`[porch] Could not extract plan phases: ${e}`));
+        }
+      } else {
+        console.log(chalk.yellow(`[porch] Warning: Entering phased phase '${phaseId}' but no plan file found`));
+      }
+    }
+
     // Check if terminal phase
     if (isTerminalPhase(protocol, phaseId)) {
       console.log(chalk.green('━'.repeat(40)));
@@ -583,11 +604,37 @@ export async function run(
         console.log(formatConsultationResults(consultResult));
         await notifier.consultationComplete(phaseId, consultResult.feedback, consultResult.allApproved);
 
-        // If not all approved, stay in current state for revision
+        // If not all approved after max rounds, escalate to human gate
         if (!consultResult.allApproved) {
-          console.log(chalk.yellow(`[porch] Consultation requested changes, staying for revision`));
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+          const maxRounds = consultConfig.max_rounds || 3;
+          if (consultResult.round >= maxRounds) {
+            // Create escalation gate - requires human intervention
+            const escalationGateId = `${phaseId}_consultation_escalation`;
+
+            // Check if escalation gate was already approved (human override)
+            if (currentState.gates[escalationGateId]?.status === 'passed') {
+              console.log(chalk.green(`[porch] Consultation escalation gate already approved, continuing`));
+              // Don't continue loop - fall through to next state handling
+            } else {
+              console.log(chalk.red(`[porch] Consultation failed after ${maxRounds} rounds - escalating to human`));
+              console.log(chalk.yellow(`[porch] To override and continue: porch approve ${projectId} ${escalationGateId}`));
+
+              // Request human gate if not already requested
+              if (!currentState.gates[escalationGateId]?.requested_at) {
+                currentState = requestGateApproval(currentState, escalationGateId);
+                await writeState(statusFilePath, currentState);
+                await notifier.gatePending(phaseId, escalationGateId);
+              }
+
+              // Wait for human approval
+              await new Promise(r => setTimeout(r, pollInterval * 1000));
+              continue;
+            }
+          } else {
+            console.log(chalk.yellow(`[porch] Consultation requested changes (round ${consultResult.round}/${maxRounds}), staying for revision`));
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
         }
 
         // All approved - use consultation's next state if defined

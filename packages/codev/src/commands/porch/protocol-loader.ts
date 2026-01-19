@@ -169,9 +169,15 @@ function convertPhase(json: PhaseJson, defaults?: ProtocolJson['defaults']): Pha
     phase.consultation = convertConsultation(json.consultation, defaults?.consultation);
   }
 
-  // Add gate
+  // Add gate - determine when gate triggers based on requires or last step
   if (json.gate) {
-    phase.gate = convertGate(json.gate);
+    // Gate triggers after the last required substate, or after the last step
+    const gateAfter = json.gate.requires?.length
+      ? json.gate.requires[json.gate.requires.length - 1]
+      : json.steps?.length
+        ? json.steps[json.steps.length - 1]
+        : null;
+    phase.gate = convertGate(json.gate, gateAfter);
   }
 
   // Build signals from transitions
@@ -227,10 +233,12 @@ function convertConsultation(
 
 /**
  * Convert gate JSON to GateConfig type
+ * @param json - Gate configuration from protocol JSON
+ * @param gateAfter - Substate after which the gate triggers (from requires or last step)
  */
-function convertGate(json: GateJson): GateConfig {
+function convertGate(json: GateJson, gateAfter: string | null): GateConfig {
   return {
-    after: json.name, // Use gate name as the substate it follows
+    after: gateAfter || json.name, // Use computed trigger point, fallback to gate name
     type: 'human',
     next: json.next || '',
   };

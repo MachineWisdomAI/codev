@@ -240,4 +240,105 @@ describe('protocol-loader', () => {
       expect(phased[0].id).toBe('middle');
     });
   });
+
+  describe('gate trigger logic', () => {
+    it('should set gate.after from requires array (last item)', () => {
+      const protocolWithRequires = {
+        name: 'gate-test',
+        version: '1.0.0',
+        description: 'Test gate triggers',
+        phases: [
+          {
+            id: 'specify',
+            name: 'Specify',
+            type: 'once',
+            steps: ['draft', 'consult', 'revise', 'spec_final'],
+            gate: {
+              name: 'spec-approval',
+              requires: ['spec_final', 'consultation_done'],
+              next: 'plan',
+            },
+          },
+          {
+            id: 'plan',
+            name: 'Plan',
+            type: 'once',
+            steps: ['draft'],
+          },
+        ],
+      };
+
+      const protocolDir = path.join(protocolsDir, 'gate-test');
+      fs.mkdirSync(protocolDir, { recursive: true });
+      fs.writeFileSync(path.join(protocolDir, 'protocol.json'), JSON.stringify(protocolWithRequires));
+
+      const protocol = loadProtocol(testDir, 'gate-test')!;
+      const specifyPhase = protocol.phases.find(p => p.id === 'specify');
+
+      // Gate should trigger after last item in requires: 'consultation_done'
+      expect(specifyPhase!.gate).toBeDefined();
+      expect(specifyPhase!.gate!.after).toBe('consultation_done');
+    });
+
+    it('should set gate.after from last step when no requires array', () => {
+      const protocolWithoutRequires = {
+        name: 'gate-test-2',
+        version: '1.0.0',
+        description: 'Test gate triggers without requires',
+        phases: [
+          {
+            id: 'review',
+            name: 'Review',
+            type: 'once',
+            steps: ['draft', 'consult', 'final'],
+            gate: {
+              name: 'review-approval',
+              next: null,
+            },
+          },
+        ],
+      };
+
+      const protocolDir = path.join(protocolsDir, 'gate-test-2');
+      fs.mkdirSync(protocolDir, { recursive: true });
+      fs.writeFileSync(path.join(protocolDir, 'protocol.json'), JSON.stringify(protocolWithoutRequires));
+
+      const protocol = loadProtocol(testDir, 'gate-test-2')!;
+      const reviewPhase = protocol.phases.find(p => p.id === 'review');
+
+      // Gate should trigger after last step: 'final'
+      expect(reviewPhase!.gate).toBeDefined();
+      expect(reviewPhase!.gate!.after).toBe('final');
+    });
+
+    it('should fallback to gate name when no steps or requires', () => {
+      const protocolMinimal = {
+        name: 'gate-test-3',
+        version: '1.0.0',
+        description: 'Minimal gate test',
+        phases: [
+          {
+            id: 'end',
+            name: 'End',
+            type: 'once',
+            gate: {
+              name: 'final-gate',
+              next: null,
+            },
+          },
+        ],
+      };
+
+      const protocolDir = path.join(protocolsDir, 'gate-test-3');
+      fs.mkdirSync(protocolDir, { recursive: true });
+      fs.writeFileSync(path.join(protocolDir, 'protocol.json'), JSON.stringify(protocolMinimal));
+
+      const protocol = loadProtocol(testDir, 'gate-test-3')!;
+      const endPhase = protocol.phases.find(p => p.id === 'end');
+
+      // Gate should fallback to gate name: 'final-gate'
+      expect(endPhase!.gate).toBeDefined();
+      expect(endPhase!.gate!.after).toBe('final-gate');
+    });
+  });
 });
