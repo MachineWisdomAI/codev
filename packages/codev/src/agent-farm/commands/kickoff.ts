@@ -19,6 +19,7 @@ import { loadRolePrompt } from '../utils/roles.js';
 
 export interface KickoffOptions {
   project: string;
+  title?: string;   // Project title (required if no spec/porch state exists)
   protocol?: string;
   noRole?: boolean;
   resume?: boolean; // Resume existing porch state
@@ -191,27 +192,35 @@ async function getPorchCommand(): Promise<string> {
  * Kickoff a new protocol-driven project
  */
 export async function kickoff(options: KickoffOptions): Promise<void> {
-  const { project: projectId, protocol: protocolName = 'spider', noRole, resume } = options;
+  const { project: projectId, title, protocol: protocolName = 'spider', noRole, resume } = options;
 
   const config = getConfig();
 
   // Find spec file OR porch state
   const specFile = await findSpecFile(config.codevDir, projectId);
-  const porchState = await findPorchState(config.codevDir, projectId);
+  let porchState = await findPorchState(config.codevDir, projectId);
 
-  // Need either a spec or porch state to proceed
-  if (!specFile && !porchState) {
+  // Need either a spec, porch state, or title to proceed
+  if (!specFile && !porchState && !title) {
     fatal(`No spec or porch state found for project: ${projectId}\n` +
-          `Either create a spec file (codev/specs/${projectId}-*.md) or initialize porch:\n` +
-          `  porch init ${protocolName} ${projectId} <project-name>`);
+          `Either:\n` +
+          `  1. Create a spec file (codev/specs/${projectId}-*.md)\n` +
+          `  2. Provide a title: af kickoff -p ${projectId} --title "feature-name"\n` +
+          `  3. Initialize porch manually: porch init ${protocolName} ${projectId} <project-name>`);
   }
 
-  // Derive names from spec or porch state
-  const specName = specFile ? basename(specFile, '.md') : `${projectId}-${porchState!.title}`;
+  // If we have a title but no porch state, we'll initialize porch before creating worktree
+  const needsInitialization = !specFile && !porchState && title;
+
+  // Derive the project title from spec, porch state, or provided title
+  const projectTitle = specFile
+    ? basename(specFile, '.md').replace(/^\d+-/, '') // Strip leading number from spec filename
+    : porchState?.title || title!;
+
+  // Derive names from spec or porch state or title
+  const specName = specFile ? basename(specFile, '.md') : `${projectId}-${projectTitle}`;
   const builderId = projectId;
-  const safeName = specFile
-    ? specName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-')
-    : porchState!.title.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
+  const safeName = projectTitle.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
   const actualProtocol = porchState?.protocol || protocolName;
 
   // Use worktrees/ directory with protocol-prefixed naming per spec 0073

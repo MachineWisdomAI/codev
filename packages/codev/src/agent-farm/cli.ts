@@ -155,6 +155,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('kickoff')
     .description('Kickoff a new porch-driven builder for a spec')
     .requiredOption('-p, --project <id>', 'Project/spec ID to kickoff')
+    .option('-t, --title <name>', 'Project title (required if no spec exists)')
     .option('--protocol <name>', 'Protocol to use (default: spider)')
     .option('--no-role', 'Skip loading builder role prompt')
     .option('--resume', 'Resume existing porch state')
@@ -163,6 +164,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       try {
         await kickoff({
           project: options.project,
+          title: options.title,
           protocol: options.protocol,
           noRole: !options.role,
           resume: options.resume,
