@@ -8,6 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 import { findProjectRoot, getSkeletonDir } from '../../lib/skeleton.js';
@@ -397,8 +398,72 @@ function getNextIDEState(
   return 'complete';
 }
 
+// ============================================================================
+// Interactive REPL
+// ============================================================================
+
 /**
- * Run the protocol loop for a project
+ * Create a readline interface for interactive input
+ */
+function createRepl(): readline.Interface {
+  return readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
+}
+
+/**
+ * Prompt user for input with a given message
+ */
+async function prompt(rl: readline.Interface, message: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(message, (answer) => {
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
+
+/**
+ * Show REPL help
+ */
+function showReplHelp(): void {
+  console.log('');
+  console.log(chalk.blue('Porch REPL Commands:'));
+  console.log('  ' + chalk.green('approve') + ' [gate]  - Approve pending gate (or current if omitted)');
+  console.log('  ' + chalk.green('status') + '          - Show current project status');
+  console.log('  ' + chalk.green('continue') + '        - Continue to next iteration');
+  console.log('  ' + chalk.green('skip') + '            - Skip current phase (use with caution)');
+  console.log('  ' + chalk.green('help') + '            - Show this help');
+  console.log('  ' + chalk.green('quit') + '            - Exit porch');
+  console.log('');
+}
+
+/**
+ * Display current status summary
+ */
+function displayStatus(state: ProjectState, protocol: Protocol): void {
+  console.log('');
+  console.log(chalk.blue('─'.repeat(50)));
+  console.log(chalk.blue(`Project: ${state.id} - ${state.title}`));
+  console.log(chalk.blue(`Protocol: ${state.protocol}`));
+  console.log(chalk.blue(`State: ${state.current_state}`));
+  console.log(chalk.blue(`Iteration: ${state.iteration}`));
+
+  // Show pending gates
+  const pendingGates = Object.entries(state.gates)
+    .filter(([, g]) => g.status === 'pending' && g.requested_at)
+    .map(([id]) => id);
+
+  if (pendingGates.length > 0) {
+    console.log(chalk.yellow(`Pending gates: ${pendingGates.join(', ')}`));
+  }
+  console.log(chalk.blue('─'.repeat(50)));
+  console.log('');
+}
+
+/**
+ * Run the protocol loop for a project (Interactive REPL mode)
  */
 export async function run(
   projectId: string,
@@ -422,15 +487,25 @@ export async function run(
   }
 
   const protocol = loadProtocol(state.protocol, projectRoot);
-  const pollInterval = options.pollInterval || protocol.config?.poll_interval || 30;
   const maxIterations = protocol.config?.max_iterations || 100;
 
   // Create notifier for this project (desktop notifications for important events)
   const notifier = createNotifier(projectId, { desktop: true });
 
-  console.log(chalk.blue(`[porch] Starting ${state.protocol} loop for project ${projectId}`));
-  console.log(chalk.blue(`[porch] Status file: ${statusFilePath}`));
-  console.log(chalk.blue(`[porch] Poll interval: ${pollInterval}s`));
+  // Create REPL interface
+  const rl = createRepl();
+
+  console.log('');
+  console.log(chalk.green('═'.repeat(50)));
+  console.log(chalk.green(`  PORCH - Protocol Orchestrator`));
+  console.log(chalk.green('═'.repeat(50)));
+  console.log(chalk.blue(`  Project: ${state.id} - ${state.title}`));
+  console.log(chalk.blue(`  Protocol: ${state.protocol}`));
+  console.log(chalk.blue(`  State: ${state.current_state}`));
+  console.log(chalk.green('═'.repeat(50)));
+  console.log('');
+  console.log(chalk.gray('Type "help" for commands, "quit" to exit'));
+  console.log('');
 
   let currentState = state;
 
@@ -491,6 +566,7 @@ export async function run(
       console.log(chalk.green(`[porch] ${state.protocol} loop COMPLETE`));
       console.log(chalk.green(`[porch] Project ${projectId} finished all phases`));
       console.log(chalk.green('━'.repeat(40)));
+      rl.close();
       return;
     }
 
@@ -522,11 +598,50 @@ export async function run(
           continue; // Start next iteration with new state
         }
       } else if (currentState.gates[gateId]?.requested_at) {
-        // Gate requested but not approved - wait
-        console.log(chalk.cyan(`[phase] Phase: ${phaseId} (waiting for gate: ${gateId})`));
-        console.log(chalk.yellow(`[porch] BLOCKED - Waiting for gate: ${gateId}`));
-        console.log(chalk.yellow(`[porch] To approve: porch approve ${projectId} ${gateId}`));
-        await new Promise(r => setTimeout(r, pollInterval * 1000));
+        // Gate requested but not approved - prompt user interactively
+        console.log('');
+        console.log(chalk.yellow('═'.repeat(50)));
+        console.log(chalk.yellow(`  GATE PENDING: ${gateId}`));
+        console.log(chalk.yellow('═'.repeat(50)));
+        console.log(chalk.cyan(`  Phase: ${phaseId}`));
+        console.log(chalk.cyan(`  State: ${currentState.current_state}`));
+        console.log('');
+
+        // Interactive gate approval loop
+        let gateHandled = false;
+        while (!gateHandled) {
+          const answer = await prompt(rl, chalk.yellow(`Approve ${gateId}? [y/n/help]: `));
+
+          switch (answer) {
+            case 'y':
+            case 'yes':
+            case 'approve':
+              currentState = approveGate(currentState, gateId);
+              await writeState(statusFilePath, currentState);
+              console.log(chalk.green(`✓ Gate ${gateId} approved`));
+              gateHandled = true;
+              break;
+            case 'n':
+            case 'no':
+              console.log(chalk.yellow('Gate not approved. Staying in current state.'));
+              console.log(chalk.gray('Type "quit" to exit or wait for changes.'));
+              break;
+            case 'status':
+              displayStatus(currentState, protocol);
+              break;
+            case 'help':
+            case '?':
+              showReplHelp();
+              break;
+            case 'quit':
+            case 'exit':
+              console.log(chalk.blue('Exiting porch...'));
+              rl.close();
+              return;
+            default:
+              console.log(chalk.gray('Type "y" to approve, "n" to decline, or "help" for commands'));
+          }
+        }
         continue;
       }
       // If gate not yet requested, fall through to execute phase first
@@ -639,14 +754,54 @@ export async function run(
                 await notifier.gatePending(phaseId, escalationGateId);
               }
 
-              // Wait for human approval
-              await new Promise(r => setTimeout(r, pollInterval * 1000));
+              // Prompt user to approve escalation gate
+              console.log('');
+              console.log(chalk.red('═'.repeat(50)));
+              console.log(chalk.red(`  ESCALATION: ${escalationGateId}`));
+              console.log(chalk.red('═'.repeat(50)));
+              console.log(chalk.yellow(`  Consultation failed after ${attemptCount} attempts`));
+              console.log('');
+
+              let escalationHandled = false;
+              while (!escalationHandled) {
+                const answer = await prompt(rl, chalk.red(`Override and continue? [y/n/help]: `));
+
+                switch (answer) {
+                  case 'y':
+                  case 'yes':
+                  case 'approve':
+                  case 'override':
+                    currentState = approveGate(currentState, escalationGateId);
+                    currentState = resetConsultationAttempts(currentState, stateKey);
+                    await writeState(statusFilePath, currentState);
+                    console.log(chalk.green(`✓ Escalation gate ${escalationGateId} approved`));
+                    escalationHandled = true;
+                    break;
+                  case 'n':
+                  case 'no':
+                    console.log(chalk.yellow('Escalation not approved. Consultation loop will continue.'));
+                    break;
+                  case 'status':
+                    displayStatus(currentState, protocol);
+                    break;
+                  case 'help':
+                  case '?':
+                    showReplHelp();
+                    break;
+                  case 'quit':
+                  case 'exit':
+                    console.log(chalk.blue('Exiting porch...'));
+                    rl.close();
+                    return;
+                  default:
+                    console.log(chalk.gray('Type "y" to override and continue, "n" to decline, or "help" for commands'));
+                }
+              }
               continue;
             }
           } else {
             console.log(chalk.yellow(`[porch] Consultation requested changes (attempt ${attemptCount}/${maxRounds}), continuing for revision`));
             // Stay in same state for Claude to revise on next iteration
-            await new Promise(r => setTimeout(r, 2000));
             continue;
           }
         } else {
@@ -682,11 +837,46 @@ export async function run(
         await notifier.gatePending(phaseId, gateId);
       }
 
-      // Gate not yet approved - wait (will check approval at start of next iteration)
+      // Gate not yet approved - prompt user interactively
       if (currentState.gates[gateId]?.status !== 'passed') {
-        console.log(chalk.yellow(`[porch] BLOCKED - Waiting for gate: ${gateId}`));
-        console.log(chalk.yellow(`[porch] To approve: porch approve ${projectId} ${gateId}`));
-        await new Promise(r => setTimeout(r, pollInterval * 1000));
+        console.log('');
+        console.log(chalk.yellow('═'.repeat(50)));
+        console.log(chalk.yellow(`  GATE PENDING: ${gateId}`));
+        console.log(chalk.yellow('═'.repeat(50)));
+
+        let gateHandled = false;
+        while (!gateHandled) {
+          const answer = await prompt(rl, chalk.yellow(`Approve ${gateId}? [y/n/help]: `));
+
+          switch (answer) {
+            case 'y':
+            case 'yes':
+            case 'approve':
+              currentState = approveGate(currentState, gateId);
+              await writeState(statusFilePath, currentState);
+              console.log(chalk.green(`✓ Gate ${gateId} approved`));
+              gateHandled = true;
+              break;
+            case 'n':
+            case 'no':
+              console.log(chalk.yellow('Gate not approved. Staying in current state.'));
+              break;
+            case 'status':
+              displayStatus(currentState, protocol);
+              break;
+            case 'help':
+            case '?':
+              showReplHelp();
+              break;
+            case 'quit':
+            case 'exit':
+              console.log(chalk.blue('Exiting porch...'));
+              rl.close();
+              return;
+            default:
+              console.log(chalk.gray('Type "y" to approve, "n" to decline, or "help" for commands'));
+          }
+        }
         continue;
       }
     }
@@ -726,10 +916,9 @@ export async function run(
     } else {
       console.log(chalk.yellow(`[porch] No transition defined, staying in current state`));
     }
-
-    await new Promise(r => setTimeout(r, 2000));
   }
 
+  rl.close();
   throw new Error(`Max iterations (${maxIterations}) reached!`);
 }
 

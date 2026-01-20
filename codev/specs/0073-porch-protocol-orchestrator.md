@@ -711,14 +711,17 @@ Signals are the mechanism by which Claude communicates phase completion to Porch
 config:
   claude_timeout: 600        # 10 minutes per Claude invocation
   consultation_timeout: 300  # 5 minutes per consult invocation
-  gate_poll_interval: 30     # Check gate status every 30 seconds
-  max_gate_wait: 86400       # 24 hours before escalating
 ```
 
 **Timeout behavior:**
 - Claude timeout exceeded → terminate process, retry with exponential backoff
 - Consultation timeout → mark that model as "timeout", proceed if 2/3 respond
-- Gate wait exceeded → notify human of stale gate, continue polling
+
+**Gate handling (Interactive REPL):**
+- When a gate is pending, porch prompts the user directly in the terminal
+- User can type `y/yes/approve` to approve, `n/no` to decline, or `quit` to exit
+- No polling or waiting - the REPL blocks until user responds
+- For background/remote use, the gate status is persisted in status.yaml for external monitoring
 
 ### Concurrent Access Handling
 

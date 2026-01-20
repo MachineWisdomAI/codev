@@ -191,9 +191,15 @@ porch reject 0073 specify_approval    # Reject with feedback prompt
 ```
 
 **REPL behavior:**
-- `porch run` starts an interactive loop
+- `porch run` starts an interactive REPL session
 - State is checkpointed after each phase transition
-- User can press Escape or Ctrl+C to pause
+- When a gate is pending, porch prompts the user directly:
+  - `y/yes/approve` - Approve the gate and continue
+  - `n/no` - Decline (stay in current state)
+  - `status` - Show current project status
+  - `help` - Show available commands
+  - `quit/exit` - Exit porch (state is preserved)
+- User can press Ctrl+C to exit at any time
 - Re-running `porch run 0073` resumes from last checkpoint
 - `--dry-run` shows state machine transitions without executing
 
