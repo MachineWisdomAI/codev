@@ -47,6 +47,15 @@ export interface GateConfig {
 }
 
 /**
+ * Phase transition configuration
+ */
+export interface PhaseTransition {
+  on_complete?: string; // next state when phase completes
+  on_fail?: string; // state to return to on failure
+  on_all_phases_complete?: string; // for phased phases: state when all plan phases done
+}
+
+/**
  * Phase definition in a protocol
  */
 export interface Phase {
@@ -61,6 +70,7 @@ export interface Phase {
   checks?: Record<string, Check>;
   consultation?: ConsultationConfig;
   gate?: GateConfig;
+  transition?: PhaseTransition;
 }
 
 /**
@@ -205,6 +215,8 @@ export interface ProjectState {
   plan_phases?: PlanPhase[];
   /** Consultation attempt counts per state key (e.g., "specify:consult" -> 2) */
   consultation_attempts?: Record<string, number>;
+  /** User input pending for next Claude invocation (from AWAITING_INPUT signal) */
+  pending_input?: string;
   iteration: number;
   started_at: string;
   last_updated: string;

@@ -62,6 +62,55 @@ import {
 } from './notifications.js';
 
 // ============================================================================
+// Terminal Markdown Rendering
+// ============================================================================
+
+/**
+ * Render markdown text for terminal display
+ * Handles: headers, bold, italic, lists, code
+ */
+function renderMarkdown(text: string): string {
+  const lines = text.split('\n');
+  const rendered: string[] = [];
+
+  for (const line of lines) {
+    let processed = line;
+
+    // Headers: ## Header -> bold cyan
+    if (processed.match(/^###\s+/)) {
+      processed = chalk.cyan.bold(processed.replace(/^###\s+/, '   '));
+    } else if (processed.match(/^##\s+/)) {
+      processed = chalk.cyan.bold(processed.replace(/^##\s+/, '  '));
+    } else if (processed.match(/^#\s+/)) {
+      processed = chalk.cyan.bold(processed.replace(/^#\s+/, ''));
+    }
+    // Numbered lists: 1. item -> with bullet
+    else if (processed.match(/^\d+\.\s+/)) {
+      const num = processed.match(/^(\d+)\.\s+/)?.[1];
+      processed = chalk.yellow(` ${num}.`) + processed.replace(/^\d+\.\s+/, ' ');
+    }
+    // Bullet lists: - item or * item
+    else if (processed.match(/^[-*]\s+/)) {
+      processed = chalk.yellow('  •') + processed.replace(/^[-*]\s+/, ' ');
+    }
+
+    // Inline formatting (apply to all lines)
+    // Bold: **text** or __text__
+    processed = processed.replace(/\*\*([^*]+)\*\*/g, (_, p1) => chalk.bold(p1));
+    processed = processed.replace(/__([^_]+)__/g, (_, p1) => chalk.bold(p1));
+    // Italic: *text* or _text_
+    processed = processed.replace(/\*([^*]+)\*/g, (_, p1) => chalk.italic(p1));
+    processed = processed.replace(/_([^_]+)_/g, (_, p1) => chalk.italic(p1));
+    // Inline code: `code`
+    processed = processed.replace(/`([^`]+)`/g, (_, p1) => chalk.bgGray.white(` ${p1} `));
+
+    rendered.push(processed);
+  }
+
+  return rendered.join('\n');
+}
+
+// ============================================================================
 // Protocol Loading (delegates to protocol-loader.ts)
 // ============================================================================
 
@@ -157,10 +206,26 @@ function getGateNextState(protocol: Protocol, phaseId: string): string | null {
 
 /**
  * Get signal-based next state
+ *
+ * Handles both explicit signal mappings and implicit transitions via
+ * the phase's transition.on_complete property for completion signals.
  */
 function getSignalNextState(protocol: Protocol, phaseId: string, signal: string): string | null {
   const phase = protocol.phases.find(p => p.id === phaseId);
-  return phase?.signals?.[signal] || null;
+  if (!phase) return null;
+
+  // Check for explicit signal mapping first
+  if (phase.signals?.[signal]) {
+    return phase.signals[signal];
+  }
+
+  // Check for completion signals that should use transition.on_complete
+  const completionSignals = ['PHASE_COMPLETE', 'PHASE_IMPLEMENTED', 'PHASE_DONE'];
+  if (completionSignals.includes(signal) && phase.transition?.on_complete) {
+    return phase.transition.on_complete;
+  }
+
+  return null;
 }
 
 /**
@@ -328,6 +393,11 @@ async function invokeClaude(
   const startTime = Date.now();
   const maxRetries = 3;
 
+  // Include any pending user input from previous AWAITING_INPUT
+  const userInputSection = state.pending_input
+    ? `\n## User Input\nThe user provided this response to your previous question:\n${state.pending_input}\n`
+    : '';
+
   const fullPrompt = `## Protocol: ${protocol.name}
 ## Phase: ${phaseId}
 ## Project ID: ${state.id}
@@ -338,7 +408,7 @@ state: "${state.current_state}"
 iteration: ${state.iteration}
 started_at: "${state.started_at}"
 \`\`\`
-
+${userInputSection}
 ## Task
 Execute the ${phaseId} phase for project ${state.id} - ${state.title}
 
@@ -351,6 +421,19 @@ ${promptContent}
 - Follow the instructions above precisely
 - Output <signal>...</signal> tags when you reach completion points
 `;
+
+  // Display prompt before invoking Claude
+  console.log('');
+  console.log(chalk.blue('┌' + '─'.repeat(58) + '┐'));
+  console.log(chalk.blue('│') + chalk.blue.bold(' PROMPT TO CLAUDE') + ' '.repeat(41) + chalk.blue('│'));
+  console.log(chalk.blue('├' + '─'.repeat(58) + '┤'));
+  for (const line of fullPrompt.split('\n')) {
+    const truncated = line.length > 56 ? line.slice(0, 53) + '...' : line;
+    const padded = truncated.padEnd(56);
+    console.log(chalk.blue('│ ') + chalk.gray(padded) + chalk.blue(' │'));
+  }
+  console.log(chalk.blue('└' + '─'.repeat(58) + '┘'));
+  console.log('');
 
   // Retry loop for crashes
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -601,7 +684,7 @@ function createRepl(): readline.Interface {
 async function prompt(rl: readline.Interface, message: string): Promise<string> {
   return new Promise((resolve) => {
     rl.question(message, (answer) => {
-      resolve(answer.trim().toLowerCase());
+      resolve(answer.trim());  // Don't lowercase - preserve user's input
     });
   });
 }
@@ -893,7 +976,7 @@ export async function run(
         while (!gateHandled) {
           const answer = await prompt(rl, chalk.yellow(`Approve ${gateId}? [y/n/help]: `));
 
-          switch (answer) {
+          switch (answer.toLowerCase()) {
             case 'y':
             case 'yes':
             case 'approve':
@@ -996,7 +1079,64 @@ export async function run(
 
     // Execute phase
     const output = await invokeClaude(protocol, phaseId, currentState, statusFilePath, projectRoot, options);
-    const signal = extractSignal(output);
+    const extracted = extractSignal(output);
+    const signal = extracted?.type ?? null;
+    const signalContent = extracted?.content ?? null;
+
+    // Clear pending_input after it's been used
+    if (currentState.pending_input) {
+      currentState = { ...currentState, pending_input: undefined };
+      await writeState(statusFilePath, currentState);
+    }
+
+    // Handle AWAITING_INPUT signal - Claude needs user input before proceeding
+    // Format: <signal type=AWAITING_INPUT>What input do you need?</signal>
+    if (signal === 'AWAITING_INPUT') {
+      console.log('');
+      console.log(chalk.bgCyan.black(' ▶ YOUR INPUT NEEDED '));
+      console.log('');
+
+      if (signalContent) {
+        // Show Claude's question/details with markdown rendering
+        console.log(renderMarkdown(signalContent));
+        console.log('');
+      } else {
+        // No content provided - show recent output as fallback
+        console.log(chalk.gray('Claude is waiting for your input.'));
+        const recentLines = tailLog(10);
+        if (recentLines.length > 0) {
+          console.log('');
+          for (const line of recentLines) {
+            console.log(chalk.gray(line));
+          }
+        }
+        console.log('');
+      }
+
+      console.log(chalk.cyan('─'.repeat(50)));
+
+      let inputHandled = false;
+      while (!inputHandled) {
+        const answer = await prompt(rl, chalk.green('→ '));
+
+        if (answer.trim().toLowerCase() === 'quit') {
+          console.log(chalk.blue('Exiting porch...'));
+          rl.close();
+          return;
+        } else if (answer.trim().length > 0) {
+          // User provided input - store it and continue
+          currentState = { ...currentState, pending_input: answer.trim() };
+          await writeState(statusFilePath, currentState);
+          console.log(chalk.green('✓ Continuing...'));
+          console.log('');
+          inputHandled = true;
+        } else {
+          console.log(chalk.yellow('(empty input - type your response or "quit" to exit)'));
+        }
+      }
+      // Continue to next iteration - Claude will receive the user's input
+      continue;
+    }
 
     // Run phase checks (build/test) if defined
     if (phase?.checks && !options.dryRun) {
@@ -1095,7 +1235,7 @@ export async function run(
               while (!escalationHandled) {
                 const answer = await prompt(rl, chalk.red(`Override and continue? [y/n/help]: `));
 
-                switch (answer) {
+                switch (answer.toLowerCase()) {
                   case 'y':
                   case 'yes':
                   case 'approve':
@@ -1177,7 +1317,7 @@ export async function run(
         while (!gateHandled) {
           const answer = await prompt(rl, chalk.yellow(`Approve ${gateId}? [y/n/help]: `));
 
-          switch (answer) {
+          switch (answer.toLowerCase()) {
             case 'y':
             case 'yes':
             case 'approve':

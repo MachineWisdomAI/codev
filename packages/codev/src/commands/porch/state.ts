@@ -211,6 +211,14 @@ export function serializeState(state: ProjectState): string {
     lines.push('');
   }
 
+  // Pending user input (from AWAITING_INPUT signal)
+  if (state.pending_input) {
+    // Escape newlines and quotes for YAML
+    const escaped = state.pending_input.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    lines.push(`pending_input: "${escaped}"`);
+    lines.push('');
+  }
+
   // Metadata
   lines.push(`iteration: ${state.iteration || 0}`);
   lines.push(`started_at: "${state.started_at || new Date().toISOString()}"`);
@@ -413,6 +421,10 @@ export function parseState(content: string): ProjectState {
           break;
         case 'last_updated':
           state.last_updated = value;
+          break;
+        case 'pending_input':
+          // Unescape newlines
+          state.pending_input = value.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
           break;
       }
     }

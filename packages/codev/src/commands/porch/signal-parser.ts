@@ -12,40 +12,104 @@ import type { Protocol, Phase } from './types.js';
  */
 export interface SignalResult {
   signal: string | null;
+  content: string | null;  // Content inside the signal tag (for AWAITING_INPUT, etc.)
   allSignals: string[];
   isValid: boolean;
   error?: string;
 }
 
 /**
- * Extract signal from Claude output
- *
- * Rules:
- * - Scan for <signal>...</signal> patterns
- * - Return the LAST signal found (multiple signals → last wins)
- * - Return null if no signal found
+ * Extracted signal with optional content
  */
-export function extractSignal(output: string): string | null {
-  const matches = output.match(/<signal>([^<]+)<\/signal>/gi);
-  if (!matches || matches.length === 0) return null;
-
-  // Get the last match
-  const lastMatch = matches[matches.length - 1];
-  const signalMatch = lastMatch.match(/<signal>([^<]+)<\/signal>/i);
-  return signalMatch ? signalMatch[1].trim() : null;
+interface ExtractedSignal {
+  type: string;
+  content: string | null;
 }
 
 /**
- * Extract all signals from output
+ * Extract signal from Claude output
+ *
+ * Supports two formats:
+ * - Simple: <signal>SIGNAL_NAME</signal>
+ * - With content: <signal type=SIGNAL_NAME>content here</signal>
+ *
+ * Rules:
+ * - Scan for both patterns
+ * - Return the LAST signal found (multiple signals → last wins)
+ * - Return null if no signal found
+ */
+export function extractSignal(output: string): ExtractedSignal | null {
+  // Try new format first: <signal type=NAME>content</signal>
+  const typedMatches = output.match(/<signal\s+type=([A-Z_]+)>([\s\S]*?)<\/signal>/gi);
+
+  // Also try simple format: <signal>NAME</signal>
+  const simpleMatches = output.match(/<signal>([^<]+)<\/signal>/gi);
+
+  // Collect all matches with their positions
+  const allMatches: { index: number; type: string; content: string | null }[] = [];
+
+  if (typedMatches) {
+    for (const match of typedMatches) {
+      const parsed = match.match(/<signal\s+type=([A-Z_]+)>([\s\S]*?)<\/signal>/i);
+      if (parsed) {
+        const index = output.indexOf(match);
+        allMatches.push({
+          index,
+          type: parsed[1].trim(),
+          content: parsed[2].trim() || null
+        });
+      }
+    }
+  }
+
+  if (simpleMatches) {
+    for (const match of simpleMatches) {
+      const parsed = match.match(/<signal>([^<]+)<\/signal>/i);
+      if (parsed) {
+        const index = output.indexOf(match);
+        allMatches.push({
+          index,
+          type: parsed[1].trim(),
+          content: null
+        });
+      }
+    }
+  }
+
+  if (allMatches.length === 0) return null;
+
+  // Sort by position and return the last one
+  allMatches.sort((a, b) => a.index - b.index);
+  const last = allMatches[allMatches.length - 1];
+
+  return { type: last.type, content: last.content };
+}
+
+/**
+ * Extract all signals from output (returns just the type names)
  */
 export function extractAllSignals(output: string): string[] {
-  const matches = output.match(/<signal>([^<]+)<\/signal>/gi);
-  if (!matches) return [];
+  const results: string[] = [];
 
-  return matches.map(match => {
-    const signalMatch = match.match(/<signal>([^<]+)<\/signal>/i);
-    return signalMatch ? signalMatch[1].trim() : '';
-  }).filter(Boolean);
+  // Match typed format: <signal type=NAME>...</signal>
+  const typedMatches = output.match(/<signal\s+type=([A-Z_]+)>[\s\S]*?<\/signal>/gi);
+  if (typedMatches) {
+    for (const match of typedMatches) {
+      const parsed = match.match(/<signal\s+type=([A-Z_]+)>/i);
+      if (parsed) results.push(parsed[1].trim());
+    }
+  }
+
+  // Match simple format: <signal>NAME</signal>
+  const simpleMatches = output.match(/<signal>([^<]+)<\/signal>/gi);
+  if (simpleMatches) {
+    for (const match of simpleMatches) {
+      const parsed = match.match(/<signal>([^<]+)<\/signal>/i);
+      if (parsed) results.push(parsed[1].trim());
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -92,21 +156,23 @@ export function parseSignal(
   protocol: Protocol,
   currentState: string
 ): SignalResult {
-  const signal = extractSignal(output);
+  const extracted = extractSignal(output);
   const allSignals = extractAllSignals(output);
 
-  if (!signal) {
+  if (!extracted) {
     return {
       signal: null,
+      content: null,
       allSignals: [],
       isValid: true, // No signal is valid (use default transition)
     };
   }
 
-  const validation = validateSignal(signal, protocol, currentState);
+  const validation = validateSignal(extracted.type, protocol, currentState);
 
   return {
-    signal,
+    signal: extracted.type,
+    content: extracted.content,
     allSignals,
     isValid: validation.valid,
     error: validation.warning,
@@ -163,8 +229,9 @@ export const CommonSignals = {
 
   // General
   COMPLETE: 'COMPLETE',
-  BLOCKED: 'BLOCKED',
+  BLOCKED: 'BLOCKED',  // Can include reason: BLOCKED:reason text
   NEEDS_CLARIFICATION: 'NEEDS_CLARIFICATION',
+  AWAITING_INPUT: 'AWAITING_INPUT',  // Claude needs user input. Can include question: AWAITING_INPUT:Your question here?
 } as const;
 
 /**

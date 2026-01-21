@@ -190,7 +190,10 @@ function convertPhase(json: PhaseJson, defaults?: ProtocolJson['defaults']): Pha
   if (json.transition) {
     phase.signals = {};
     if (json.transition.on_complete) {
+      // Map multiple completion signal variants to the same target
       phase.signals['PHASE_COMPLETE'] = json.transition.on_complete;
+      phase.signals['PHASE_IMPLEMENTED'] = json.transition.on_complete;
+      phase.signals['PHASE_DONE'] = json.transition.on_complete;
     }
     if (json.transition.on_fail) {
       phase.signals['PHASE_FAILED'] = json.transition.on_fail;
@@ -198,6 +201,12 @@ function convertPhase(json: PhaseJson, defaults?: ProtocolJson['defaults']): Pha
     if (json.transition.on_all_phases_complete) {
       phase.signals['ALL_PHASES_COMPLETE'] = json.transition.on_all_phases_complete;
     }
+    // Preserve transition for direct access
+    phase.transition = {
+      on_complete: json.transition.on_complete,
+      on_fail: json.transition.on_fail,
+      on_all_phases_complete: json.transition.on_all_phases_complete,
+    };
   }
 
   // Mark as terminal if gate has no next
