@@ -18,7 +18,8 @@
         "spec_exists": "test -f codev/specs/${PROJECT_ID}-*.md",
         "has_consultation_section": "grep -q '^## Consultation' codev/specs/${PROJECT_ID}-*.md",
         "no_phases_in_spec": "! grep -qE '^## Phase [0-9]' codev/specs/${PROJECT_ID}-*.md"
-      }
+      },
+      "gate": { "name": "spec-approval", "next": "plan" }
     },
     {
       "id": "plan",
@@ -32,7 +33,8 @@
       "checks": {
         "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
         "has_phases": "grep -qE '^## Phase [0-9]' codev/plans/${PROJECT_ID}-*.md"
-      }
+      },
+      "gate": { "name": "plan-approval", "next": "implement" }
     },
     {
       "id": "implement",
