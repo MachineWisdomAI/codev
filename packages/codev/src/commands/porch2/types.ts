@@ -46,12 +46,22 @@ export interface GateStatus {
 }
 
 /**
- * Plan phase extracted from plan.md
+ * Stage status within a plan phase
+ */
+export type StageStatus = 'pending' | 'in_progress' | 'complete';
+
+/**
+ * Plan phase extracted from plan.md with per-stage tracking
+ * Tracks implement → defend → evaluate for each plan phase
  */
 export interface PlanPhase {
   id: string;
   title: string;
-  status: 'pending' | 'in_progress' | 'complete';
+  stages: {
+    implement: StageStatus;
+    defend: StageStatus;
+    evaluate: StageStatus;
+  };
 }
 
 /**

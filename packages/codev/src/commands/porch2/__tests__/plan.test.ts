@@ -13,22 +13,51 @@ import {
   getCurrentPlanPhase,
   getNextPlanPhase,
   allPlanPhasesComplete,
-  advancePlanPhase,
+  advanceStage,
   getPhaseContent,
+  isPlanPhaseComplete,
+  getCurrentStage,
 } from '../plan.js';
+import type { PlanPhase } from '../types.js';
+
+// Helper to create a plan phase with all stages pending
+const pendingPhase = (id: string, title: string): PlanPhase => ({
+  id,
+  title,
+  stages: { implement: 'pending', defend: 'pending', evaluate: 'pending' },
+});
+
+// Helper to create a fully complete plan phase
+const completePhase = (id: string, title: string): PlanPhase => ({
+  id,
+  title,
+  stages: { implement: 'complete', defend: 'complete', evaluate: 'complete' },
+});
 
 describe('porch2 plan parsing', () => {
   const testDir = path.join(tmpdir(), `porch2-plan-test-${Date.now()}`);
   const plansDir = path.join(testDir, 'codev/plans');
 
-  // Sample plan content
+  // Sample plan content with JSON phases block
   const samplePlan = `# Plan 0074: Test Feature
 
 ## Overview
 
 This is a test plan.
 
-## Implementation Phases
+## Phases (Machine Readable)
+
+\`\`\`json
+{
+  "phases": [
+    {"id": "phase_1", "title": "Core Types"},
+    {"id": "phase_2", "title": "State Management"},
+    {"id": "phase_3", "title": "Commands"}
+  ]
+}
+\`\`\`
+
+## Phase Breakdown
 
 ### Phase 1: Core Types
 
@@ -50,12 +79,6 @@ Implement CLI commands.
 
 - status command
 - check command
-- done command
-
-## Dependencies
-
-- Node.js 18+
-- js-yaml
 `;
 
   beforeEach(() => {
@@ -94,18 +117,22 @@ Implement CLI commands.
   });
 
   describe('extractPlanPhases', () => {
-    it('should extract phases from standard format', () => {
+    it('should extract phases from JSON block', () => {
       const phases = extractPlanPhases(samplePlan);
 
       expect(phases).toHaveLength(3);
       expect(phases[0].id).toBe('phase_1');
       expect(phases[0].title).toBe('Core Types');
-      expect(phases[0].status).toBe('pending');
+      expect(phases[0].stages.implement).toBe('pending');
+      expect(phases[0].stages.defend).toBe('pending');
+      expect(phases[0].stages.evaluate).toBe('pending');
       expect(phases[1].id).toBe('phase_2');
+      expect(phases[1].title).toBe('State Management');
       expect(phases[2].id).toBe('phase_3');
+      expect(phases[2].title).toBe('Commands');
     });
 
-    it('should return default phase if no phases section', () => {
+    it('should return default phase if no JSON block', () => {
       const content = '# Simple Plan\n\nJust some text.';
       const phases = extractPlanPhases(content);
 
@@ -114,12 +141,12 @@ Implement CLI commands.
       expect(phases[0].title).toBe('Implementation');
     });
 
-    it('should return default phase if no phase headers found', () => {
+    it('should return default phase if JSON is invalid', () => {
       const content = `# Plan
 
-## Implementation Phases
-
-Just some text without phase headers.
+\`\`\`json
+{invalid json}
+\`\`\`
 `;
       const phases = extractPlanPhases(content);
 
@@ -127,24 +154,29 @@ Just some text without phase headers.
       expect(phases[0].title).toBe('Implementation');
     });
 
-    it('should handle alternative "Phases" header', () => {
+    it('should handle 6-phase plan', () => {
       const content = `# Plan
 
-## Phases
+## Phases (Machine Readable)
 
-### Phase 1: Setup
-
-Do setup.
-
-### Phase 2: Build
-
-Build it.
+\`\`\`json
+{
+  "phases": [
+    {"id": "phase_1", "title": "Remove Frontend Files"},
+    {"id": "phase_2", "title": "Remove HTML References"},
+    {"id": "phase_3", "title": "Remove Utils Functions"},
+    {"id": "phase_4", "title": "Remove Backend Code"},
+    {"id": "phase_5", "title": "Update Documentation"},
+    {"id": "phase_6", "title": "Final Verification"}
+  ]
+}
+\`\`\`
 `;
       const phases = extractPlanPhases(content);
 
-      expect(phases).toHaveLength(2);
-      expect(phases[0].title).toBe('Setup');
-      expect(phases[1].title).toBe('Build');
+      expect(phases).toHaveLength(6);
+      expect(phases[0].title).toBe('Remove Frontend Files');
+      expect(phases[5].title).toBe('Final Verification');
     });
   });
 
@@ -165,12 +197,48 @@ Build it.
     });
   });
 
+  describe('isPlanPhaseComplete', () => {
+    it('should return true when all stages complete', () => {
+      const phase = completePhase('phase_1', 'Test');
+      expect(isPlanPhaseComplete(phase)).toBe(true);
+    });
+
+    it('should return false when any stage incomplete', () => {
+      const phase: PlanPhase = {
+        id: 'phase_1',
+        title: 'Test',
+        stages: { implement: 'complete', defend: 'complete', evaluate: 'pending' },
+      };
+      expect(isPlanPhaseComplete(phase)).toBe(false);
+    });
+  });
+
+  describe('getCurrentStage', () => {
+    it('should return first incomplete stage', () => {
+      const phase: PlanPhase = {
+        id: 'phase_1',
+        title: 'Test',
+        stages: { implement: 'complete', defend: 'in_progress', evaluate: 'pending' },
+      };
+      expect(getCurrentStage(phase)).toBe('defend');
+    });
+
+    it('should return null when all stages complete', () => {
+      const phase = completePhase('phase_1', 'Test');
+      expect(getCurrentStage(phase)).toBeNull();
+    });
+  });
+
   describe('getCurrentPlanPhase', () => {
     it('should return first non-complete phase', () => {
-      const phases = [
-        { id: 'phase_1', title: 'One', status: 'complete' as const },
-        { id: 'phase_2', title: 'Two', status: 'in_progress' as const },
-        { id: 'phase_3', title: 'Three', status: 'pending' as const },
+      const phases: PlanPhase[] = [
+        completePhase('phase_1', 'One'),
+        {
+          id: 'phase_2',
+          title: 'Two',
+          stages: { implement: 'in_progress', defend: 'pending', evaluate: 'pending' },
+        },
+        pendingPhase('phase_3', 'Three'),
       ];
 
       const current = getCurrentPlanPhase(phases);
@@ -180,8 +248,8 @@ Build it.
 
     it('should return null if all complete', () => {
       const phases = [
-        { id: 'phase_1', title: 'One', status: 'complete' as const },
-        { id: 'phase_2', title: 'Two', status: 'complete' as const },
+        completePhase('phase_1', 'One'),
+        completePhase('phase_2', 'Two'),
       ];
 
       const current = getCurrentPlanPhase(phases);
@@ -192,9 +260,9 @@ Build it.
 
   describe('getNextPlanPhase', () => {
     const phases = [
-      { id: 'phase_1', title: 'One', status: 'complete' as const },
-      { id: 'phase_2', title: 'Two', status: 'in_progress' as const },
-      { id: 'phase_3', title: 'Three', status: 'pending' as const },
+      completePhase('phase_1', 'One'),
+      pendingPhase('phase_2', 'Two'),
+      pendingPhase('phase_3', 'Three'),
     ];
 
     it('should return next phase', () => {
@@ -216,8 +284,8 @@ Build it.
   describe('allPlanPhasesComplete', () => {
     it('should return true when all complete', () => {
       const phases = [
-        { id: 'phase_1', title: 'One', status: 'complete' as const },
-        { id: 'phase_2', title: 'Two', status: 'complete' as const },
+        completePhase('phase_1', 'One'),
+        completePhase('phase_2', 'Two'),
       ];
 
       expect(allPlanPhasesComplete(phases)).toBe(true);
@@ -225,39 +293,80 @@ Build it.
 
     it('should return false when some pending', () => {
       const phases = [
-        { id: 'phase_1', title: 'One', status: 'complete' as const },
-        { id: 'phase_2', title: 'Two', status: 'pending' as const },
+        completePhase('phase_1', 'One'),
+        pendingPhase('phase_2', 'Two'),
       ];
 
       expect(allPlanPhasesComplete(phases)).toBe(false);
     });
   });
 
-  describe('advancePlanPhase', () => {
-    it('should mark current as complete and next as in_progress', () => {
-      const phases = [
-        { id: 'phase_1', title: 'One', status: 'in_progress' as const },
-        { id: 'phase_2', title: 'Two', status: 'pending' as const },
-        { id: 'phase_3', title: 'Three', status: 'pending' as const },
+  describe('advanceStage', () => {
+    it('should advance from implement to defend', () => {
+      const phases: PlanPhase[] = [
+        {
+          id: 'phase_1',
+          title: 'One',
+          stages: { implement: 'in_progress', defend: 'pending', evaluate: 'pending' },
+        },
+        pendingPhase('phase_2', 'Two'),
       ];
 
-      const updated = advancePlanPhase(phases, 'phase_1');
+      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'implement');
 
-      expect(updated[0].status).toBe('complete');
-      expect(updated[1].status).toBe('in_progress');
-      expect(updated[2].status).toBe('pending');
+      expect(updated[0].stages.implement).toBe('complete');
+      expect(updated[0].stages.defend).toBe('in_progress');
+      expect(nextProtocolPhase).toBe('defend');
     });
 
-    it('should handle advancing last phase', () => {
-      const phases = [
-        { id: 'phase_1', title: 'One', status: 'complete' as const },
-        { id: 'phase_2', title: 'Two', status: 'in_progress' as const },
+    it('should advance from defend to evaluate', () => {
+      const phases: PlanPhase[] = [
+        {
+          id: 'phase_1',
+          title: 'One',
+          stages: { implement: 'complete', defend: 'in_progress', evaluate: 'pending' },
+        },
+        pendingPhase('phase_2', 'Two'),
       ];
 
-      const updated = advancePlanPhase(phases, 'phase_2');
+      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'defend');
 
-      expect(updated[0].status).toBe('complete');
-      expect(updated[1].status).toBe('complete');
+      expect(updated[0].stages.defend).toBe('complete');
+      expect(updated[0].stages.evaluate).toBe('in_progress');
+      expect(nextProtocolPhase).toBe('evaluate');
+    });
+
+    it('should advance from evaluate to next plan phase implement', () => {
+      const phases: PlanPhase[] = [
+        {
+          id: 'phase_1',
+          title: 'One',
+          stages: { implement: 'complete', defend: 'complete', evaluate: 'in_progress' },
+        },
+        pendingPhase('phase_2', 'Two'),
+      ];
+
+      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_1', 'evaluate');
+
+      expect(updated[0].stages.evaluate).toBe('complete');
+      expect(updated[1].stages.implement).toBe('in_progress');
+      expect(nextProtocolPhase).toBe('implement');
+    });
+
+    it('should return review when last phase evaluate completes', () => {
+      const phases: PlanPhase[] = [
+        completePhase('phase_1', 'One'),
+        {
+          id: 'phase_2',
+          title: 'Two',
+          stages: { implement: 'complete', defend: 'complete', evaluate: 'in_progress' },
+        },
+      ];
+
+      const { phases: updated, nextProtocolPhase } = advanceStage(phases, 'phase_2', 'evaluate');
+
+      expect(updated[1].stages.evaluate).toBe('complete');
+      expect(nextProtocolPhase).toBe('review');
     });
   });
 

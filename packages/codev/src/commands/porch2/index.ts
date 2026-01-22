@@ -29,9 +29,11 @@ import {
   findPlanFile,
   extractPhasesFromFile,
   getCurrentPlanPhase,
+  getCurrentStage,
   getPhaseContent,
-  advancePlanPhase,
+  advanceStage,
   allPlanPhasesComplete,
+  isPlanPhaseComplete,
 } from './plan.js';
 import {
   runPhaseChecks,
@@ -77,13 +79,38 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
 
-  // For phased protocols, show current plan phase
+  // For phased protocols, show plan phase status matrix
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
+    console.log('');
+    console.log(chalk.bold('PLAN PHASES:'));
+    console.log('');
+
+    // Status icons
+    const icon = (status: string) => {
+      switch (status) {
+        case 'complete': return chalk.green('✓');
+        case 'in_progress': return chalk.yellow('►');
+        default: return chalk.gray('○');
+      }
+    };
+
+    // Show matrix
+    for (const phase of state.plan_phases) {
+      const isCurrent = !isPlanPhaseComplete(phase) &&
+                        state.plan_phases.every((p, i) =>
+                          i >= state.plan_phases.indexOf(phase) || isPlanPhaseComplete(p));
+      const prefix = isCurrent ? chalk.cyan('→ ') : '  ';
+      const title = isCurrent ? chalk.bold(phase.title) : phase.title;
+
+      console.log(`${prefix}${phase.id}: ${title}`);
+      console.log(`     implement: ${icon(phase.stages.implement)}  defend: ${icon(phase.stages.defend)}  evaluate: ${icon(phase.stages.evaluate)}`);
+    }
+
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase) {
+      const currentStage = getCurrentStage(currentPlanPhase);
       console.log('');
-      console.log(chalk.bold(`CURRENT PLAN PHASE: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
-      console.log(`STATUS: ${currentPlanPhase.status}`);
+      console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} → ${currentStage || 'complete'}`));
 
       // Show phase content from plan
       const planPath = findPlanFile(projectRoot, state.id, state.title);
@@ -200,27 +227,50 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     return;
   }
 
-  // Handle phased protocols
+  // Handle phased protocols (implement/defend/evaluate cycle)
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
+    const currentStage = currentPlanPhase ? getCurrentStage(currentPlanPhase) : null;
 
-    if (currentPlanPhase && !allPlanPhasesComplete(state.plan_phases)) {
-      // Advance plan phase
-      state.plan_phases = advancePlanPhase(state.plan_phases, currentPlanPhase.id);
-      state.current_plan_phase = getCurrentPlanPhase(state.plan_phases)?.id || null;
-      writeState(statusPath, state);
+    if (currentPlanPhase && currentStage && !allPlanPhasesComplete(state.plan_phases)) {
+      // Advance to next stage
+      const { phases: updatedPhases, nextProtocolPhase } = advanceStage(
+        state.plan_phases,
+        currentPlanPhase.id,
+        currentStage
+      );
+
+      state.plan_phases = updatedPhases;
 
       console.log('');
-      console.log(chalk.green(`PHASE COMPLETE: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
+      console.log(chalk.green(`STAGE COMPLETE: ${currentPlanPhase.id} → ${currentStage}`));
 
-      const nextPlanPhase = getCurrentPlanPhase(state.plan_phases);
-      if (nextPlanPhase) {
-        console.log(chalk.cyan(`NEXT PHASE: ${nextPlanPhase.id} - ${nextPlanPhase.title}`));
+      // Check if moving to review (all plan phases done)
+      if (nextProtocolPhase === 'review') {
+        state.phase = 'review';
+        state.current_plan_phase = null;
+        writeState(statusPath, state);
+        console.log(chalk.cyan('All plan phases complete. Moving to REVIEW phase.'));
         console.log(`\n  Run: porch2 status ${state.id}`);
-      } else {
-        // All plan phases done, move to next protocol phase
-        advanceProtocolPhase(state, protocol, statusPath);
+        return;
       }
+
+      // Update protocol phase if stage changed
+      if (nextProtocolPhase && nextProtocolPhase !== state.phase) {
+        state.phase = nextProtocolPhase;
+      }
+
+      // Update current plan phase tracker
+      const newCurrentPhase = getCurrentPlanPhase(state.plan_phases);
+      state.current_plan_phase = newCurrentPhase?.id || null;
+
+      writeState(statusPath, state);
+
+      const newStage = newCurrentPhase ? getCurrentStage(newCurrentPhase) : null;
+      if (newCurrentPhase && newStage) {
+        console.log(chalk.cyan(`NEXT: ${newCurrentPhase.id} → ${newStage}`));
+      }
+      console.log(`\n  Run: porch2 status ${state.id}`);
       return;
     }
   }
@@ -241,13 +291,16 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
 
   state.phase = nextPhase.id;
 
-  // If entering a phased phase, extract plan phases
+  // If entering a phased phase (implement), extract plan phases
   if (isPhased(protocol, nextPhase.id)) {
     const planPath = findPlanFile(process.cwd(), state.id, state.title);
     if (planPath) {
       state.plan_phases = extractPhasesFromFile(planPath);
-      state.plan_phases[0].status = 'in_progress';
-      state.current_plan_phase = state.plan_phases[0].id;
+      // Mark first phase's implement stage as in_progress
+      if (state.plan_phases.length > 0) {
+        state.plan_phases[0].stages.implement = 'in_progress';
+        state.current_plan_phase = state.plan_phases[0].id;
+      }
     }
   }
 
@@ -291,10 +344,21 @@ export async function gate(projectRoot: string, projectId: string): Promise<void
   console.log(chalk.bold(`GATE: ${gateName}`));
   console.log('');
 
-  // Show relevant artifact
+  // Show relevant artifact and open it for review
   const artifact = getArtifactForPhase(projectRoot, state);
   if (artifact) {
-    console.log(`  Artifact: ${artifact}`);
+    const fullPath = path.join(projectRoot, artifact);
+    if (fs.existsSync(fullPath)) {
+      console.log(`  Artifact: ${artifact}`);
+      console.log('');
+      console.log(chalk.cyan('  Opening artifact for human review...'));
+      // Use af open to display in annotation viewer
+      const { spawn } = await import('node:child_process');
+      spawn('af', ['open', fullPath], {
+        stdio: 'inherit',
+        detached: true
+      }).unref();
+    }
   }
 
   console.log('');
@@ -308,10 +372,15 @@ export async function gate(projectRoot: string, projectId: string): Promise<void
 }
 
 /**
- * porch2 approve <id> <gate>
- * Human approves a gate.
+ * porch2 approve <id> <gate> --a-human-explicitly-approved-this
+ * Human approves a gate. Requires explicit flag to prevent automated approvals.
  */
-export async function approve(projectRoot: string, projectId: string, gateName: string): Promise<void> {
+export async function approve(
+  projectRoot: string,
+  projectId: string,
+  gateName: string,
+  hasHumanFlag: boolean
+): Promise<void> {
   const statusPath = findStatusPath(projectRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.`);
@@ -327,6 +396,18 @@ export async function approve(projectRoot: string, projectId: string, gateName: 
   if (state.gates[gateName].status === 'approved') {
     console.log(chalk.yellow(`Gate ${gateName} is already approved.`));
     return;
+  }
+
+  // Require explicit human flag
+  if (!hasHumanFlag) {
+    console.log('');
+    console.log(chalk.red('ERROR: Human approval required.'));
+    console.log('');
+    console.log('  To approve, please run:');
+    console.log('');
+    console.log(chalk.cyan(`    porch2 approve ${projectId} ${gateName} --a-human-explicitly-approved-this`));
+    console.log('');
+    process.exit(1);
   }
 
   state.gates[gateName].status = 'approved';
@@ -452,8 +533,9 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       case 'approve':
-        if (!rest[0] || !rest[1]) throw new Error('Usage: porch2 approve <id> <gate>');
-        await approve(projectRoot, rest[0], rest[1]);
+        if (!rest[0] || !rest[1]) throw new Error('Usage: porch2 approve <id> <gate> --a-human-explicitly-approved-this');
+        const hasHumanFlag = rest.includes('--a-human-explicitly-approved-this');
+        await approve(projectRoot, rest[0], rest[1], hasHumanFlag);
         break;
 
       case 'init':
@@ -471,7 +553,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('  check <id>               Run checks for current phase');
         console.log('  done <id>                Advance to next phase (if checks pass)');
         console.log('  gate <id>                Request human approval');
-        console.log('  approve <id> <gate>      Approve a gate');
+        console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
         console.log('');
         process.exit(command ? 1 : 0);

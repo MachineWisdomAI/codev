@@ -17,7 +17,7 @@ import {
 
 describe('porch2 protocol loading', () => {
   const testDir = path.join(tmpdir(), `porch2-protocol-test-${Date.now()}`);
-  const protocolsDir = path.join(testDir, 'codev/porch/protocols');
+  const protocolsDir = path.join(testDir, 'codev/protocols/spider');
 
   // Create test protocol JSON
   const spiderProtocol = {
@@ -67,7 +67,7 @@ describe('porch2 protocol loading', () => {
   beforeEach(() => {
     fs.mkdirSync(protocolsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(protocolsDir, 'spider.json'),
+      path.join(protocolsDir, 'protocol.json'),
       JSON.stringify(spiderProtocol, null, 2)
     );
   });
@@ -95,7 +95,7 @@ describe('porch2 protocol loading', () => {
 
     it('should throw error for invalid JSON', () => {
       fs.writeFileSync(
-        path.join(protocolsDir, 'spider.json'),
+        path.join(protocolsDir, 'protocol.json'),
         '{ invalid json }'
       );
 
@@ -106,7 +106,7 @@ describe('porch2 protocol loading', () => {
 
     it('should throw error for missing name field', () => {
       fs.writeFileSync(
-        path.join(protocolsDir, 'spider.json'),
+        path.join(protocolsDir, 'protocol.json'),
         JSON.stringify({ phases: [] })
       );
 
@@ -223,14 +223,14 @@ describe('porch2 protocol loading', () => {
 
   describe('codev-skeleton fallback', () => {
     it('should load from codev-skeleton if not in codev', () => {
-      // Remove from codev/porch/protocols
-      fs.rmSync(path.join(protocolsDir, 'spider.json'));
+      // Remove from codev/protocols/spider
+      fs.rmSync(path.join(protocolsDir, 'protocol.json'));
 
-      // Create in codev-skeleton/porch/protocols
-      const skeletonDir = path.join(testDir, 'codev-skeleton/porch/protocols');
+      // Create in codev-skeleton/protocols/spider
+      const skeletonDir = path.join(testDir, 'codev-skeleton/protocols/spider');
       fs.mkdirSync(skeletonDir, { recursive: true });
       fs.writeFileSync(
-        path.join(skeletonDir, 'spider.json'),
+        path.join(skeletonDir, 'protocol.json'),
         JSON.stringify({ ...spiderProtocol, description: 'From skeleton' })
       );
 
