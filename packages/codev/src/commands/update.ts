@@ -15,6 +15,7 @@ import {
   isUserDataPath,
   isUpdatableFile,
 } from '../lib/templates.js';
+import { copyConsultTypes, copyProtocols } from '../lib/scaffold.js';
 
 interface UpdateOptions {
   dryRun?: boolean;
@@ -62,6 +63,26 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
   const templateFiles = getTemplateFiles(templatesDir);
   const currentHashes = loadHashStore(targetDir);
   const newHashes: Record<string, string> = { ...currentHashes };
+
+  // Update consult-types (with skipExisting to preserve user customizations)
+  if (!dryRun) {
+    const consultTypesResult = copyConsultTypes(targetDir, templatesDir, { skipExisting: true });
+    if (consultTypesResult.copied.length > 0) {
+      for (const file of consultTypesResult.copied) {
+        console.log(chalk.green('  + (new)'), `codev/consult-types/${file}`);
+      }
+    }
+  }
+
+  // Update protocols (with skipExisting to preserve user customizations)
+  if (!dryRun) {
+    const protocolsResult = copyProtocols(targetDir, templatesDir, { skipExisting: true });
+    if (protocolsResult.copied.length > 0) {
+      for (const file of protocolsResult.copied) {
+        console.log(chalk.green('  + (new)'), `codev/protocols/${file}`);
+      }
+    }
+  }
 
   const result: UpdateResult = {
     updated: [],

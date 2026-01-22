@@ -397,7 +397,12 @@ export async function start(options: StartOptions = {}): Promise<void> {
       const launchScript = resolve(config.stateDir, 'launch-architect.sh');
       writeFileSync(launchScript, `#!/bin/bash
 cd "${config.projectRoot}"
-exec ${cmd} --append-system-prompt "$(cat '${roleFile}')"
+while true; do
+  ${cmd} --append-system-prompt "$(cat '${roleFile}')"
+  echo ""
+  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
 `, { mode: 0o755 });
 
       cmd = launchScript;
