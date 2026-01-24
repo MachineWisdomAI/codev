@@ -30,9 +30,8 @@ import {
   findPlanFile,
   extractPhasesFromFile,
   getCurrentPlanPhase,
-  getCurrentStage,
   getPhaseContent,
-  advanceStage,
+  advancePlanPhase,
   allPlanPhasesComplete,
   isPlanPhaseComplete,
 } from './plan.js';
@@ -80,7 +79,7 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
   console.log(`  PROTOCOL: ${state.protocol}`);
   console.log(`  PHASE: ${state.phase} (${phaseConfig?.name || 'unknown'})`);
 
-  // For phased protocols, show plan phase status matrix
+  // For phased protocols, show plan phase status
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     console.log('');
     console.log(chalk.bold('PLAN PHASES:'));
@@ -95,23 +94,19 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
       }
     };
 
-    // Show matrix
+    // Show phases
     for (const phase of state.plan_phases) {
-      const isCurrent = !isPlanPhaseComplete(phase) &&
-                        state.plan_phases.every((p, i) =>
-                          i >= state.plan_phases.indexOf(phase) || isPlanPhaseComplete(p));
+      const isCurrent = phase.status === 'in_progress';
       const prefix = isCurrent ? chalk.cyan('→ ') : '  ';
       const title = isCurrent ? chalk.bold(phase.title) : phase.title;
 
-      console.log(`${prefix}${phase.id}: ${title}`);
-      console.log(`     implement: ${icon(phase.stages.implement)}  defend: ${icon(phase.stages.defend)}  evaluate: ${icon(phase.stages.evaluate)}`);
+      console.log(`${prefix}${icon(phase.status)} ${phase.id}: ${title}`);
     }
 
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
     if (currentPlanPhase) {
-      const currentStage = getCurrentStage(currentPlanPhase);
       console.log('');
-      console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} → ${currentStage || 'complete'}`));
+      console.log(chalk.bold(`CURRENT: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
 
       // Show phase content from plan
       const planPath = findPlanFile(projectRoot, state.id, state.title);
@@ -122,6 +117,22 @@ export async function status(projectRoot: string, projectId: string): Promise<vo
           console.log(section('FROM THE PLAN', phaseContent.slice(0, 500)));
         }
       }
+
+      // Find the next phase name for the warning
+      const currentIdx = state.plan_phases.findIndex(p => p.id === currentPlanPhase.id);
+      const nextPlanPhase = state.plan_phases[currentIdx + 1];
+
+      console.log('');
+      console.log(chalk.red.bold('╔══════════════════════════════════════════════════════════════╗'));
+      console.log(chalk.red.bold('║  🛑 CRITICAL RULES                                           ║'));
+      if (nextPlanPhase) {
+        console.log(chalk.red.bold(`║  1. DO NOT start ${nextPlanPhase.id} until you run porch again!`.padEnd(63) + '║'));
+      } else {
+        console.log(chalk.red.bold('║  1. DO NOT start the next phase until you run porch again!   ║'));
+      }
+      console.log(chalk.red.bold('║  2. Run /compact before starting each new phase              ║'));
+      console.log(chalk.red.bold('║  3. After completing this phase, run: porch done ' + state.id.padEnd(12) + '║'));
+      console.log(chalk.red.bold('╚══════════════════════════════════════════════════════════════╝'));
     }
   }
 
@@ -228,51 +239,47 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     return;
   }
 
-  // Handle phased protocols (implement/defend/evaluate cycle)
+  // Handle phased protocols (plan phases with checks at completion)
   if (isPhased(protocol, state.phase) && state.plan_phases.length > 0) {
     const currentPlanPhase = getCurrentPlanPhase(state.plan_phases);
-    const currentStage = currentPlanPhase ? getCurrentStage(currentPlanPhase) : null;
 
-    if (currentPlanPhase && currentStage && !allPlanPhasesComplete(state.plan_phases)) {
-      // Run phase completion checks when finishing evaluate stage (end of plan phase)
-      if (currentStage === 'evaluate') {
-        const completionChecks = getPhaseCompletionChecks(protocol);
-        if (Object.keys(completionChecks).length > 0) {
-          const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+    if (currentPlanPhase && !allPlanPhasesComplete(state.plan_phases)) {
+      // Run phase completion checks (implement + defend + evaluate all at once)
+      const completionChecks = getPhaseCompletionChecks(protocol);
+      if (Object.keys(completionChecks).length > 0) {
+        const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
 
+        console.log('');
+        console.log(chalk.bold(`RUNNING PHASE COMPLETION CHECKS (${currentPlanPhase.id})...`));
+
+        const results = await runPhaseChecks(completionChecks, projectRoot, checkEnv);
+        console.log(formatCheckResults(results));
+
+        if (!allChecksPassed(results)) {
           console.log('');
-          console.log(chalk.bold(`RUNNING PHASE COMPLETION CHECKS (${currentPlanPhase.id})...`));
-
-          const results = await runPhaseChecks(completionChecks, projectRoot, checkEnv);
-          console.log(formatCheckResults(results));
-
-          if (!allChecksPassed(results)) {
-            console.log('');
-            console.log(chalk.red('PHASE COMPLETION CHECKS FAILED. Cannot advance.'));
-            console.log(`\n  Ensure your commit includes:`);
-            console.log(`    - Implementation code`);
-            console.log(`    - Tests`);
-            console.log(`    - 3-way review results in commit message`);
-            console.log(`\n  Then try again.`);
-            process.exit(1);
-          }
+          console.log(chalk.red('PHASE COMPLETION CHECKS FAILED. Cannot advance.'));
+          console.log(`\n  Ensure your commit includes:`);
+          console.log(`    - Implementation code`);
+          console.log(`    - Tests`);
+          console.log(`    - 3-way review results in commit message`);
+          console.log(`\n  Then try again.`);
+          process.exit(1);
         }
       }
 
-      // Advance to next stage
-      const { phases: updatedPhases, nextProtocolPhase } = advanceStage(
+      // Advance to next plan phase
+      const { phases: updatedPhases, moveToReview } = advancePlanPhase(
         state.plan_phases,
-        currentPlanPhase.id,
-        currentStage
+        currentPlanPhase.id
       );
 
       state.plan_phases = updatedPhases;
 
       console.log('');
-      console.log(chalk.green(`STAGE COMPLETE: ${currentPlanPhase.id} → ${currentStage}`));
+      console.log(chalk.green(`PLAN PHASE COMPLETE: ${currentPlanPhase.id} - ${currentPlanPhase.title}`));
 
       // Check if moving to review (all plan phases done)
-      if (nextProtocolPhase === 'review') {
+      if (moveToReview) {
         state.phase = 'review';
         state.current_plan_phase = null;
         writeState(statusPath, state);
@@ -281,20 +288,14 @@ export async function done(projectRoot: string, projectId: string): Promise<void
         return;
       }
 
-      // Update protocol phase if stage changed
-      if (nextProtocolPhase && nextProtocolPhase !== state.phase) {
-        state.phase = nextProtocolPhase;
-      }
-
       // Update current plan phase tracker
       const newCurrentPhase = getCurrentPlanPhase(state.plan_phases);
       state.current_plan_phase = newCurrentPhase?.id || null;
 
       writeState(statusPath, state);
 
-      const newStage = newCurrentPhase ? getCurrentStage(newCurrentPhase) : null;
-      if (newCurrentPhase && newStage) {
-        console.log(chalk.cyan(`NEXT: ${newCurrentPhase.id} → ${newStage}`));
+      if (newCurrentPhase) {
+        console.log(chalk.cyan(`NEXT: ${newCurrentPhase.id} - ${newCurrentPhase.title}`));
       }
       console.log(`\n  Run: porch status ${state.id}`);
       return;
@@ -322,9 +323,8 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
     const planPath = findPlanFile(process.cwd(), state.id, state.title);
     if (planPath) {
       state.plan_phases = extractPhasesFromFile(planPath);
-      // Mark first phase's implement stage as in_progress
+      // extractPhasesFromFile already marks first phase as in_progress
       if (state.plan_phases.length > 0) {
-        state.plan_phases[0].stages.implement = 'in_progress';
         state.current_plan_phase = state.plan_phases[0].id;
       }
     }
@@ -334,6 +334,38 @@ function advanceProtocolPhase(state: ProjectState, protocol: Protocol, statusPat
 
   console.log('');
   console.log(chalk.green(`ADVANCING TO: ${nextPhase.id} - ${nextPhase.name}`));
+
+  // If we just entered implement phase, show phase 1 info and the critical warning
+  if (isPhased(protocol, nextPhase.id) && state.plan_phases.length > 0) {
+    const firstPhase = state.plan_phases[0];
+    const nextPlanPhase = state.plan_phases[1];
+
+    console.log('');
+    console.log(chalk.bold(`YOUR TASK: ${firstPhase.id} - "${firstPhase.title}"`));
+
+    // Show phase content from plan
+    const planPath = findPlanFile(process.cwd(), state.id, state.title);
+    if (planPath) {
+      const content = fs.readFileSync(planPath, 'utf-8');
+      const phaseContent = getPhaseContent(content, firstPhase.id);
+      if (phaseContent) {
+        console.log(section('FROM THE PLAN', phaseContent.slice(0, 800)));
+      }
+    }
+
+    console.log('');
+    console.log(chalk.red.bold('╔══════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.red.bold('║  🛑 CRITICAL RULES                                           ║'));
+    if (nextPlanPhase) {
+      console.log(chalk.red.bold(`║  1. DO NOT start ${nextPlanPhase.id} until you run porch again!`.padEnd(63) + '║'));
+    } else {
+      console.log(chalk.red.bold('║  1. DO NOT start the next phase until you run porch again!   ║'));
+    }
+    console.log(chalk.red.bold('║  2. Run /compact before starting each new phase              ║'));
+    console.log(chalk.red.bold('║  3. When phase complete, run: porch done ' + state.id.padEnd(20) + '║'));
+    console.log(chalk.red.bold('╚══════════════════════════════════════════════════════════════╝'));
+  }
+
   console.log(`\n  Run: porch status ${state.id}`);
 }
 
@@ -559,6 +591,12 @@ export async function cli(args: string[]): Promise<void> {
 
   try {
     switch (command) {
+      case 'run':
+        if (!rest[0]) throw new Error('Usage: porch run <id>');
+        const { run } = await import('./run.js');
+        await run(projectRoot, rest[0]);
+        break;
+
       case 'status':
         if (!rest[0]) throw new Error('Usage: porch status <id>');
         await status(projectRoot, rest[0]);
@@ -593,9 +631,10 @@ export async function cli(args: string[]): Promise<void> {
         break;
 
       default:
-        console.log('porch - Minimal Protocol Orchestrator');
+        console.log('porch - Protocol Orchestrator');
         console.log('');
         console.log('Commands:');
+        console.log('  run <id>                 Run the protocol (porch as outer loop)');
         console.log('  status <id>              Show current state and instructions');
         console.log('  check <id>               Run checks for current phase');
         console.log('  done <id>                Advance to next phase (if checks pass)');

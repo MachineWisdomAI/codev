@@ -1,204 +1,196 @@
-# Plan 0075: Porch Minimal Redesign
+# Plan 0075: Porch Minimal Redesign (Porch Outer)
 
 ## Overview
 
-Replace the current 4,800-line porch with a minimal ~400-line implementation that Claude calls as a tool.
-
-## Implementation Phases
-
-### Phase 1: Core Types and State Management
-
-**Files:**
-- `packages/codev/src/commands/porch/types.ts` (~50 lines)
-- `packages/codev/src/commands/porch/state.ts` (~100 lines)
-- `packages/codev/src/commands/porch/__tests__/state.test.ts` (~80 lines)
-
-**Deliverables:**
-- [ ] ProjectState interface (simplified from current)
-- [ ] Phase type (string, protocol-defined)
-- [ ] GateStatus and CheckResult types
-- [ ] readState() - read status.yaml
-- [ ] writeState() - write status.yaml
-- [ ] createInitialState() - for porch init
-- [ ] Unit tests for state read/write/create
-
-**Acceptance:**
-- Types compile
-- Can read/write status.yaml
-- Fails loudly on corrupted YAML
-- Unit tests pass
-
-### Phase 2: Protocol Loading
-
-**Files:**
-- `packages/codev/src/commands/porch/protocol.ts` (~80 lines)
-- `packages/codev/src/commands/porch/__tests__/protocol.test.ts` (~80 lines)
-
-**Deliverables:**
-- [ ] loadProtocol() - parse protocol.json from codev/protocols or codev-skeleton/protocols
-- [ ] getPhaseConfig() - get phase configuration by id
-- [ ] getNextPhase() - determine next phase from current
-- [ ] getPhaseChecks() - get checks for a phase
-- [ ] getPhaseGate() - get gate for a phase (if any)
-- [ ] Unit tests for protocol loading and phase queries
-
-**Acceptance:**
-- Can load SPIDER, TICK, MAINTAIN protocols
-- Phase transitions work correctly
-- Fails loudly on missing/invalid protocol.json
-- Unit tests pass
-
-### Phase 3: Plan Parsing
-
-**Files:**
-- `packages/codev/src/commands/porch/plan.ts` (~80 lines)
-- `packages/codev/src/commands/porch/__tests__/plan.test.ts` (~100 lines)
-
-**Deliverables:**
-- [ ] findPlanFile() - locate plan markdown by project id
-- [ ] extractPlanPhases() - extract phases from plan markdown (look for `### Phase N:` headers)
-- [ ] getCurrentPlanPhase() - get current plan phase from state
-- [ ] advancePlanPhase() - move to next plan phase
-- [ ] allPlanPhasesComplete() - check if all done
-- [ ] Unit tests with fixture plan files
-
-**Plan Markdown Format:**
-```markdown
-### Phase 1: Title Here
-...content...
-
-### Phase 2: Another Title
-...content...
-```
-
-**Acceptance:**
-- Extracts phases from existing plan files
-- Tracks plan phase progress
-- Fails loudly if plan file missing for phased protocol
-- Unit tests pass with various plan formats
-
-### Phase 4: Check Runner
-
-**Files:**
-- `packages/codev/src/commands/porch/checks.ts` (~80 lines)
-- `packages/codev/src/commands/porch/__tests__/checks.test.ts` (~60 lines)
-
-**Deliverables:**
-- [ ] runCheck() - run a single check command with 5-minute timeout
-- [ ] runPhaseChecks() - run all checks for current phase
-- [ ] formatCheckResults() - format for terminal output
-- [ ] Unit tests (mock subprocess)
-
-**Behavior:**
-- Run checks in project root directory
-- Capture stdout/stderr
-- Timeout after 5 minutes (configurable)
-- Return pass/fail with output
-
-**Acceptance:**
-- npm run build check works
-- npm test check works
-- Timeout kills hanging commands
-- Clear pass/fail output
-- Unit tests pass
-
-### Phase 5: Commands Implementation
-
-**Files:**
-- `packages/codev/src/commands/porch/index.ts` (~150 lines)
-
-**Deliverables:**
-- [ ] status() - show current state and instructions
-- [ ] check() - run checks and report
-- [ ] done() - advance if checks pass
-- [ ] gate() - request human approval
-- [ ] approve() - approve a gate
-- [ ] init() - initialize new project
-
-**Acceptance:**
-- All commands produce clear, prescriptive output
-- done() refuses to advance if checks fail
-- gate() tells Claude to stop and wait
-
-### Phase 6: CLI Wiring
-
-**Files:**
-- `packages/codev/bin/porch.js` (new binary)
-- `packages/codev/package.json` (add bin entry)
-
-**Deliverables:**
-- [ ] CLI entry point
-- [ ] Command routing
-- [ ] Error handling
-
-**Acceptance:**
-- `porch status 0074` works from command line
-- All commands accessible via CLI
-
-### Phase 7: Role Prompt Updates
-
-**Files:**
-- `codev/roles/builder.md` or `codev-skeleton/roles/builder.md`
-
-**Deliverables:**
-- [ ] Add CRITICAL porch enforcement section
-- [ ] Mandatory behaviors list
-- [ ] Clear "porch is authoritative" messaging
-
-**Acceptance:**
-- Role prompt clearly emphasizes porch
-- Instructions are unambiguous
-
-### Phase 8: Integration Testing
-
-**Deliverables:**
-- [ ] Test with spec 0074 (remove-today-summary)
-- [ ] Verify phase transitions work
-- [ ] Verify gates block correctly
-- [ ] Verify checks run and report correctly
-
-**Acceptance:**
-- Can run through full SPIDER workflow
-- Gates actually block progress
-- Claude follows porch instructions
-
-## Migration Strategy
-
-1. Build porch alongside existing porch
-2. Test with spec 0074
-3. If successful, rename porch → porch
-4. Delete old porch code
-
-## File Count Estimate
-
-| File | Lines |
-|------|-------|
-| types.ts | ~50 |
-| state.ts | ~100 |
-| protocol.ts | ~80 |
-| plan.ts | ~80 |
-| checks.ts | ~80 |
-| index.ts | ~150 |
-| **Source Total** | **~540** |
-| | |
-| state.test.ts | ~80 |
-| protocol.test.ts | ~80 |
-| plan.test.ts | ~100 |
-| checks.test.ts | ~60 |
-| **Test Total** | **~320** |
-| | |
-| **Grand Total** | **~860** |
-
-Down from ~4,800 lines = **82% reduction** (source only: 89% reduction)
-
-## Risks
-
-1. **Claude doesn't call porch enough** - Mitigate with strong role prompt
-2. **Gate enforcement is soft** - Mitigate by making gate() output very clear
-3. **Plan parsing breaks** - Reuse working regex from current porch
+Redesign porch so it is the outer loop that spawns and controls Claude, rather than Claude calling porch commands. This gives hard enforcement of phase transitions and prevents Claude from bypassing protocol.
 
 ## Dependencies
 
-- Existing protocol.json files (may need simplification)
-- Existing plan file format (no changes)
-- Builder role prompt (needs updates)
+- Existing porch command structure (`packages/codev/src/commands/porch/`)
+- Claude CLI (`claude` command)
+- Existing state management (`state.ts`, `protocol.ts`)
+
+## Implementation Phases
+
+```json
+{
+  "phases": [
+    {
+      "id": "phase_1",
+      "title": "Core Run Loop and REPL",
+      "description": "Implement the main run loop that spawns Claude and accepts user commands"
+    },
+    {
+      "id": "phase_2",
+      "title": "Claude Spawning and Output Monitoring",
+      "description": "Spawn Claude with output to file, watch for signals"
+    },
+    {
+      "id": "phase_3",
+      "title": "Phase Prompts and Integration",
+      "description": "Build phase-specific prompts, update af kickoff to use porch run"
+    }
+  ]
+}
+```
+
+### Phase 1: Core Run Loop and REPL
+
+**Goal:** Create the main `porch run <id>` command with a simple REPL.
+
+**Files to create/modify:**
+
+| File | Action |
+|------|--------|
+| `packages/codev/src/commands/porch/run.ts` | Create: Main run loop |
+| `packages/codev/src/commands/porch/repl.ts` | Create: REPL implementation |
+| `packages/codev/src/commands/porch/index.ts` | Modify: Add `run` subcommand |
+
+**Steps:**
+
+1. **Create `run.ts`** with the main loop:
+   - Load state for project
+   - Determine current phase
+   - Build phase-specific prompt
+   - Spawn Claude with output to file
+   - Enter REPL loop
+   - Handle signals and advance state
+
+2. **Create `repl.ts`** with commands:
+   - `t` / `tail` - Tail Claude's output file
+   - `i` / `interact` - Switch to interactive mode
+   - `a` / `approve` - Approve current gate
+   - `s` / `status` - Show current status
+   - `q` / `quit` - Kill Claude and exit
+   - `Enter` - Refresh status display
+
+3. **Status line display:**
+   ```
+   [0074] phase: specify | stage: writing | claude: running (2m 34s)
+   > _
+   ```
+
+**Verification:**
+```bash
+# Command parses and shows help
+node packages/codev/bin/porch.js run --help
+
+# Can start with a project ID
+node packages/codev/bin/porch.js run 0074
+```
+
+### Phase 2: Claude Spawning and Output Monitoring
+
+**Goal:** Spawn Claude with output to file, detect completion signals.
+
+**Files to create/modify:**
+
+| File | Action |
+|------|--------|
+| `packages/codev/src/commands/porch/claude.ts` | Create: Claude spawning/monitoring |
+| `packages/codev/src/commands/porch/signals.ts` | Create: Signal detection |
+
+**Steps:**
+
+1. **Create `claude.ts`**:
+   - Spawn Claude with `child_process.spawn`
+   - Redirect stdout/stderr to `.porch/claude-output.txt`
+   - Track process state (running, exited, killed)
+   - Provide methods: `kill()`, `isRunning()`, `getExitCode()`
+
+2. **Create `signals.ts`**:
+   - Watch output file for signal markers
+   - Detect: `PHASE_COMPLETE`, `GATE_NEEDED`, `BLOCKED: <reason>`
+   - Return signal type and any payload
+
+3. **Output file management:**
+   - Create `.porch/` directory if needed
+   - Clear output file at start of each phase
+   - Rotate old output files (keep last 5)
+
+**Verification:**
+```bash
+# Can spawn Claude and capture output
+node packages/codev/bin/porch.js run 0074
+# Type 't' to tail and see Claude output
+```
+
+### Phase 3: Phase Prompts and Integration
+
+**Goal:** Build phase-specific prompts, update kickoff to use porch run.
+
+**Files to create/modify:**
+
+| File | Action |
+|------|--------|
+| `packages/codev/src/commands/porch/prompts.ts` | Create: Phase prompt templates |
+| `packages/codev/src/agent-farm/commands/kickoff.ts` | Modify: Use `porch run` |
+
+**Steps:**
+
+1. **Create `prompts.ts`**:
+   - Template for each phase (specify, plan, implement, defend, evaluate, review)
+   - Include: phase instructions, files to create/modify, exit criteria
+   - Inject project-specific context (ID, title, spec path, plan path)
+
+2. **Example prompt structure:**
+   ```markdown
+   # Phase: Specify
+
+   You are writing the specification for project 0074: remove-today-summary
+
+   ## Your Task
+   1. Read the existing codebase to understand what needs to be removed
+   2. Write the spec at: codev/specs/0074-remove-today-summary.md
+   3. Run 3-way consultation and add results to spec
+   4. Commit the spec file
+
+   ## When Done
+   Output exactly: PHASE_COMPLETE
+   If you need human input: GATE_NEEDED
+   If you are stuck: BLOCKED: <reason>
+   ```
+
+3. **Update kickoff.ts**:
+   - Change from running Claude directly to running `porch run <id>`
+   - Porch becomes the outer loop that manages Claude
+
+4. **Gate handling in REPL:**
+   - When `GATE_NEEDED` detected, show gate prompt
+   - User types `a` to approve
+   - Porch updates status.yaml with approval
+   - Porch spawns Claude for next phase
+
+**Verification:**
+```bash
+# Full flow test
+af kickoff -p 0075 -t "test-feature"
+# Should start porch run, which spawns Claude
+# User can tail, interact, approve gates
+```
+
+## Success Criteria
+
+1. `porch run <id>` works as outer loop
+2. Claude spawns with phase-specific prompts
+3. Output goes to `.porch/claude-output.txt`
+4. REPL accepts commands while Claude runs
+5. Signals detected and state advances
+6. Gates block until user approves
+7. `af kickoff` uses porch run
+
+## Estimated Scope
+
+| Metric | Value |
+|--------|-------|
+| New files | 4 (run.ts, repl.ts, claude.ts, prompts.ts) |
+| Modified files | 2 (index.ts, kickoff.ts) |
+| Lines of code | ~500 |
+
+## Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| Claude CLI interface changes | Low | Medium | Abstract spawn logic, easy to update |
+| Signal detection unreliable | Medium | High | Simple text markers, clear documentation |
+| REPL complexity grows | Low | Low | Keep commands minimal (5 commands max) |

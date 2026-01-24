@@ -11,11 +11,10 @@ import { resolve, basename } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import type { Builder, Config } from '../types.js';
-import { getConfig, ensureDirectories, getResolvedCommands } from '../utils/index.js';
+import { getConfig, ensureDirectories } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
-import { loadRolePrompt } from '../utils/roles.js';
 
 export interface KickoffOptions {
   project: string;
@@ -199,7 +198,7 @@ async function getPorchCommand(config: Config): Promise<string> {
  * Kickoff a new protocol-driven project
  */
 export async function kickoff(options: KickoffOptions): Promise<void> {
-  const { project: projectId, title, protocol: protocolName = 'spider', noRole, resume } = options;
+  const { project: projectId, title, protocol: protocolName = 'spider', resume } = options;
 
   const config = getConfig();
 
@@ -215,9 +214,6 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
           `  2. Provide a title: af kickoff -p ${projectId} --title "feature-name"\n` +
           `  3. Initialize porch manually: porch init ${protocolName} ${projectId} <project-name>`);
   }
-
-  // If we have a title but no porch state, we'll initialize porch before creating worktree
-  const needsInitialization = !specFile && !porchState && title;
 
   // Derive the project title from spec, porch state, or provided title
   const projectTitle = specFile
@@ -235,10 +231,6 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
   const worktreeName = `${actualProtocol.toLowerCase()}_${projectId}_${safeName}`;
   const branchName = `builder/${projectId}-${safeName}`;
   const worktreePath = resolve(worktreesDir, worktreeName);
-
-  // Check for plan file (only if spec exists)
-  const planFile = specFile ? resolve(config.codevDir, 'plans', `${basename(specFile, '.md')}.md`) : null;
-  const hasPlan = planFile ? existsSync(planFile) : false;
 
   // Check if porch state already exists
   const hasExistingState = !!porchState;
@@ -287,92 +279,26 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
     }
   }
 
-  // Build the prompt
-  const specRelPath = specFile ? `codev/specs/${basename(specFile)}` : `codev/specs/${projectId}-${safeName}.md`;
-  const planRelPath = `codev/plans/${projectId}-${safeName}.md`;
-  const protocolPath = `codev/protocols/${actualProtocol.toLowerCase()}/protocol.md`;
-
-  let initialPrompt = `## Protocol
-Follow the ${actualProtocol.toUpperCase()} protocol STRICTLY: ${protocolPath}
-Read and internalize the protocol before starting any work.
-
-## Porch Orchestration
-This builder is orchestrated by Porch. Check your current state with:
-  porch status ${projectId}
-
-Current porch state: ${porchState?.state || 'initializing'}
-
-## Task`;
-
-  if (specFile) {
-    initialPrompt += `
-Implement the feature specified in ${specRelPath}.`;
-    if (hasPlan) {
-      initialPrompt += ` Follow the implementation plan in ${planRelPath}.`;
-    }
-    initialPrompt += `
-
-Start by reading the protocol, spec${hasPlan ? ', and plan' : ''}, then begin implementation.`;
-  } else {
-    // No spec yet - builder starts from specify phase
-    initialPrompt += `
-Project: ${porchState?.title || safeName}
-
-You are starting from the SPECIFY phase. Your first task is to:
-1. Read the protocol (${protocolPath})
-2. Understand what "${porchState?.title || safeName}" means
-3. Create the specification file at ${specRelPath}
-
-The porch orchestrator will guide you through each phase. Follow the signals it expects.`;
-  }
-
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
-
-${initialPrompt}`;
-
-  // Load role
-  const role = noRole ? null : loadRolePrompt(config, 'builder');
-  const commands = getResolvedCommands();
-
   // Start builder session
   const port = await findFreePort(config);
   const sessionName = getSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
 
-  // Write prompt and role files
-  const promptFile = resolve(worktreePath, '.builder-prompt.txt');
-  writeFileSync(promptFile, builderPrompt);
-
+  // Write startup script - porch run is the outer loop
   const scriptPath = resolve(worktreePath, '.builder-start.sh');
-  let scriptContent: string;
 
-  // Builder startup script runs porch, which orchestrates Claude sessions
-  // The role file is written for reference but porch handles the actual invocations
-  if (role) {
-    const roleFile = resolve(worktreePath, '.builder-role.md');
-    const roleWithPort = role.content.replace(/\{PORT\}/g, String(config.dashboardPort));
-    writeFileSync(roleFile, roleWithPort);
-    logger.info(`Loaded role (${role.source})`);
-  }
-
-  // Run porch as the main orchestrator
-  // Porch will invoke Claude for each phase with appropriate context
-  // Don't use exec so the session stays alive if porch exits
-  scriptContent = `#!/bin/zsh
+  // Start porch run - porch is the outer loop that spawns and controls Claude
+  // Porch runs the REPL, monitors Claude output, and handles phase transitions
+  const scriptContent = `#!/bin/bash
 cd "${worktreePath}"
-echo "Starting porch orchestrator for project ${projectId}..."
-echo "Protocol: ${protocolName.toUpperCase()}"
+echo "Starting Porch Protocol Orchestrator..."
 echo ""
 ${porchCmd} run ${projectId}
-EXIT_CODE=$?
 echo ""
-echo "═══════════════════════════════════════════════════"
-echo "Porch exited with code $EXIT_CODE"
-echo "To restart: ${porchCmd} run ${projectId}"
-echo "To exit: type 'exit'"
-echo "═══════════════════════════════════════════════════"
-exec zsh
+echo "Porch exited. Press any key to restart or Ctrl+C to quit."
+read -n 1
+exec "$0"
 `;
 
   writeFileSync(scriptPath, scriptContent);

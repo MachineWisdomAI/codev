@@ -255,11 +255,23 @@ async function startBuilderSession(
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${roleSource})`);
     scriptContent = `#!/bin/bash
-exec ${baseCmd} --append-system-prompt "$(cat '${roleFile}')" "$(cat '${promptFile}')"
+cd "${worktreePath}"
+while true; do
+  ${baseCmd} --append-system-prompt "$(cat '${roleFile}')" "$(cat '${promptFile}')"
+  echo ""
+  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
 `;
   } else {
     scriptContent = `#!/bin/bash
-exec ${baseCmd} "$(cat '${promptFile}')"
+cd "${worktreePath}"
+while true; do
+  ${baseCmd} "$(cat '${promptFile}')"
+  echo ""
+  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
 `;
   }
 
@@ -646,11 +658,23 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
     writeFileSync(roleFile, roleWithPort);
     logger.info(`Loaded role (${role.source})`);
     scriptContent = `#!/bin/bash
-exec ${commands.builder} --append-system-prompt "$(cat '${roleFile}')"
+cd "${worktreePath}"
+while true; do
+  ${commands.builder} --append-system-prompt "$(cat '${roleFile}')"
+  echo ""
+  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
 `;
   } else {
     scriptContent = `#!/bin/bash
-exec ${commands.builder}
+cd "${worktreePath}"
+while true; do
+  ${commands.builder}
+  echo ""
+  echo "Claude exited. Restarting in 2 seconds... (Ctrl+C to quit)"
+  sleep 2
+done
 `;
   }
 

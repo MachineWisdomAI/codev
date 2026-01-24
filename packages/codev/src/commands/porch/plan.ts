@@ -2,8 +2,10 @@
  * Porch Plan Parsing
  *
  * Extracts implementation phases from plan.md files.
- * Looks for `### Phase N: <title>` headers.
- * Fails loudly if plan file is missing when required.
+ * Looks for `### Phase N: <title>` headers or JSON phases block.
+ *
+ * Plan phases are simple: pending → in_progress → complete.
+ * All checks (implement, defend, evaluate) run together at the end.
  */
 
 import * as fs from 'node:fs';
@@ -49,18 +51,11 @@ export function findPlanFile(projectRoot: string, projectId: string, projectName
 // Phase Extraction
 // ============================================================================
 
-/** Default stages for a new plan phase */
-const DEFAULT_STAGES = {
-  implement: 'pending' as const,
-  defend: 'pending' as const,
-  evaluate: 'pending' as const,
-};
-
 /**
  * Extract phases from plan markdown content
- * Returns phases with all stages pending
+ * Returns phases with status 'pending'
  *
- * Looks for a JSON code block in the "Phases (Machine Readable)" section:
+ * Looks for a JSON code block:
  * ```json
  * {"phases": [{"id": "phase_1", "title": "..."}, ...]}
  * ```
@@ -73,10 +68,10 @@ export function extractPlanPhases(planContent: string): PlanPhase[] {
     try {
       const parsed = JSON.parse(jsonMatch[1]);
       if (parsed.phases && Array.isArray(parsed.phases)) {
-        return parsed.phases.map((p: { id: string; title: string }) => ({
+        return parsed.phases.map((p: { id: string; title: string }, index: number) => ({
           id: p.id,
           title: p.title,
-          stages: { ...DEFAULT_STAGES },
+          status: index === 0 ? 'in_progress' as const : 'pending' as const,
         }));
       }
     } catch (e) {
@@ -89,7 +84,7 @@ export function extractPlanPhases(planContent: string): PlanPhase[] {
   return [{
     id: 'phase_1',
     title: 'Implementation',
-    stages: { ...DEFAULT_STAGES },
+    status: 'in_progress',
   }];
 }
 
@@ -110,29 +105,11 @@ export function extractPhasesFromFile(planFilePath: string): PlanPhase[] {
 // Phase Navigation
 // ============================================================================
 
-/** IDE stages in order */
-const IDE_STAGES = ['implement', 'defend', 'evaluate'] as const;
-type IDEStage = typeof IDE_STAGES[number];
-
 /**
- * Check if a plan phase is fully complete (all stages complete)
+ * Check if a plan phase is complete
  */
 export function isPlanPhaseComplete(phase: PlanPhase): boolean {
-  return phase.stages.implement === 'complete' &&
-         phase.stages.defend === 'complete' &&
-         phase.stages.evaluate === 'complete';
-}
-
-/**
- * Get the current stage within a plan phase
- */
-export function getCurrentStage(phase: PlanPhase): IDEStage | null {
-  for (const stage of IDE_STAGES) {
-    if (phase.stages[stage] !== 'complete') {
-      return stage;
-    }
-  }
-  return null; // All stages complete
+  return phase.status === 'complete';
 }
 
 /**
@@ -140,7 +117,7 @@ export function getCurrentStage(phase: PlanPhase): IDEStage | null {
  */
 export function getCurrentPlanPhase(phases: PlanPhase[]): PlanPhase | null {
   for (const phase of phases) {
-    if (!isPlanPhaseComplete(phase)) {
+    if (phase.status !== 'complete') {
       return phase;
     }
   }
@@ -166,82 +143,33 @@ export function allPlanPhasesComplete(phases: PlanPhase[]): boolean {
 }
 
 /**
- * Advance the stage within a plan phase
- * Returns updated phases array and the next protocol phase to enter
+ * Advance to the next plan phase
+ * Marks current phase complete and next phase in_progress
+ * Returns updated phases array and whether to move to review
  */
-export function advanceStage(
+export function advancePlanPhase(
   phases: PlanPhase[],
-  currentPhaseId: string,
-  currentStage: IDEStage
-): { phases: PlanPhase[]; nextProtocolPhase: string | null } {
+  currentPhaseId: string
+): { phases: PlanPhase[]; moveToReview: boolean } {
   const phaseIndex = phases.findIndex(p => p.id === currentPhaseId);
   if (phaseIndex < 0) {
-    return { phases, nextProtocolPhase: null };
+    return { phases, moveToReview: false };
   }
 
-  const stageIndex = IDE_STAGES.indexOf(currentStage);
   const updatedPhases = phases.map((p, i) => {
-    if (i !== phaseIndex) return p;
-
-    const newStages = { ...p.stages };
-    newStages[currentStage] = 'complete';
-
-    // If there's a next stage, mark it in_progress
-    if (stageIndex < IDE_STAGES.length - 1) {
-      newStages[IDE_STAGES[stageIndex + 1]] = 'in_progress';
+    if (i === phaseIndex) {
+      return { ...p, status: 'complete' as const };
     }
-
-    return { ...p, stages: newStages };
-  });
-
-  // Determine next protocol phase
-  let nextProtocolPhase: string | null = null;
-
-  if (stageIndex < IDE_STAGES.length - 1) {
-    // Move to next stage within same plan phase
-    nextProtocolPhase = IDE_STAGES[stageIndex + 1];
-  } else {
-    // Completed evaluate, check if there's another plan phase
-    if (phaseIndex < phases.length - 1) {
-      // Start next plan phase at implement
-      const nextPlanPhase = phases[phaseIndex + 1];
-      updatedPhases[phaseIndex + 1] = {
-        ...nextPlanPhase,
-        stages: { ...nextPlanPhase.stages, implement: 'in_progress' },
-      };
-      nextProtocolPhase = 'implement';
-    } else {
-      // All plan phases complete, move to review
-      nextProtocolPhase = 'review';
-    }
-  }
-
-  return { phases: updatedPhases, nextProtocolPhase };
-}
-
-/**
- * Legacy: Advance to the next plan phase (for backward compat)
- * @deprecated Use advanceStage instead
- */
-export function advancePlanPhase(phases: PlanPhase[], currentPhaseId: string): PlanPhase[] {
-  // Mark all stages of current phase as complete
-  return phases.map((p, i) => {
-    if (p.id === currentPhaseId) {
-      return {
-        ...p,
-        stages: { implement: 'complete', defend: 'complete', evaluate: 'complete' },
-      };
-    }
-    // Mark next phase's implement as in_progress
-    const currentIndex = phases.findIndex(phase => phase.id === currentPhaseId);
-    if (i === currentIndex + 1) {
-      return {
-        ...p,
-        stages: { ...p.stages, implement: 'in_progress' },
-      };
+    if (i === phaseIndex + 1) {
+      return { ...p, status: 'in_progress' as const };
     }
     return p;
   });
+
+  // Check if all phases are now complete
+  const moveToReview = updatedPhases.every(p => p.status === 'complete');
+
+  return { phases: updatedPhases, moveToReview };
 }
 
 /**

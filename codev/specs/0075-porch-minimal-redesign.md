@@ -1,312 +1,273 @@
-# Spec 0075: Porch Minimal Redesign
+# Spec 0075: Porch Minimal Redesign (v2 - Porch Outer)
 
 ## Problem Statement
 
-The current porch implementation is ~4,800 lines and tries to do too much:
-- REPL interface for interactive use
-- Claude subprocess management and signal parsing
-- Complex state machine with nested substates
-- Consultation coordination
-- Desktop notifications
+The "Claude outer" approach (Claude calls porch as a tool) doesn't work reliably:
+- Claude doesn't follow instructions consistently
+- Claude edits files it shouldn't (status.yaml)
+- Claude skips porch commands and does its own thing
+- No hard enforcement of phase transitions
 
-This complexity creates fragility. Signal detection is unreliable, the REPL conflicts with automated use, and debugging is difficult.
+We need porch to be the outer loop with hard control over Claude.
 
 ## Proposed Solution
 
-**Flip the relationship**: Instead of porch orchestrating Claude, Claude calls porch as a tool.
+**Porch is the outer loop.** Porch spawns Claude for each phase, monitors output, and controls transitions.
 
-Claude is already good at:
-- Calling tools in a loop
-- Following instructions from tool output
-- Making decisions based on feedback
+### Design Principles
 
-Porch becomes an **advisor tool** that Claude consults, not an orchestrator that spawns Claude.
+1. **Simple REPL** - Porch runs a minimal command loop
+2. **Async Claude** - Claude runs in background, output to file
+3. **File watching** - Porch watches output file until Claude finishes
+4. **User control** - User can tail, interact, or approve at any time
+5. **Hard state control** - Only porch modifies status.yaml
 
-### Key Features to Keep
-
-1. **Declarative protocols** - protocol.json defines phases, gates, checks
-2. **Plan unrolling** - Extract phases from plan markdown, track progress
-3. **Gates** - Human approval checkpoints that block progress
-4. **Checks** - Run npm test, npm build, etc. to verify criteria
-
-### Features to Remove
-
-1. **REPL** - No interactive prompt
-2. **Claude subprocess management** - No spawning Claude
-3. **Signal parsing** - No parsing `<signal>` tags from output
-4. **Consultation coordination** - Claude handles this directly
-5. **Desktop notifications** - Not needed
-6. **Complex substate tracking** - No nested states like `specify:consultation_2`
-
-### Generic Protocol Support
-
-Porch must support any protocol defined in protocol.json, not just SPIDER. This includes:
-- **SPIDER** - Full specify → plan → implement → defend → evaluate → review flow
-- **TICK** - Amendment workflow for existing specs
-- **MAINTAIN** - Codebase maintenance
-- **Custom protocols** - User-defined workflows
-
-The protocol.json format defines phases, gates, and checks declaratively. Porch interprets this at runtime.
-
-## Commands
-
-### `porch status <id>`
-
-Shows current state and prescriptive next steps.
+### Architecture
 
 ```
-$ porch status 0074
-
-══════════════════════════════════════════════════
-  PROJECT: 0074 - remove-today-summary
-  PROTOCOL: spider
-  PHASE: implement (2 of 4)
-══════════════════════════════════════════════════
-
-CURRENT PLAN PHASE: phase_2 - Add E2E tests
-STATUS: in_progress
-
-CRITERIA:
-  ✗ npm test (not yet run)
-  ✗ npm run build (not yet run)
-
-INSTRUCTIONS:
-  You are implementing phase_2: "Add E2E tests".
-
-  From the plan:
-  - Add tests to tests/e2e/dashboard.bats
-  - Verify removal of activity.js and activity.css
-  - Test that no activity-related endpoints exist
-
-  When complete, run: porch check 0074
-
-NEXT ACTION: Implement the E2E tests as specified in the plan.
+┌─────────────────────────────────────────────────────────┐
+│  PORCH (outer loop)                                     │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │  Simple REPL                                        ││
+│  │  - Watches Claude output file                       ││
+│  │  - Accepts user commands                            ││
+│  │  - Updates status.yaml                              ││
+│  └─────────────────────────────────────────────────────┘│
+│                          │                              │
+│                          ▼                              │
+│  ┌─────────────────────────────────────────────────────┐│
+│  │  CLAUDE (spawned per phase)                         ││
+│  │  - Runs with phase-specific prompt                  ││
+│  │  - Output goes to file                              ││
+│  │  - No access to status.yaml                         ││
+│  │  - Exits when phase work complete                   ││
+│  └─────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────┘
 ```
 
-### `porch check <id>`
+## REPL Commands
 
-Runs the phase checks and reports results.
+The porch REPL accepts these commands while Claude is running:
 
+| Command | Description |
+|---------|-------------|
+| `t` / `tail` | Tail the current Claude session output |
+| `i` / `interact` | Switch to interactive mode (user can type to Claude) |
+| `a` / `approve` | Approve the current gate |
+| `s` / `status` | Show current project status |
+| `q` / `quit` | Kill Claude and exit porch |
+| `Enter` | Refresh status display |
+
+### Default Behavior
+
+When no command is entered, porch shows a status line:
 ```
-$ porch check 0074
-
-RUNNING CHECKS...
-
-  ✓ npm run build (passed)
-  ✗ npm test (3 failing tests)
-
-RESULT: CHECKS FAILED
-
-  Fix the failing tests before advancing.
-  Run: porch check 0074 (to re-check)
-```
-
-### `porch done <id>`
-
-Advances to next phase if checks pass. Refuses if checks fail.
-
-```
-$ porch done 0074
-
-RUNNING CHECKS...
-  ✓ npm run build (passed)
-  ✓ npm test (passed)
-
-CHECKS PASSED. Advancing...
-
-PHASE COMPLETE: phase_2 - Add E2E tests
-NEXT PHASE: phase_3 - Documentation cleanup
-
-Run: porch status 0074 (to see next steps)
+[0074] phase: specify | stage: writing | claude: running (2m 34s)
+> _
 ```
 
-### `porch gate <id>`
+## Phase Execution Flow
 
-Requests human approval for current gate.
+### 1. Porch starts
 
-```
-$ porch gate 0074
-
-GATE: spec_approval
-
-  The specification is complete and ready for review.
-
-  Artifact: codev/specs/0074-remove-today-summary.md
-
-  Human approval required. STOP and wait.
-  Do not proceed until gate is approved.
-
-STATUS: WAITING FOR HUMAN APPROVAL
+```bash
+porch run 0074
 ```
 
-### `porch approve <id> <gate>`
+Porch:
+1. Loads status.yaml
+2. Determines current phase and stage
+3. Builds phase-specific prompt for Claude
+4. Spawns Claude with output to `.porch/claude-output.txt`
+5. Enters REPL loop
 
-Human approves a gate (run from separate terminal).
+### 2. Claude runs
 
+Claude executes the phase work:
+- Specify: Write the spec, run consultations
+- Plan: Write the plan with JSON phases
+- Implement: Write code for current plan phase
+- Defend: Write tests
+- Evaluate: Run 3-way review, commit
+- Review: Create PR
+
+Claude's prompt includes:
+- The phase instructions
+- What files to create/modify
+- Clear exit criteria ("when done, output PHASE_COMPLETE")
+
+### 3. Porch detects completion
+
+Porch watches Claude's output for:
+- `PHASE_COMPLETE` - Claude finished the phase successfully
+- `GATE_NEEDED` - Claude needs human approval
+- `BLOCKED: <reason>` - Claude is stuck
+- Process exit - Claude crashed or was killed
+
+### 4. Porch advances state
+
+When Claude signals completion:
+1. Porch runs phase checks (build, test, etc.)
+2. If checks pass, porch updates status.yaml
+3. Porch determines next phase
+4. If gate required, porch waits for user approval
+5. Porch spawns Claude for next phase
+
+## Gate Handling
+
+When a phase has a gate (e.g., spec-approval):
+
+1. Claude finishes phase work, outputs `GATE_NEEDED`
+2. Porch displays:
+   ```
+   ════════════════════════════════════════════════════════════
+   GATE: spec-approval
+
+   Review the spec at: codev/specs/0074-remove-today-summary.md
+
+   Type 'a' or 'approve' to approve and continue.
+   ════════════════════════════════════════════════════════════
+   [0074] phase: specify | WAITING FOR APPROVAL
+   > _
+   ```
+3. User reviews the artifact
+4. User types `a` to approve
+5. Porch updates status.yaml with approval
+6. Porch spawns Claude for next phase
+
+## Claude Prompts
+
+Each phase gets a specific prompt. Example for `specify` phase:
+
+```markdown
+# Phase: Specify
+
+You are writing the specification for project 0074: remove-today-summary
+
+## Your Task
+
+1. Read the existing codebase to understand what needs to be removed
+2. Write the spec at: codev/specs/0074-remove-today-summary.md
+3. Run 3-way consultation and add results to spec
+4. Commit the spec file
+
+## Requirements
+
+- Spec must have: Summary, Motivation, Requirements, Acceptance Criteria
+- Spec must have ## Consultation section with 3-way review results
+- Spec must NOT contain implementation phases (those go in the plan)
+
+## When Done
+
+Output exactly: PHASE_COMPLETE
+
+If you need human input, output: GATE_NEEDED
+If you are stuck, output: BLOCKED: <reason>
 ```
-$ porch approve 0074 spec_approval
-
-Gate spec_approval approved.
-```
-
-### `porch init <protocol> <id> <name>`
-
-Initialize a new project (same as current).
 
 ## State File
 
-Simplified `status.yaml`:
+Same as before - status.yaml tracks project state:
 
 ```yaml
 id: "0074"
 title: "remove-today-summary"
 protocol: "spider"
-phase: "implement"
-plan_phases:
-  - id: "phase_1"
-    title: "Backend cleanup"
-    status: "complete"
-  - id: "phase_2"
-    title: "Add E2E tests"
-    status: "in_progress"
-  - id: "phase_3"
-    title: "Documentation cleanup"
-    status: "pending"
-current_plan_phase: "phase_2"
+phase: "specify"
+plan_phases: []
+current_plan_phase: null
 gates:
-  spec_approval: { status: "approved", approved_at: "2026-01-20T..." }
-  plan_approval: { status: "approved", approved_at: "2026-01-20T..." }
-  impl_approval: { status: "pending" }
-  review_approval: { status: "pending" }
-started_at: "2026-01-20T..."
-updated_at: "2026-01-21T..."
+  spec-approval: { status: "pending" }
+  plan-approval: { status: "pending" }
+started_at: "2026-01-23T..."
+updated_at: "2026-01-23T..."
 ```
 
-## Protocol Definition
+**Critical**: Only porch modifies this file. Claude never touches it.
 
-Keep declarative protocol.json. Porch reads this at runtime to determine phases, gates, and checks.
+## Output File
 
-```json
-{
-  "name": "spider",
-  "description": "Multi-phase development with consultation",
-  "phases": [
-    {
-      "id": "specify",
-      "name": "Specification",
-      "gate": "spec_approval",
-      "checks": ["build"],
-      "next": "plan"
-    },
-    {
-      "id": "plan",
-      "name": "Planning",
-      "gate": "plan_approval",
-      "checks": ["build"],
-      "next": "implement"
-    },
-    {
-      "id": "implement",
-      "name": "Implementation",
-      "type": "phased",
-      "checks": ["build", "test"],
-      "next": "defend"
-    },
-    {
-      "id": "defend",
-      "name": "Testing",
-      "checks": ["build", "test"],
-      "next": "evaluate"
-    },
-    {
-      "id": "evaluate",
-      "name": "Evaluation",
-      "gate": "impl_approval",
-      "checks": ["build", "test"],
-      "next": "review"
-    },
-    {
-      "id": "review",
-      "name": "Review",
-      "gate": "review_approval",
-      "next": null
+Claude's output goes to `.porch/claude-output.txt`:
+- Porch watches this file for signals
+- User can `tail` to see progress
+- File is cleared at start of each phase
+
+## Implementation
+
+### Core Loop (pseudocode)
+
+```typescript
+async function run(projectId: string) {
+  const state = loadState(projectId);
+
+  while (true) {
+    const phase = getCurrentPhase(state);
+    if (!phase) break; // Protocol complete
+
+    // Build prompt for this phase
+    const prompt = buildPhasePrompt(state, phase);
+
+    // Spawn Claude with output to file
+    const claude = spawnClaude(prompt, OUTPUT_FILE);
+
+    // REPL loop while Claude runs
+    while (claude.running) {
+      const input = await promptUser(getStatusLine(state));
+
+      switch (input) {
+        case 't': tailOutput(); break;
+        case 'i': interactiveMode(claude); break;
+        case 'a': approveGate(state); break;
+        case 's': showStatus(state); break;
+        case 'q': claude.kill(); return;
+      }
+
+      // Check for Claude signals
+      const signal = checkOutputForSignal(OUTPUT_FILE);
+      if (signal === 'PHASE_COMPLETE') break;
+      if (signal === 'GATE_NEEDED') waitForApproval(state);
+      if (signal.startsWith('BLOCKED:')) handleBlocked(signal);
     }
-  ],
-  "checks": {
-    "build": "npm run build",
-    "test": "npm test"
+
+    // Run checks and advance
+    if (await runChecks(phase)) {
+      advancePhase(state);
+      saveState(state);
+    }
   }
+
+  console.log('Protocol complete!');
 }
 ```
 
-**Protocol-agnostic**: Porch doesn't hardcode SPIDER. It reads the protocol definition and follows it. TICK, MAINTAIN, or custom protocols work the same way - define phases, gates, checks in protocol.json.
+### File Structure
 
-## Role Prompt Enforcement
-
-The builder role prompt must heavily emphasize porch:
-
-```markdown
-# CRITICAL: Porch Protocol Enforcement
-
-You are operating under the SPIDER protocol. Porch is the gatekeeper.
-
-## MANDATORY BEHAVIORS
-
-1. **FIRST ACTION**: Run `porch status {PROJECT_ID}` to see your current state
-2. **BEFORE ANY WORK**: Read porch's instructions carefully
-3. **AFTER COMPLETING WORK**: Run `porch check {PROJECT_ID}` to verify
-4. **TO ADVANCE**: Run `porch done {PROJECT_ID}` - porch will verify and advance
-5. **AT GATES**: Run `porch gate {PROJECT_ID}` and STOP. Wait for human.
-
-## PORCH IS AUTHORITATIVE
-
-- Porch tells you what phase you're in
-- Porch tells you what to do next
-- Porch runs the checks that determine if you're done
-- Porch controls advancement between phases
-- You CANNOT skip phases or ignore porch
-
-## WHEN PORCH SAYS STOP, YOU STOP
-
-If porch output contains "STOP" or "WAIT", you must stop working
-and wait for human intervention. Do not try to proceed.
 ```
-
-## Error Handling
-
-**Fail loudly.** When something is wrong, porch exits with non-zero status and clear error message.
-
-| Condition | Behavior |
-|-----------|----------|
-| `status.yaml` missing | Error: "Project not found. Run porch init first." |
-| `status.yaml` corrupted | Error: "Invalid state file: {parse error}" |
-| `protocol.json` missing | Error: "Protocol '{name}' not found" |
-| `protocol.json` invalid | Error: "Invalid protocol: {parse error}" |
-| Plan file missing (for phased phase) | Error: "Plan file required for phased protocol" |
-| Unknown gate in `porch approve` | Error: "Unknown gate: {name}" |
-| Already approved gate | Warning: "Gate already approved" (not an error) |
-| Check command fails | Report failure, do not advance |
-| Check command hangs | Timeout after 5 minutes, report as failure |
-
-No graceful degradation. No guessing. If state is unclear, fail and tell the user.
+packages/codev/src/commands/porch/
+├── index.ts        # CLI entry point
+├── run.ts          # Main run loop (NEW)
+├── repl.ts         # REPL implementation (NEW)
+├── claude.ts       # Claude spawning/monitoring (NEW)
+├── prompts.ts      # Phase prompt templates (NEW)
+├── state.ts        # State management (existing)
+├── protocol.ts     # Protocol loading (existing)
+├── plan.ts         # Plan parsing (existing)
+└── checks.ts       # Check running (existing)
+```
 
 ## Success Criteria
 
-1. Porch reduced from ~4,800 lines to <600 lines
-2. All commands produce clear, prescriptive output
-3. Plan phases are extracted and tracked correctly
-4. Gates block progress until human approves
-5. Checks verify criteria before phase advancement
-6. No subprocess management or signal parsing
-7. Claude can drive the workflow by calling porch commands
-8. **Supports any protocol defined in protocol.json** (SPIDER, TICK, MAINTAIN, custom)
-9. **Fails loudly with clear errors** on invalid state or missing files
-10. **Unit tests** for state, protocol, plan, and check modules
+1. Porch is the outer loop - Claude never runs unsupervised
+2. User can tail, interact, or approve at any time
+3. Only porch modifies status.yaml
+4. Claude signals completion with simple text markers
+5. Gates block until user explicitly approves
+6. Phase checks run before advancing
+7. Clean REPL interface with status display
 
 ## Out of Scope
 
 - Desktop notifications
-- Consultation coordination (Claude handles directly)
-- REPL interface
-- Signal parsing
-- Complex substate tracking (specify:consultation_2, etc.)
+- Complex signal parsing (just simple text markers)
+- Nested substates
+- Multiple concurrent Claude sessions

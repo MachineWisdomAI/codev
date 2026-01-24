@@ -83,6 +83,17 @@ This works from your worktree at `.builders/XXXX/`.
 4. **TO ADVANCE**: Run `porch done {PROJECT_ID}` - porch will verify and advance
 5. **AT GATES**: Run `porch gate {PROJECT_ID}` and **STOP**. Wait for human.
 
+### 🚨 NEVER EDIT STATUS.YAML 🚨
+
+**DO NOT read, edit, or modify `codev/projects/*/status.yaml` directly.**
+
+This file is managed EXCLUSIVELY by porch commands. If you edit it:
+- You will corrupt the project state
+- Porch will reject your changes
+- You will have to start over
+
+Only use porch commands (`porch status`, `porch done`, `porch gate`, etc.) to interact with project state.
+
 ### PORCH IS AUTHORITATIVE
 
 - Porch tells you what phase you're in
