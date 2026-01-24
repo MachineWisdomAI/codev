@@ -169,9 +169,28 @@ Porch captures consultation verdicts:
 |---------|---------|
 | `APPROVE` | No changes needed, ready to proceed |
 | `REQUEST_CHANGES` | Issues found, needs revision |
-| `COMMENT` | Suggestions only, no blocking issues |
+| `COMMENT` | Suggestions only, no blocking issues (explicit only) |
 
-Porch parses the output for verdict keywords (REQUEST_CHANGES takes priority, then APPROVE, else COMMENT).
+**Verdict Parsing (Safe Defaults):**
+1. If output contains `REQUEST_CHANGES` → `REQUEST_CHANGES`
+2. If output contains `APPROVE` → `APPROVE`
+3. If output is empty, very short (<50 chars), or malformed → `REQUEST_CHANGES` (safe default)
+4. If no explicit verdict found → `REQUEST_CHANGES` (safe default)
+
+**Key safety principle:** Silent failures (crashes, timeouts, empty output) default to `REQUEST_CHANGES` to prevent proceeding with unverified code.
+
+### Error Handling
+
+| Failure Mode | Behavior |
+|--------------|----------|
+| `consult` CLI crashes | Verdict = `REQUEST_CHANGES`, error written to review file |
+| `consult` CLI times out | Not currently handled (TODO: add timeout) |
+| Empty/malformed output | Verdict = `REQUEST_CHANGES` |
+| Claude fails to produce artifact | Claude retries (porch doesn't intervene) |
+| Git commit fails | Warning logged, continues (may be nothing to commit) |
+| Git push fails | Warning logged, continues |
+
+Porch prioritizes **not proceeding with unverified code** over graceful degradation.
 
 ### State Tracking
 
@@ -234,11 +253,30 @@ Same as before, but simplified since consultations are automatic:
 6. Max iteration cap prevents infinite loops
 7. Clean status display showing build/verify progress
 
+## Testing Strategy
+
+| Test Type | Coverage |
+|-----------|----------|
+| Unit tests | `parseVerdict()`, `allApprove()`, `formatVerdicts()`, `buildHistoryHeader()` |
+| Integration | Build-verify loop with mocked consult (TODO) |
+| E2E | Manual testing with real consultations |
+
+**Existing tests:**
+- `plan.test.ts` - Plan phase parsing, `advancePlanPhase()`, `isPlanPhaseComplete()`
+- `state.test.ts` - State initialization, serialization with `history` field
+- `protocol.test.ts` - Protocol parsing including `build_verify` type
+
+**Test gaps (TODO):**
+- Mock `consult` CLI for integration testing
+- Timeout handling tests
+- Git failure recovery tests
+
 ## Out of Scope
 
 - Multiple concurrent Claude sessions
 - Desktop notifications
 - Custom consultation models per phase
+- Consultation timeout handling (future enhancement)
 
 ## Consultation
 

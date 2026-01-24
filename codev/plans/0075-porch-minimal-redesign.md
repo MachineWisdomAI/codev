@@ -215,9 +215,13 @@ async function runVerification(state, verifyConfig): Promise<ReviewResult[]> {
 }
 
 function parseVerdict(output: string): Verdict {
+  // Safety: empty/short output = something went wrong
+  if (!output || output.trim().length < 50) {
+    return 'REQUEST_CHANGES';
+  }
   if (output.includes('REQUEST_CHANGES')) return 'REQUEST_CHANGES';
   if (output.includes('APPROVE')) return 'APPROVE';
-  return 'COMMENT';  // No explicit verdict = comment only
+  return 'REQUEST_CHANGES';  // No explicit verdict = safe default
 }
 ```
 
@@ -252,32 +256,41 @@ function buildHistoryHeader(history: IterationRecord[]): string {
 
 | File | Action |
 |------|--------|
-| `packages/codev/src/commands/porch/git.ts` | Create: Git operations |
-| `packages/codev/src/commands/porch/run.ts` | Update: Call git after verify |
+| `packages/codev/src/commands/porch/run.ts` | Update: Add `runOnComplete()` inline |
 
-**Git operations:**
+**Git operations (inline in run.ts):**
 
 ```typescript
-async function commitAndPush(state, phaseConfig) {
-  const artifact = resolveArtifact(phaseConfig.build.artifact, state);
+async function runOnComplete(projectRoot, state, protocol, reviews) {
+  const onComplete = getOnCompleteConfig(protocol, state.phase);
+  if (!onComplete) return;
 
-  // Stage the artifact
-  await exec(`git add ${artifact}`);
+  const buildConfig = getBuildConfig(protocol, state.phase);
+  const artifact = buildConfig.artifact
+    .replace('${PROJECT_ID}', state.id)
+    .replace('${PROJECT_TITLE}', state.title);
 
-  // Commit with phase info
-  const message = `[Spec ${state.id}] ${phaseConfig.name}: ${state.title}
+  if (onComplete.commit) {
+    try {
+      await exec(`git add ${artifact}`);
+      const message = `[Spec ${state.id}] ${state.phase}: ${state.title}\n\nIteration ${state.iteration}\n3-way review: ${formatVerdicts(reviews)}`;
+      await exec(`git commit -m "${message}"`);
+    } catch (err) {
+      console.log('Commit failed (may be nothing to commit).');
+    }
+  }
 
-Iteration ${state.iteration}/${phaseConfig.max_iterations}
-3-way review: ${formatVerdicts(state.last_feedback)}`;
-
-  await exec(`git commit -m "${message}"`);
-
-  // Push
-  if (phaseConfig.on_complete?.push) {
-    await exec(`git push`);
+  if (onComplete.push) {
+    try {
+      await exec('git push');
+    } catch (err) {
+      console.log('Push failed.');
+    }
   }
 }
 ```
+
+**Note:** Git logic is inline in run.ts, not a separate git.ts file.
 
 ## REPL Updates
 
@@ -315,10 +328,32 @@ Update status display for build-verify:
 
 **Simplification:** Verification and git logic are inline in run.ts. No feedback synthesis needed - Claude reads files directly.
 
+## Testing Strategy
+
+| Test Type | Scope | Status |
+|-----------|-------|--------|
+| Unit: `parseVerdict()` | Verdict parsing with edge cases | TODO |
+| Unit: `allApprove()` | Review result aggregation | TODO |
+| Unit: `buildHistoryHeader()` | Prompt history formatting | TODO |
+| Integration: build-verify loop | Mock consult CLI, verify state transitions | TODO |
+| E2E: full cycle | Manual testing with real consultations | Done (ad-hoc) |
+
+**Existing test coverage:**
+- `plan.test.ts`: Phase parsing, advancement, completion checks
+- `state.test.ts`: State init with new `history` field
+- `protocol.test.ts`: Protocol parsing including `build_verify` type
+
+**Test gaps:**
+- No mock for `consult` CLI
+- No timeout simulation
+- No git failure simulation
+
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | consult CLI output format changes | Low | Medium | Abstract parsing, easy to update |
-| Consultation takes too long | Medium | Low | Parallel execution, timeouts |
-| Verdict parsing unreliable | Medium | Medium | Clear format requirements, fallback to REQUEST_CHANGES |
+| Consultation takes too long | Medium | Low | Parallel execution, timeouts (TODO) |
+| Verdict parsing unreliable | Low | High | Safe default to REQUEST_CHANGES, validate output length |
+| Silent consultation failures | Low | High | Default to REQUEST_CHANGES on empty/short output |
+| Agent ignores feedback files | Medium | Medium | Clear prompt instructions, file paths in header |

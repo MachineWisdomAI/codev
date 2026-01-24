@@ -350,8 +350,16 @@ async function runConsult(
 
 /**
  * Parse verdict from consultation output.
+ *
+ * Safety: If no explicit verdict found (empty output, crash, malformed),
+ * defaults to REQUEST_CHANGES to prevent proceeding with unverified code.
  */
 function parseVerdict(output: string): Verdict {
+  // Empty or very short output = something went wrong
+  if (!output || output.trim().length < 50) {
+    return 'REQUEST_CHANGES';
+  }
+
   // Look for verdict in output (case insensitive)
   const upperOutput = output.toUpperCase();
   if (upperOutput.includes('REQUEST_CHANGES')) {
@@ -360,7 +368,8 @@ function parseVerdict(output: string): Verdict {
   if (upperOutput.includes('APPROVE')) {
     return 'APPROVE';
   }
-  return 'COMMENT'; // No explicit verdict = comment only
+  // No explicit verdict = default to REQUEST_CHANGES for safety
+  return 'REQUEST_CHANGES';
 }
 
 /**
