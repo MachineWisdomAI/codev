@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Protocol, ProtocolPhase, PhaseVerification } from './types.js';
+import type { Protocol, ProtocolPhase, BuildConfig, VerifyConfig, OnCompleteConfig } from './types.js';
 
 /** Known protocol locations (relative to project root) */
 const PROTOCOL_PATHS = [
@@ -137,23 +137,47 @@ function normalizePhase(p: unknown): ProtocolPhase {
     checks.push(...Object.keys(phase.checks as Record<string, unknown>));
   }
 
-  // Parse verification config
-  let verification: PhaseVerification | undefined;
-  const verificationRaw = phase.verification as Record<string, unknown> | undefined;
-  if (verificationRaw?.checks && typeof verificationRaw.checks === 'object') {
-    verification = {
-      checks: verificationRaw.checks as Record<string, string>,
-      max_retries: (verificationRaw.max_retries as number) ?? 5,
+  // Parse build config (for build_verify phases)
+  let build: BuildConfig | undefined;
+  const buildRaw = phase.build as Record<string, unknown> | undefined;
+  if (buildRaw) {
+    build = {
+      prompt: buildRaw.prompt as string,
+      artifact: buildRaw.artifact as string,
+    };
+  }
+
+  // Parse verify config (for build_verify phases)
+  let verify: VerifyConfig | undefined;
+  const verifyRaw = phase.verify as Record<string, unknown> | undefined;
+  if (verifyRaw) {
+    verify = {
+      type: verifyRaw.type as string,
+      models: verifyRaw.models as string[],
+      parallel: (verifyRaw.parallel as boolean) ?? true,
+    };
+  }
+
+  // Parse on_complete config
+  let on_complete: OnCompleteConfig | undefined;
+  const onCompleteRaw = phase.on_complete as Record<string, unknown> | undefined;
+  if (onCompleteRaw) {
+    on_complete = {
+      commit: onCompleteRaw.commit as boolean | undefined,
+      push: onCompleteRaw.push as boolean | undefined,
     };
   }
 
   return {
     id: phase.id as string,
     name: (phase.name as string) || phase.id as string,
-    type: phase.type as 'once' | 'per_plan_phase' | 'phased' | undefined,
+    type: phase.type as 'once' | 'per_plan_phase' | 'build_verify' | undefined,
+    build,
+    verify,
+    max_iterations: (phase.max_iterations as number) ?? 3,
+    on_complete,
     gate: gate?.name as string | undefined,
     checks: checks.length > 0 ? checks : undefined,
-    verification,
     next,
   };
 }
@@ -207,11 +231,11 @@ export function getPhaseGate(protocol: Protocol, phaseId: string): string | null
 }
 
 /**
- * Check if a phase is "phased" (runs per plan phase)
+ * Check if a phase runs per plan phase
  */
 export function isPhased(protocol: Protocol, phaseId: string): boolean {
   const phase = getPhaseConfig(protocol, phaseId);
-  return phase?.type === 'per_plan_phase' || phase?.type === 'phased';
+  return phase?.type === 'per_plan_phase';
 }
 
 /**
@@ -222,9 +246,41 @@ export function getPhaseCompletionChecks(protocol: Protocol): Record<string, str
 }
 
 /**
- * Get verification config for a phase (if any)
+ * Check if a phase is a build_verify phase
  */
-export function getPhaseVerification(protocol: Protocol, phaseId: string): PhaseVerification | null {
+export function isBuildVerify(protocol: Protocol, phaseId: string): boolean {
   const phase = getPhaseConfig(protocol, phaseId);
-  return phase?.verification || null;
+  return phase?.type === 'build_verify';
+}
+
+/**
+ * Get build config for a phase
+ */
+export function getBuildConfig(protocol: Protocol, phaseId: string): BuildConfig | null {
+  const phase = getPhaseConfig(protocol, phaseId);
+  return phase?.build || null;
+}
+
+/**
+ * Get verify config for a phase
+ */
+export function getVerifyConfig(protocol: Protocol, phaseId: string): VerifyConfig | null {
+  const phase = getPhaseConfig(protocol, phaseId);
+  return phase?.verify || null;
+}
+
+/**
+ * Get max iterations for a build_verify phase
+ */
+export function getMaxIterations(protocol: Protocol, phaseId: string): number {
+  const phase = getPhaseConfig(protocol, phaseId);
+  return phase?.max_iterations ?? 3;
+}
+
+/**
+ * Get on_complete config for a phase
+ */
+export function getOnCompleteConfig(protocol: Protocol, phaseId: string): OnCompleteConfig | null {
+  const phase = getPhaseConfig(protocol, phaseId);
+  return phase?.on_complete || null;
 }

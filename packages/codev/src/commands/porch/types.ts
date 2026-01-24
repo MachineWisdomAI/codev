@@ -10,11 +10,28 @@
 // ============================================================================
 
 /**
- * Verification config - checks run after PHASE_COMPLETE with retry
+ * Build config for build_verify phases
  */
-export interface PhaseVerification {
-  checks: Record<string, string>;  // Check name -> command
-  max_retries?: number;            // Max respawn attempts (default: 5)
+export interface BuildConfig {
+  prompt: string;           // Prompt file (e.g., "specify.md")
+  artifact: string;         // Artifact path pattern (e.g., "codev/specs/${PROJECT_ID}-*.md")
+}
+
+/**
+ * Verify config for build_verify phases - 3-way consultation
+ */
+export interface VerifyConfig {
+  type: string;             // Review type (e.g., "spec-review", "plan-review")
+  models: string[];         // ["gemini", "codex", "claude"]
+  parallel?: boolean;       // Run consultations in parallel (default: true)
+}
+
+/**
+ * On-complete actions
+ */
+export interface OnCompleteConfig {
+  commit?: boolean;         // Commit artifact after successful verify
+  push?: boolean;           // Push after commit
 }
 
 /**
@@ -23,11 +40,14 @@ export interface PhaseVerification {
 export interface ProtocolPhase {
   id: string;
   name: string;
-  type?: 'once' | 'per_plan_phase' | 'phased';
-  gate?: string;           // Gate name that blocks after this phase
-  checks?: string[];       // Check names to run (keys into protocol.checks)
-  verification?: PhaseVerification; // Post-completion checks with retry
-  next?: string | null;    // Next phase id, or null if terminal
+  type?: 'once' | 'per_plan_phase' | 'build_verify';
+  build?: BuildConfig;           // Build config (for build_verify phases)
+  verify?: VerifyConfig;         // Verify config (for build_verify phases)
+  max_iterations?: number;       // Max build-verify iterations (default: 3)
+  on_complete?: OnCompleteConfig; // Actions after successful verify
+  gate?: string;                 // Gate name that blocks after this phase
+  checks?: string[];             // Check names to run (keys into protocol.checks)
+  next?: string | null;          // Next phase id, or null if terminal
 }
 
 /**
@@ -71,6 +91,24 @@ export interface PlanPhase {
 }
 
 /**
+ * Verdict from a 3-way review
+ */
+export type Verdict = 'APPROVE' | 'REQUEST_CHANGES';
+
+/**
+ * Result from a single consultation
+ */
+export interface FeedbackResult {
+  verdict: Verdict;
+  summary: string;
+}
+
+/**
+ * Feedback from all models in a 3-way review
+ */
+export type FeedbackSet = Record<string, FeedbackResult>;
+
+/**
  * Project state (stored in status.yaml)
  */
 export interface ProjectState {
@@ -81,7 +119,9 @@ export interface ProjectState {
   plan_phases: PlanPhase[];                // Phases from plan.md
   current_plan_phase: string | null;       // Current plan phase id
   gates: Record<string, GateStatus>;       // Gate statuses
-  verification_retries: number;            // Current retry count for verification
+  iteration: number;                       // Current build-verify iteration (1-based)
+  build_complete: boolean;                 // Has build finished this iteration?
+  last_feedback: FeedbackSet;              // Feedback from last verify
   started_at: string;
   updated_at: string;
 }

@@ -9,8 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
-import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, getPhaseVerification } from './protocol.js';
-import { runPhaseChecks, allChecksPassed, formatCheckResults, type CheckEnv } from './checks.js';
+import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
 import { spawnClaude, type ClaudeProcess } from './claude.js';
 import { watchForSignal, type Signal } from './signals.js';
@@ -237,7 +236,7 @@ async function handleGate(
 
 /**
  * Handle signal from Claude output.
- * Returns true if should respawn Claude (verification failed), false otherwise.
+ * Returns true if should respawn Claude (for build-verify iteration), false otherwise.
  */
 async function handleSignal(
   signal: Signal,
@@ -252,39 +251,15 @@ async function handleSignal(
     case 'PHASE_COMPLETE':
       console.log(chalk.green('Signal: PHASE_COMPLETE'));
 
-      // Check for verification requirements
-      const verification = getPhaseVerification(protocol, state.phase);
-      if (verification) {
-        const maxRetries = verification.max_retries ?? 5;
-        const currentRetries = state.verification_retries ?? 0;
-
-        console.log(chalk.dim(`Running verification checks (attempt ${currentRetries + 1}/${maxRetries})...`));
-
-        const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
-        const results = await runPhaseChecks(verification.checks, projectRoot, checkEnv);
-        console.log(formatCheckResults(results));
-
-        if (!allChecksPassed(results)) {
-          if (currentRetries < maxRetries - 1) {
-            // Increment retry count and respawn
-            state.verification_retries = currentRetries + 1;
-            writeState(statusPath, state);
-            console.log(chalk.yellow(`\nVerification failed. Respawning Claude (${state.verification_retries}/${maxRetries})...`));
-            return true; // Signal to respawn
-          } else {
-            // Max retries reached, proceed to gate anyway
-            console.log(chalk.yellow(`\nVerification failed after ${maxRetries} attempts. Proceeding to gate for human decision.`));
-            state.verification_retries = 0; // Reset for next phase
-            writeState(statusPath, state);
-          }
-        } else {
-          console.log(chalk.green('Verification passed.'));
-          state.verification_retries = 0; // Reset on success
-          writeState(statusPath, state);
-        }
+      // For build_verify phases, we'll run verification in the main loop
+      // Mark build as complete so main loop knows to run verify
+      if (isBuildVerify(protocol, state.phase)) {
+        state.build_complete = true;
+        writeState(statusPath, state);
+        return false; // Main loop will handle verify
       }
 
-      // Advance state (reuse existing done logic)
+      // For non-build_verify phases, advance state directly
       const { done } = await import('./index.js');
       await done(projectRoot, state.id);
       return false;

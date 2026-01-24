@@ -1,14 +1,14 @@
-# Plan 0075: Porch Minimal Redesign (Porch Outer)
+# Plan 0075: Porch Minimal Redesign (Build-Verify Cycles)
 
 ## Overview
 
-Redesign porch so it is the outer loop that spawns and controls Claude, rather than Claude calling porch commands. This gives hard enforcement of phase transitions and prevents Claude from bypassing protocol.
+Redesign porch to orchestrate **build-verify cycles** where porch runs 3-way consultations automatically, feeds back failures to Claude, and manages iteration/commit/push.
 
 ## Dependencies
 
-- Existing porch command structure (`packages/codev/src/commands/porch/`)
-- Claude CLI (`claude` command)
-- Existing state management (`state.ts`, `protocol.ts`)
+- Existing porch code (run.ts, repl.ts, claude.ts, etc.)
+- consult CLI tool
+- git for commit/push
 
 ## Implementation Phases
 
@@ -17,180 +17,286 @@ Redesign porch so it is the outer loop that spawns and controls Claude, rather t
   "phases": [
     {
       "id": "phase_1",
-      "title": "Core Run Loop and REPL",
-      "description": "Implement the main run loop that spawns Claude and accepts user commands"
+      "title": "Protocol Format and Types",
+      "description": "Update protocol.json format and types for build_verify phases"
     },
     {
       "id": "phase_2",
-      "title": "Claude Spawning and Output Monitoring",
-      "description": "Spawn Claude with output to file, watch for signals"
+      "title": "Build-Verify Loop",
+      "description": "Implement the core build-verify cycle in run.ts"
     },
     {
       "id": "phase_3",
-      "title": "Phase Prompts and Integration",
-      "description": "Build phase-specific prompts, update af kickoff to use porch run"
+      "title": "Consultation Integration",
+      "description": "Integrate consult CLI, parse verdicts, synthesize feedback"
+    },
+    {
+      "id": "phase_4",
+      "title": "Commit and Push",
+      "description": "Add automatic commit/push after successful verification"
     }
   ]
 }
 ```
 
-### Phase 1: Core Run Loop and REPL
+### Phase 1: Protocol Format and Types
 
-**Goal:** Create the main `porch run <id>` command with a simple REPL.
+**Goal:** Update protocol.json format to express build_verify phases.
 
-**Files to create/modify:**
+**Files to modify:**
 
 | File | Action |
 |------|--------|
-| `packages/codev/src/commands/porch/run.ts` | Create: Main run loop |
-| `packages/codev/src/commands/porch/repl.ts` | Create: REPL implementation |
-| `packages/codev/src/commands/porch/index.ts` | Modify: Add `run` subcommand |
+| `codev/resources/protocol-format.md` | Update: Document build_verify phase type |
+| `packages/codev/src/commands/porch/types.ts` | Update: Add build_verify types |
+| `packages/codev/src/commands/porch/protocol.ts` | Update: Parse build_verify config |
+| `codev-skeleton/protocols/spider/protocol.json` | Update: Convert to build_verify format |
 
-**Steps:**
+**New types:**
 
-1. **Create `run.ts`** with the main loop:
-   - Load state for project
-   - Determine current phase
-   - Build phase-specific prompt
-   - Spawn Claude with output to file
-   - Enter REPL loop
-   - Handle signals and advance state
+```typescript
+interface BuildConfig {
+  prompt: string;           // Prompt file (e.g., "specify.md")
+  artifact: string;         // Artifact path pattern (e.g., "codev/specs/${PROJECT_ID}-*.md")
+}
 
-2. **Create `repl.ts`** with commands:
-   - `t` / `tail` - Tail Claude's output file
-   - `i` / `interact` - Switch to interactive mode
-   - `a` / `approve` - Approve current gate
-   - `s` / `status` - Show current status
-   - `q` / `quit` - Kill Claude and exit
-   - `Enter` - Refresh status display
+interface VerifyConfig {
+  type: string;             // Review type (e.g., "spec-review")
+  models: string[];         // ["gemini", "codex", "claude"]
+  parallel: boolean;        // Run consultations in parallel
+}
 
-3. **Status line display:**
-   ```
-   [0074] phase: specify | stage: writing | claude: running (2m 34s)
-   > _
-   ```
-
-**Verification:**
-```bash
-# Command parses and shows help
-node packages/codev/bin/porch.js run --help
-
-# Can start with a project ID
-node packages/codev/bin/porch.js run 0074
+interface PhaseConfig {
+  id: string;
+  name: string;
+  type: 'build_verify' | 'once' | 'per_plan_phase';
+  build?: BuildConfig;
+  verify?: VerifyConfig;
+  max_iterations?: number;  // Default: 3
+  on_complete?: {
+    commit: boolean;
+    push: boolean;
+  };
+  gate?: string;
+}
 ```
 
-### Phase 2: Claude Spawning and Output Monitoring
+**Updated spider protocol.json structure:**
 
-**Goal:** Spawn Claude with output to file, detect completion signals.
-
-**Files to create/modify:**
-
-| File | Action |
-|------|--------|
-| `packages/codev/src/commands/porch/claude.ts` | Create: Claude spawning/monitoring |
-| `packages/codev/src/commands/porch/signals.ts` | Create: Signal detection |
-
-**Steps:**
-
-1. **Create `claude.ts`**:
-   - Spawn Claude with `child_process.spawn`
-   - Redirect stdout/stderr to `.porch/claude-output.txt`
-   - Track process state (running, exited, killed)
-   - Provide methods: `kill()`, `isRunning()`, `getExitCode()`
-
-2. **Create `signals.ts`**:
-   - Watch output file for signal markers
-   - Detect: `PHASE_COMPLETE`, `GATE_NEEDED`, `BLOCKED: <reason>`
-   - Return signal type and any payload
-
-3. **Output file management:**
-   - Create `.porch/` directory if needed
-   - Clear output file at start of each phase
-   - Rotate old output files (keep last 5)
-
-**Verification:**
-```bash
-# Can spawn Claude and capture output
-node packages/codev/bin/porch.js run 0074
-# Type 't' to tail and see Claude output
+```json
+{
+  "phases": [
+    {
+      "id": "specify",
+      "type": "build_verify",
+      "build": { "prompt": "specify.md", "artifact": "codev/specs/${PROJECT_ID}-*.md" },
+      "verify": { "type": "spec-review", "models": ["gemini", "codex", "claude"] },
+      "max_iterations": 3,
+      "on_complete": { "commit": true, "push": true },
+      "gate": "spec-approval"
+    }
+  ]
+}
 ```
 
-### Phase 3: Phase Prompts and Integration
+### Phase 2: Build-Verify Loop
 
-**Goal:** Build phase-specific prompts, update kickoff to use porch run.
+**Goal:** Implement the core build-verify cycle.
+
+**Files to modify:**
+
+| File | Action |
+|------|--------|
+| `packages/codev/src/commands/porch/run.ts` | Update: Implement build-verify loop |
+| `packages/codev/src/commands/porch/state.ts` | Update: Add iteration tracking |
+| `packages/codev/src/commands/porch/types.ts` | Update: Add feedback types |
+
+**State additions:**
+
+```typescript
+interface ProjectState {
+  // ... existing
+  iteration: number;           // Current iteration (1-based)
+  build_complete: boolean;     // Has build finished this iteration?
+  last_feedback: FeedbackSet;  // Feedback from last verify
+}
+
+interface FeedbackSet {
+  gemini?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
+  codex?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
+  claude?: { verdict: 'APPROVE' | 'REQUEST_CHANGES'; summary: string };
+}
+```
+
+**Run loop pseudocode:**
+
+```typescript
+async function runBuildVerifyCycle(state, phaseConfig) {
+  while (state.iteration <= phaseConfig.max_iterations) {
+    // BUILD phase
+    const prompt = buildPrompt(state, phaseConfig);
+    if (state.iteration > 1) {
+      prompt = prependFeedback(prompt, state.last_feedback);
+    }
+
+    await runClaude(prompt);  // Wait for PHASE_COMPLETE
+
+    // VERIFY phase
+    const feedback = await runVerification(phaseConfig.verify);
+    state.last_feedback = feedback;
+
+    if (allApprove(feedback)) {
+      // Success - commit, push, proceed to gate
+      await commitAndPush(phaseConfig);
+      return 'gate';
+    }
+
+    // Failure - increment and retry
+    state.iteration++;
+    saveState(state);
+  }
+
+  // Max iterations - proceed to gate anyway
+  console.log('Max iterations reached, proceeding to gate');
+  return 'gate';
+}
+```
+
+### Phase 3: Consultation Integration
+
+**Goal:** Run consult CLI, parse verdicts, synthesize feedback.
 
 **Files to create/modify:**
 
 | File | Action |
 |------|--------|
-| `packages/codev/src/commands/porch/prompts.ts` | Create: Phase prompt templates |
-| `packages/codev/src/agent-farm/commands/kickoff.ts` | Modify: Use `porch run` |
+| `packages/codev/src/commands/porch/verify.ts` | Create: Verification logic |
+| `packages/codev/src/commands/porch/feedback.ts` | Create: Feedback synthesis |
 
-**Steps:**
+**Verification flow:**
 
-1. **Create `prompts.ts`**:
-   - Template for each phase (specify, plan, implement, defend, evaluate, review)
-   - Include: phase instructions, files to create/modify, exit criteria
-   - Inject project-specific context (ID, title, spec path, plan path)
+```typescript
+async function runVerification(verifyConfig, artifact) {
+  const results = await Promise.all(
+    verifyConfig.models.map(model =>
+      runConsult(model, verifyConfig.type, artifact)
+    )
+  );
 
-2. **Example prompt structure:**
-   ```markdown
-   # Phase: Specify
+  return parseResults(results);
+}
 
-   You are writing the specification for project 0074: remove-today-summary
+async function runConsult(model, type, artifact) {
+  const proc = spawn('consult', [
+    '--model', model,
+    '--type', type,
+    'spec',  // or 'plan', 'pr' based on artifact type
+    projectId
+  ]);
 
-   ## Your Task
-   1. Read the existing codebase to understand what needs to be removed
-   2. Write the spec at: codev/specs/0074-remove-today-summary.md
-   3. Run 3-way consultation and add results to spec
-   4. Commit the spec file
+  const output = await captureOutput(proc);
+  return { model, output, verdict: parseVerdict(output) };
+}
 
-   ## When Done
-   Output exactly: PHASE_COMPLETE
-   If you need human input: GATE_NEEDED
-   If you are stuck: BLOCKED: <reason>
-   ```
+function parseVerdict(output) {
+  // Look for APPROVE or REQUEST_CHANGES in output
+  if (output.includes('APPROVE')) return 'APPROVE';
+  if (output.includes('REQUEST_CHANGES')) return 'REQUEST_CHANGES';
+  return 'REQUEST_CHANGES';  // Default to changes needed
+}
+```
 
-3. **Update kickoff.ts**:
-   - Change from running Claude directly to running `porch run <id>`
-   - Porch becomes the outer loop that manages Claude
+**Feedback synthesis:**
 
-4. **Gate handling in REPL:**
-   - When `GATE_NEEDED` detected, show gate prompt
-   - User types `a` to approve
-   - Porch updates status.yaml with approval
-   - Porch spawns Claude for next phase
+```typescript
+function synthesizeFeedback(feedback: FeedbackSet): string {
+  let md = '# Previous Review Feedback\n\n';
 
-**Verification:**
-```bash
-# Full flow test
-af kickoff -p 0075 -t "test-feature"
-# Should start porch run, which spawns Claude
-# User can tail, interact, approve gates
+  for (const [model, result] of Object.entries(feedback)) {
+    md += `## ${model} (${result.verdict})\n`;
+    md += result.summary + '\n\n';
+  }
+
+  md += '---\n\n';
+  md += 'Please address the above feedback and signal PHASE_COMPLETE when done.\n';
+
+  return md;
+}
+```
+
+### Phase 4: Commit and Push
+
+**Goal:** Automatic commit/push after successful verification.
+
+**Files to modify:**
+
+| File | Action |
+|------|--------|
+| `packages/codev/src/commands/porch/git.ts` | Create: Git operations |
+| `packages/codev/src/commands/porch/run.ts` | Update: Call git after verify |
+
+**Git operations:**
+
+```typescript
+async function commitAndPush(state, phaseConfig) {
+  const artifact = resolveArtifact(phaseConfig.build.artifact, state);
+
+  // Stage the artifact
+  await exec(`git add ${artifact}`);
+
+  // Commit with phase info
+  const message = `[Spec ${state.id}] ${phaseConfig.name}: ${state.title}
+
+Iteration ${state.iteration}/${phaseConfig.max_iterations}
+3-way review: ${formatVerdicts(state.last_feedback)}`;
+
+  await exec(`git commit -m "${message}"`);
+
+  // Push
+  if (phaseConfig.on_complete?.push) {
+    await exec(`git push`);
+  }
+}
+```
+
+## REPL Updates
+
+Update status display for build-verify:
+
+```
+[0075] SPECIFY - Iteration 2/3
+  BUILD: complete (Claude finished)
+  VERIFY: running...
+    gemini: APPROVE
+    codex:  running (45s)
+    claude: REQUEST_CHANGES
+
+> _
 ```
 
 ## Success Criteria
 
-1. `porch run <id>` works as outer loop
-2. Claude spawns with phase-specific prompts
-3. Output goes to `.porch/claude-output.txt`
-4. REPL accepts commands while Claude runs
-5. Signals detected and state advances
-6. Gates block until user approves
-7. `af kickoff` uses porch run
+1. Protocol.json supports `type: "build_verify"` phases
+2. Porch runs consultations automatically after Claude completes
+3. Verdicts parsed from consultation output
+4. Failed verifications feed back to next Claude iteration
+5. Successful verification triggers commit + push
+6. Human gates come after build-verify cycle completes
+7. Max iteration cap prevents infinite loops
+8. Status display shows build/verify progress
 
 ## Estimated Scope
 
 | Metric | Value |
 |--------|-------|
-| New files | 4 (run.ts, repl.ts, claude.ts, prompts.ts) |
-| Modified files | 2 (index.ts, kickoff.ts) |
-| Lines of code | ~500 |
+| New files | 3 (verify.ts, feedback.ts, git.ts) |
+| Modified files | 5 (run.ts, types.ts, protocol.ts, state.ts, protocol-format.md) |
+| Lines of code | ~400 |
 
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Claude CLI interface changes | Low | Medium | Abstract spawn logic, easy to update |
-| Signal detection unreliable | Medium | High | Simple text markers, clear documentation |
-| REPL complexity grows | Low | Low | Keep commands minimal (5 commands max) |
+| consult CLI output format changes | Low | Medium | Abstract parsing, easy to update |
+| Consultation takes too long | Medium | Low | Parallel execution, timeouts |
+| Verdict parsing unreliable | Medium | Medium | Clear format requirements, fallback to REQUEST_CHANGES |

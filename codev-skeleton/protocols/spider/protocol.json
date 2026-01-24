@@ -1,161 +1,93 @@
 {
   "$schema": "../../protocol-schema.json",
   "name": "spider",
-  "version": "1.0.0",
-  "description": "Specification-driven development with multi-agent consultation",
+  "version": "2.0.0",
+  "description": "Specification-driven development with build-verify cycles",
   "phases": [
     {
       "id": "specify",
       "name": "Specify",
-      "description": "Collaborative design exploration and specification",
-      "type": "once",
-      "prompt": "specify.md",
-      "steps": [
-        "clarifying_questions",
-        "problem_analysis",
-        "solution_exploration",
-        "open_questions",
-        "success_criteria",
-        "spec_draft",
-        "consultation_1",
-        "human_review",
-        "consultation_2",
-        "spec_final"
-      ],
-      "consultation": {
-        "on": "review",
-        "models": ["gemini", "codex", "claude"],
-        "type": "spec-review",
-        "parallel": true,
-        "max_rounds": 3
+      "description": "Write specification with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "specify.md",
+        "artifact": "codev/specs/${PROJECT_ID}-*.md"
       },
-      "checks": {
-        "spec_exists": "test -f codev/specs/${PROJECT_ID}-*.md",
-        "has_consultation_section": "grep -q '^## Consultation' codev/specs/${PROJECT_ID}-*.md",
-        "no_phases_in_spec": "! grep -qE '^## Phase [0-9]' codev/specs/${PROJECT_ID}-*.md"
+      "verify": {
+        "type": "spec-review",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 3,
+      "on_complete": {
+        "commit": true,
+        "push": true
       },
       "gate": {
         "name": "spec-approval",
         "description": "Human approves specification before planning",
-        "requires": ["spec_final", "consultation_2"],
         "next": "plan"
       }
     },
     {
       "id": "plan",
       "name": "Plan",
-      "description": "Implementation planning with phased breakdown",
-      "type": "once",
-      "prompt": "plan.md",
-      "steps": [
-        "analyze_spec",
-        "identify_phases",
-        "define_steps",
-        "plan_draft",
-        "consultation",
-        "human_review",
-        "plan_final"
-      ],
-      "consultation": {
-        "on": "review",
-        "models": ["gemini", "codex", "claude"],
+      "description": "Write implementation plan with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "plan.md",
+        "artifact": "codev/plans/${PROJECT_ID}-*.md"
+      },
+      "verify": {
         "type": "plan-review",
-        "parallel": true,
-        "max_rounds": 2
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 3,
+      "on_complete": {
+        "commit": true,
+        "push": true
       },
       "checks": {
         "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
-        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md",
-        "has_consultation": "grep -q '^## Consultation' codev/plans/${PROJECT_ID}-*.md"
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md"
       },
       "gate": {
         "name": "plan-approval",
         "description": "Human approves plan before implementation",
-        "requires": ["plan_final", "consultation"],
         "next": "implement"
       }
     },
     {
       "id": "implement",
       "name": "Implement",
-      "description": "Code implementation following the plan",
+      "description": "Implement code with 3-way review per plan phase",
       "type": "per_plan_phase",
-      "prompt": "implement.md",
-      "steps": [
-        "read_phase",
-        "implement_code",
-        "self_review",
-        "commit"
-      ],
+      "build": {
+        "prompt": "implement.md",
+        "artifact": "src/**/*.{ts,tsx,js,jsx}"
+      },
+      "verify": {
+        "type": "impl-review",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 3,
+      "on_complete": {
+        "commit": true,
+        "push": true
+      },
       "checks": {
         "build": {
           "command": "npm run build",
           "on_fail": "retry",
           "max_retries": 2
         },
-        "typecheck": {
-          "command": "npm run typecheck",
+        "tests": {
+          "command": "npm test",
           "on_fail": "retry",
           "max_retries": 2
         }
-      },
-      "transition": {
-        "on_complete": "defend",
-        "on_fail": "implement"
-      }
-    },
-    {
-      "id": "defend",
-      "name": "Defend",
-      "description": "Testing and verification",
-      "type": "per_plan_phase",
-      "prompt": "defend.md",
-      "steps": [
-        "write_tests",
-        "run_tests",
-        "fix_failures",
-        "commit"
-      ],
-      "checks": {
-        "tests": {
-          "command": "npm test",
-          "on_fail": "implement",
-          "max_retries": 1
-        },
-        "lint": {
-          "command": "npm run lint",
-          "on_fail": "retry",
-          "max_retries": 1
-        }
-      },
-      "consultation": {
-        "on": "complete",
-        "models": ["gemini", "codex", "claude"],
-        "type": "impl-review",
-        "parallel": true,
-        "max_rounds": 2
-      },
-      "transition": {
-        "on_complete": "evaluate",
-        "on_fail": "implement"
-      }
-    },
-    {
-      "id": "evaluate",
-      "name": "Evaluate",
-      "description": "Verify implementation against spec",
-      "type": "per_plan_phase",
-      "prompt": "evaluate.md",
-      "steps": [
-        "check_spec_compliance",
-        "check_success_criteria",
-        "document_deviations"
-      ],
-      "gate": {
-        "name": "phase-complete",
-        "description": "Plan phase implementation is verified",
-        "requires": ["all_checks_pass", "spec_compliance"],
-        "next": "implement"
       },
       "transition": {
         "on_complete": "implement",
@@ -165,70 +97,49 @@
     {
       "id": "review",
       "name": "Review",
-      "description": "Final review and lessons learned",
-      "type": "once",
-      "prompt": "review.md",
-      "steps": [
-        "create_review_document",
-        "document_lessons",
-        "final_consultation",
-        "create_pr"
-      ],
-      "consultation": {
-        "on": "review",
-        "models": ["gemini", "codex", "claude"],
-        "type": "pr-ready",
-        "parallel": true,
-        "max_rounds": 1
+      "description": "Final review and PR with 3-way review",
+      "type": "build_verify",
+      "build": {
+        "prompt": "review.md",
+        "artifact": "codev/reviews/${PROJECT_ID}-*.md"
       },
-      "verification": {
-        "checks": {
-          "pr_exists": "gh pr list --head $(git branch --show-current) --json number -q '.[0].number' | grep -q .",
-          "pr_has_3way_comment": "gh pr list --head $(git branch --show-current) --json number -q '.[0].number' | xargs -I{} gh pr view {} --json comments -q '.comments[].body' | grep -qiE '(gemini|codex|claude).*(gemini|codex|claude)'"
-        },
-        "max_retries": 5
+      "verify": {
+        "type": "pr-ready",
+        "models": ["gemini", "codex", "claude"],
+        "parallel": true
+      },
+      "max_iterations": 3,
+      "on_complete": {
+        "commit": true,
+        "push": true
       },
       "gate": {
         "name": "pr-ready",
-        "description": "Implementation ready for PR",
-        "requires": ["review_complete", "all_tests_pass", "consultation"],
+        "description": "Implementation ready for merge",
         "next": null
       }
     }
   ],
   "signals": {
     "PHASE_COMPLETE": {
-      "description": "Signal current phase is complete",
-      "transitions_to": "next_phase"
+      "description": "Signal current build phase is complete",
+      "transitions_to": "verify"
     },
     "BLOCKED": {
       "description": "Signal implementation is blocked",
       "requires": "reason"
-    },
-    "REVISION_NEEDED": {
-      "description": "Signal changes requested",
-      "transitions_to": "current_phase"
-    },
-    "APPROVED": {
-      "description": "Signal gate approval received"
     }
   },
   "phase_completion": {
     "build_succeeds": "npm run build 2>&1",
     "tests_pass": "npm test 2>&1",
-    "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'",
-    "commit_has_tests": "git log -1 --name-only --pretty=format: | grep -qE '(test|spec)\\.'",
-    "commit_has_3way_review": "git log -1 --pretty=format:'%B' | grep -qiE '(3-way|three-way|3way|consultation|gemini.*codex|codex.*gemini)'"
+    "commit_has_code": "git log -1 --name-only --pretty=format: | grep -qE '\\.(ts|tsx|js|jsx|py|go|rs)$'"
   },
   "defaults": {
-    "consultation": {
-      "enabled": true,
+    "max_iterations": 3,
+    "verify": {
       "models": ["gemini", "codex", "claude"],
       "parallel": true
-    },
-    "checks": {
-      "build": "npm run build",
-      "test": "npm test"
     }
   }
 }
