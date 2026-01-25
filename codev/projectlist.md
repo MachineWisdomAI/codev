@@ -199,6 +199,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "Simple UX improvement for agent-farm dashboard"
 
+  - id: "0078"
+    title: "Porch E2E Testing Infrastructure"
+    summary: "E2E test harness for porch that validates the full SPIDER protocol lifecycle with real AI interactions"
+    status: committed
+    priority: high
+    release: v2.0.0
+    files:
+      spec: codev/specs/0078-porch-e2e-testing.md
+      plan: codev/plans/0078-porch-e2e-testing.md
+      review: codev/reviews/0078-porch-e2e-testing.md
+    dependencies: ["0073", "0075"]
+    tags: [testing, porch, e2e, v2]
+    timestamps:
+      conceived_at: "2026-01-25T18:00:00-08:00"
+      specified_at: "2026-01-25T18:30:00-08:00"
+      planned_at: "2026-01-25T19:00:00-08:00"
+      implementing_at: "2026-01-25T19:30:00-08:00"
+      implemented_at: "2026-01-25T20:00:00-08:00"
+      committed_at: "2026-01-25T20:30:00-08:00"
+      integrated_at: null
+    notes: "E2E test infrastructure for porch. 3-way review (Gemini/Codex/Claude) identified and fixed AWAITING_INPUT gap and git add policy violation."
+
   - id: "0075"
     title: "Porch Minimal Redesign"
     summary: "Redesign porch from 4800 lines to ~500 lines. Claude calls porch as a tool instead of porch spawning Claude."
@@ -813,7 +835,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0074** - Reserve this number for your next project
+**0079** - Reserve this number for your next project
 
 ---
 
