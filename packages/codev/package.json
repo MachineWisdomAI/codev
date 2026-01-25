@@ -17,7 +17,8 @@
     "templates"
   ],
   "scripts": {
-    "build": "tsc && npm run copy-skeleton",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && npm run copy-skeleton",
     "copy-skeleton": "rm -rf skeleton && cp -r ../../codev-skeleton skeleton",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",

@@ -16,6 +16,7 @@ import {
   findStatusPath,
   getProjectDir,
   getStatusPath,
+  detectProjectId,
 } from './state.js';
 import {
   loadProtocol,
@@ -589,32 +590,38 @@ export async function cli(args: string[]): Promise<void> {
   const [command, ...rest] = args;
   const projectRoot = process.cwd();
 
+  // Auto-detect project ID for commands that need it
+  function getProjectId(provided?: string): string {
+    if (provided) return provided;
+    const detected = detectProjectId(projectRoot);
+    if (detected) {
+      console.log(chalk.dim(`[auto-detected project: ${detected}]`));
+      return detected;
+    }
+    throw new Error('No project ID provided and could not auto-detect.\nProvide ID explicitly or ensure exactly one project exists in codev/projects/');
+  }
+
   try {
     switch (command) {
       case 'run':
-        if (!rest[0]) throw new Error('Usage: porch run <id>');
         const { run } = await import('./run.js');
-        await run(projectRoot, rest[0]);
+        await run(projectRoot, getProjectId(rest[0]));
         break;
 
       case 'status':
-        if (!rest[0]) throw new Error('Usage: porch status <id>');
-        await status(projectRoot, rest[0]);
+        await status(projectRoot, getProjectId(rest[0]));
         break;
 
       case 'check':
-        if (!rest[0]) throw new Error('Usage: porch check <id>');
-        await check(projectRoot, rest[0]);
+        await check(projectRoot, getProjectId(rest[0]));
         break;
 
       case 'done':
-        if (!rest[0]) throw new Error('Usage: porch done <id>');
-        await done(projectRoot, rest[0]);
+        await done(projectRoot, getProjectId(rest[0]));
         break;
 
       case 'gate':
-        if (!rest[0]) throw new Error('Usage: porch gate <id>');
-        await gate(projectRoot, rest[0]);
+        await gate(projectRoot, getProjectId(rest[0]));
         break;
 
       case 'approve':
@@ -634,13 +641,15 @@ export async function cli(args: string[]): Promise<void> {
         console.log('porch - Protocol Orchestrator');
         console.log('');
         console.log('Commands:');
-        console.log('  run <id>                 Run the protocol (porch as outer loop)');
-        console.log('  status <id>              Show current state and instructions');
-        console.log('  check <id>               Run checks for current phase');
-        console.log('  done <id>                Advance to next phase (if checks pass)');
-        console.log('  gate <id>                Request human approval');
+        console.log('  run [id]                 Run the protocol (auto-detects if one project)');
+        console.log('  status [id]              Show current state and instructions');
+        console.log('  check [id]               Run checks for current phase');
+        console.log('  done [id]                Advance to next phase (if checks pass)');
+        console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
+        console.log('');
+        console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');
         process.exit(command ? 1 : 0);
     }

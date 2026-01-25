@@ -153,3 +153,34 @@ export function findStatusPath(projectRoot: string, projectId: string): string |
 
   return null;
 }
+
+/**
+ * Auto-detect project ID when only one project exists.
+ * Returns null if zero or multiple projects found.
+ */
+export function detectProjectId(projectRoot: string): string | null {
+  const projectsDir = path.join(projectRoot, PROJECTS_DIR);
+
+  if (!fs.existsSync(projectsDir)) {
+    return null;
+  }
+
+  const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
+  const projects: string[] = [];
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      // Extract project ID from directory name (e.g., "0076-skip-close" -> "0076")
+      const match = entry.name.match(/^(\d{4})-/);
+      if (match) {
+        const statusPath = path.join(projectsDir, entry.name, 'status.yaml');
+        if (fs.existsSync(statusPath)) {
+          projects.push(match[1]);
+        }
+      }
+    }
+  }
+
+  // Only return if exactly one project
+  return projects.length === 1 ? projects[0] : null;
+}
