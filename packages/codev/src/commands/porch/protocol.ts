@@ -174,7 +174,7 @@ function normalizePhase(p: unknown): ProtocolPhase {
     type: phase.type as 'once' | 'per_plan_phase' | 'build_verify' | undefined,
     build,
     verify,
-    max_iterations: (phase.max_iterations as number) ?? 3,
+    max_iterations: (phase.max_iterations as number) ?? 7,
     on_complete,
     gate: gate?.name as string | undefined,
     checks: checks.length > 0 ? checks : undefined,
@@ -274,7 +274,7 @@ export function getVerifyConfig(protocol: Protocol, phaseId: string): VerifyConf
  */
 export function getMaxIterations(protocol: Protocol, phaseId: string): number {
   const phase = getPhaseConfig(protocol, phaseId);
-  return phase?.max_iterations ?? 3;
+  return phase?.max_iterations ?? 7;
 }
 
 /**
