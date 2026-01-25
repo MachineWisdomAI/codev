@@ -246,11 +246,13 @@ export function getPhaseCompletionChecks(protocol: Protocol): Record<string, str
 }
 
 /**
- * Check if a phase is a build_verify phase
+ * Check if a phase uses the build-verify cycle.
+ * A phase uses build-verify if it has both build and verify configs,
+ * regardless of whether type is 'build_verify' or 'per_plan_phase'.
  */
 export function isBuildVerify(protocol: Protocol, phaseId: string): boolean {
   const phase = getPhaseConfig(protocol, phaseId);
-  return phase?.type === 'build_verify';
+  return !!(phase?.build && phase?.verify);
 }
 
 /**
