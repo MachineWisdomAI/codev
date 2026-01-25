@@ -75,6 +75,26 @@ Starting with v1.7.0, minor releases use release candidates for testing:
 
 See the full workflow in `codev/protocols/release/protocol.md`.
 
+### Local Testing (Without Publishing)
+
+To test changes locally before publishing to npm:
+
+```bash
+# From packages/codev directory:
+cd packages/codev
+
+# Build and create tarball
+npm run build
+npm pack
+
+# Install globally from tarball
+npm install -g ./cluesmith-codev-2.0.0-rc.10.tgz
+```
+
+This installs the exact package that would be published, without touching the npm registry. Better than `npm link` which has symlink issues.
+
+**Do NOT use `npm link`** - it breaks global installs and has weird dependency resolution issues.
+
 ## Quick Start
 
 > **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.
