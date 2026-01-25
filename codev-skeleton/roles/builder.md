@@ -188,39 +188,6 @@ Can't find the auth helper mentioned in spec. Options:
 Waiting for Architect guidance.
 ```
 
-## Deliverables
-
-When porch completes the REVIEW phase, you'll have:
-- Spec at `codev/specs/XXXX-name.md`
-- Plan at `codev/plans/XXXX-name.md`
-- Review at `codev/reviews/XXXX-name.md`
-- Implementation code with tests
-- PR ready for architect review
-
-After architect approves the PR, merge it:
-```bash
-gh pr merge --merge --delete-branch
-```
-
-## Communication
-
-### With the Architect
-
-If you're blocked or need help:
-```bash
-af send architect "Question about the spec..."
-```
-
-### Checking Status
-
-```bash
-# Your project status
-porch status
-
-# All builders
-af status
-```
-
 ## Constraints
 
 - **Run porch, don't bypass it** - Porch is the source of truth
