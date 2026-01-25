@@ -342,13 +342,14 @@ async function runConsultation(
   }
 
   // Execute with passthrough stdio
+  // Use 'ignore' for stdin to prevent blocking when spawned as subprocess
   const fullEnv = { ...process.env, ...env };
   const startTime = Date.now();
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
       env: fullEnv,
-      stdio: 'inherit',
+      stdio: ['ignore', 'inherit', 'inherit'],
     });
 
     proc.on('close', (code) => {

@@ -22,6 +22,40 @@ const PROTOCOL_PATHS = [
 ];
 
 /**
+ * Get project summary from projectlist.md.
+ * Returns the summary field for the given project ID.
+ */
+function getProjectSummary(projectRoot: string, projectId: string): string | null {
+  const projectlistPath = path.join(projectRoot, 'codev', 'projectlist.md');
+  if (!fs.existsSync(projectlistPath)) {
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(projectlistPath, 'utf-8');
+
+    // Look for the project entry by ID
+    // Format: - id: "0076" followed by summary: "..."
+    const idPattern = new RegExp(`- id: ["']?${projectId}["']?`, 'i');
+    const idMatch = content.match(idPattern);
+    if (!idMatch) {
+      return null;
+    }
+
+    // Find the summary after this ID (within the next ~500 chars)
+    const afterId = content.slice(idMatch.index!, idMatch.index! + 500);
+    const summaryMatch = afterId.match(/summary:\s*["'](.+?)["']/);
+    if (summaryMatch) {
+      return summaryMatch[1];
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Find the prompts directory for a protocol.
  */
 function findPromptsDir(projectRoot: string, protocolName: string): string | null {
@@ -51,7 +85,8 @@ function loadPromptFile(promptsDir: string, promptFile: string): string | null {
 function substituteVariables(
   prompt: string,
   state: ProjectState,
-  planPhase?: PlanPhase | null
+  planPhase?: PlanPhase | null,
+  summary?: string | null
 ): string {
   const variables: Record<string, string> = {
     project_id: state.id,
@@ -59,6 +94,12 @@ function substituteVariables(
     current_state: state.phase,
     protocol: state.protocol,
   };
+
+  // Add summary/goal if available
+  if (summary) {
+    variables.summary = summary;
+    variables.goal = summary;  // Alias for convenience
+  }
 
   if (planPhase) {
     variables.plan_phase_id = planPhase.id;
@@ -134,6 +175,9 @@ export function buildPhasePrompt(
     return buildFallbackPrompt(state, 'unknown');
   }
 
+  // Get project summary from projectlist.md
+  const summary = getProjectSummary(projectRoot, state.id);
+
   // Get current plan phase for phased protocols
   let currentPlanPhase: PlanPhase | null = null;
 
@@ -154,7 +198,12 @@ export function buildPhasePrompt(
 
     const promptContent = loadPromptFile(promptsDir, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, currentPlanPhase);
+      let result = substituteVariables(promptContent, state, currentPlanPhase, summary);
+
+      // Add goal/summary header if available
+      if (summary) {
+        result = `## Goal\n\n${summary}\n\n---\n\n` + result;
+      }
 
       // Add plan phase context if applicable
       if (currentPlanPhase) {
@@ -174,7 +223,7 @@ export function buildPhasePrompt(
   }
 
   // Fallback to generic prompt if no protocol prompt found
-  let fallback = buildFallbackPrompt(state, phaseConfig.name, currentPlanPhase);
+  let fallback = buildFallbackPrompt(state, phaseConfig.name, currentPlanPhase, summary);
 
   // Prepend history if this is a retry
   if (historyHeader) {
@@ -235,7 +284,8 @@ Output the signal on its own line when appropriate.
 function buildFallbackPrompt(
   state: ProjectState,
   phaseName: string,
-  planPhase?: PlanPhase | null
+  planPhase?: PlanPhase | null,
+  summary?: string | null
 ): string {
   let prompt = `# Phase: ${phaseName}
 
@@ -250,6 +300,11 @@ You are executing the ${phaseName} phase of the ${state.protocol.toUpperCase()} 
 
   if (planPhase) {
     prompt += `- **Plan Phase**: ${planPhase.id} - ${planPhase.title}\n`;
+  }
+
+  // Add goal from projectlist.md summary
+  if (summary) {
+    prompt += `\n## Goal\n\n${summary}\n`;
   }
 
   prompt += `

@@ -8,7 +8,7 @@
  */
 
 import { resolve, basename } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import type { Builder, Config } from '../types.js';
 import { getConfig, ensureDirectories } from '../utils/index.js';
@@ -285,27 +285,9 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
 
   logger.info('Creating tmux session...');
 
-  // Write startup script - porch run is the outer loop
-  const scriptPath = resolve(worktreePath, '.builder-start.sh');
-
-  // Start porch run - porch is the outer loop that spawns and controls Claude
-  // Porch runs the REPL, monitors Claude output, and handles phase transitions
-  const scriptContent = `#!/bin/bash
-cd "${worktreePath}"
-echo "Starting Porch Protocol Orchestrator..."
-echo ""
-${porchCmd} run ${projectId}
-echo ""
-echo "Porch exited. Press any key to restart or Ctrl+C to quit."
-read -n 1
-exec "$0"
-`;
-
-  writeFileSync(scriptPath, scriptContent);
-  chmodSync(scriptPath, '755');
-
-  // Create tmux session
-  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${scriptPath}"`);
+  // Create tmux session with zsh shell
+  // Human runs claude manually in this shell
+  await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" zsh`);
   await run(`tmux set-option -t "${sessionName}" status off`);
   await run('tmux set -g mouse on');
   await run('tmux set -g set-clipboard on');
@@ -343,8 +325,9 @@ exec "$0"
   upsertBuilder(builder);
 
   logger.blank();
-  logger.success(`Builder ${builderId} kicked off!`);
+  logger.success(`Builder ${builderId} ready!`);
   logger.kv('Terminal', `http://localhost:${port}`);
-  logger.kv('Porch Status', `porch status ${projectId}`);
-  logger.kv('Porch Run', `porch run ${projectId}`);
+  logger.kv('Worktree', worktreePath);
+  logger.blank();
+  logger.info('Run claude in the terminal to start working.');
 }

@@ -23,11 +23,8 @@
         "commit": true,
         "push": true
       },
-      "gate": {
-        "name": "spec-approval",
-        "description": "Human approves specification before planning",
-        "next": "plan"
-      }
+      "gate": "spec-approval",
+      "next": "plan"
     },
     {
       "id": "plan",
@@ -52,11 +49,8 @@
         "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
         "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md"
       },
-      "gate": {
-        "name": "plan-approval",
-        "description": "Human approves plan before implementation",
-        "next": "implement"
-      }
+      "gate": "plan-approval",
+      "next": "implement"
     },
     {
       "id": "implement",
@@ -113,11 +107,8 @@
         "commit": true,
         "push": true
       },
-      "gate": {
-        "name": "pr-ready",
-        "description": "Implementation ready for merge",
-        "next": null
-      }
+      "gate": "pr-ready",
+      "next": null
     }
   ],
   "signals": {

@@ -20,35 +20,28 @@ import { runRepl } from './repl.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 
-const PORCH_DIR = '.porch';
-
-/** Track iteration count per phase for output file naming */
-const iterationCounts = new Map<string, number>();
+// Runtime artifacts go in project directory, not a hidden folder
+function getPorchDir(projectRoot: string, state: ProjectState): string {
+  return path.join(projectRoot, 'codev', 'projects', `${state.id}-${state.title}`);
+}
 
 /**
  * Generate output file name with phase and iteration info.
  * e.g., "0074-specify-iter-1.txt" or "0074-phase_1-iter-2.txt"
+ *
+ * Uses state.iteration which is persisted and survives porch restarts.
  */
-function getOutputFileName(state: ProjectState, protocol: Protocol): string {
+function getOutputFileName(state: ProjectState): string {
   const planPhase = getCurrentPlanPhase(state.plan_phases);
 
-  // Build phase key for iteration tracking
-  const phaseKey = planPhase
-    ? `${state.phase}-${planPhase.id}`
-    : state.phase;
-
-  // Increment iteration count
-  const iter = (iterationCounts.get(phaseKey) || 0) + 1;
-  iterationCounts.set(phaseKey, iter);
-
-  // Build filename
+  // Build filename using persisted iteration from state
   const parts = [state.id];
   if (planPhase) {
     parts.push(planPhase.id);
   } else {
     parts.push(state.phase);
   }
-  parts.push(`iter-${iter}`);
+  parts.push(`iter-${state.iteration}`);
 
   return `${parts.join('-')}.txt`;
 }
@@ -63,8 +56,11 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
     throw new Error(`Project ${projectId} not found.\nRun 'porch init' to create a new project.`);
   }
 
-  // Ensure .porch directory exists
-  const porchDir = path.join(projectRoot, PORCH_DIR);
+  // Read initial state to get project directory
+  let state = readState(statusPath);
+
+  // Ensure project artifacts directory exists
+  const porchDir = getPorchDir(projectRoot, state);
   if (!fs.existsSync(porchDir)) {
     fs.mkdirSync(porchDir, { recursive: true });
   }
@@ -75,7 +71,7 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
   console.log('');
 
   while (true) {
-    let state = readState(statusPath);
+    state = readState(statusPath);
     const protocol = loadProtocol(projectRoot, state.protocol);
     const phaseConfig = getPhaseConfig(protocol, state.phase);
 
@@ -172,7 +168,7 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
     }
 
     // Generate output file for this iteration
-    const outputFileName = getOutputFileName(state, protocol);
+    const outputFileName = getOutputFileName(state);
     const outputPath = path.join(porchDir, outputFileName);
 
     // Track this build output in history (for feedback to next iteration)
@@ -200,6 +196,18 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
     // Show status
     showStatus(state, protocol);
 
+    // Print the prompt being sent to Claude
+    console.log('');
+    console.log(chalk.cyan('═'.repeat(60)));
+    console.log(chalk.cyan.bold('  PROMPT TO CLAUDE'));
+    console.log(chalk.cyan('═'.repeat(60)));
+    console.log(chalk.dim(prompt.substring(0, 2000)));
+    if (prompt.length > 2000) {
+      console.log(chalk.dim(`... (${prompt.length - 2000} more chars)`));
+    }
+    console.log(chalk.cyan('═'.repeat(60)));
+    console.log('');
+
     // Spawn Claude
     console.log(chalk.dim('Starting Claude...'));
     const claude = spawnClaude(prompt, outputPath, projectRoot);
@@ -223,7 +231,14 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
         break;
 
       case 'claude_exit':
-        if (action.exitCode !== 0) {
+        // For build_verify phases, ANY Claude exit = build complete
+        // Don't respawn - go straight to verification
+        if (isBuildVerify(protocol, state.phase)) {
+          console.log(chalk.dim('\nClaude finished. Moving to verification...'));
+          state.build_complete = true;
+          writeState(statusPath, state);
+          // Continue loop - will hit build_complete check and run verify
+        } else if (action.exitCode !== 0) {
           console.log(chalk.red(`\nClaude exited with code ${action.exitCode}`));
           console.log(chalk.dim('Restarting in 3 seconds...'));
           await sleep(3000);
@@ -263,7 +278,7 @@ async function runVerification(
 
   console.log(chalk.dim(`Running ${verifyConfig.models.length}-way consultation...`));
 
-  const porchDir = path.join(projectRoot, PORCH_DIR);
+  const porchDir = getPorchDir(projectRoot, state);
   const reviews: ReviewResult[] = [];
 
   // Run consultations in parallel
@@ -308,6 +323,8 @@ function getConsultArtifactType(phaseId: string): string {
  * Run a single consultation.
  * Writes output to file and returns result with file path.
  */
+const CONSULT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+
 async function runConsult(
   projectRoot: string,
   model: string,
@@ -327,29 +344,56 @@ async function runConsult(
     });
 
     let output = '';
+    let resolved = false;
+
+    // Timeout after 1 hour
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        proc.kill('SIGTERM');
+        const timeoutOutput = output + '\n\n[TIMEOUT: Consultation exceeded 1 hour limit]';
+        fs.writeFileSync(outputFile, timeoutOutput);
+        console.log(chalk.yellow(`  ${model}: timeout (1 hour limit)`));
+        resolve({ model, verdict: 'REQUEST_CHANGES', file: outputFile });
+      }
+    }, CONSULT_TIMEOUT_MS);
+
     proc.stdout.on('data', (data) => { output += data.toString(); });
     proc.stderr.on('data', (data) => { output += data.toString(); });
 
     proc.on('close', () => {
-      // Write output to file
-      fs.writeFileSync(outputFile, output);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        // Write output to file
+        fs.writeFileSync(outputFile, output);
 
-      // Parse verdict from output
-      const verdict = parseVerdict(output);
-      resolve({ model, verdict, file: outputFile });
+        // Parse verdict from output
+        const verdict = parseVerdict(output);
+        resolve({ model, verdict, file: outputFile });
+      }
     });
 
     proc.on('error', (err) => {
-      const errorOutput = `Error: ${err.message}`;
-      fs.writeFileSync(outputFile, errorOutput);
-      console.log(chalk.red(`  ${model}: error - ${err.message}`));
-      resolve({ model, verdict: 'REQUEST_CHANGES', file: outputFile });
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        const errorOutput = `Error: ${err.message}`;
+        fs.writeFileSync(outputFile, errorOutput);
+        console.log(chalk.red(`  ${model}: error - ${err.message}`));
+        resolve({ model, verdict: 'REQUEST_CHANGES', file: outputFile });
+      }
     });
   });
 }
 
 /**
  * Parse verdict from consultation output.
+ *
+ * Looks for the verdict line in format:
+ *   VERDICT: APPROVE
+ *   VERDICT: REQUEST_CHANGES
+ *   VERDICT: COMMENT
  *
  * Safety: If no explicit verdict found (empty output, crash, malformed),
  * defaults to REQUEST_CHANGES to prevent proceeding with unverified code.
@@ -360,7 +404,26 @@ function parseVerdict(output: string): Verdict {
     return 'REQUEST_CHANGES';
   }
 
-  // Look for verdict in output (case insensitive)
+  // Look for actual verdict line (not template text like "[APPROVE | REQUEST_CHANGES | COMMENT]")
+  // Match lines like "VERDICT: APPROVE" or "VERDICT: REQUEST_CHANGES"
+  const lines = output.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim().toUpperCase();
+    // Match "VERDICT: <value>" but NOT "VERDICT: [APPROVE | ...]"
+    if (trimmed.startsWith('VERDICT:') && !trimmed.includes('[')) {
+      if (trimmed.includes('REQUEST_CHANGES')) {
+        return 'REQUEST_CHANGES';
+      }
+      if (trimmed.includes('APPROVE')) {
+        return 'APPROVE';
+      }
+      if (trimmed.includes('COMMENT')) {
+        return 'COMMENT';
+      }
+    }
+  }
+
+  // Fallback: look anywhere in output (legacy behavior)
   const upperOutput = output.toUpperCase();
   if (upperOutput.includes('REQUEST_CHANGES')) {
     return 'REQUEST_CHANGES';

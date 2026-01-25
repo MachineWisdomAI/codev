@@ -177,6 +177,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: "2026-01-20T10:00:00-08:00"
     notes: "Builds on Ralph-SPIDER spike (0072). Three-level architecture: protocols → porch → af. 8 rounds of 3-way review before merge."
 
+  - id: "0076"
+    title: "Skip close confirmation for terminated shells"
+    summary: "When a shell/terminal is already terminated and user clicks X to close, skip the confirmation dialog - only confirm for active shells"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+      plan: null
+      review: null
+    dependencies: []
+    tags: [ux, agent-farm]
+    timestamps:
+      conceived_at: "2026-01-24T00:30:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Simple UX improvement for agent-farm dashboard"
+
   - id: "0075"
     title: "Porch Minimal Redesign"
     summary: "Redesign porch from 4800 lines to ~500 lines. Claude calls porch as a tool instead of porch spawning Claude."

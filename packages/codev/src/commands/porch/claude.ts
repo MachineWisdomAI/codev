@@ -41,9 +41,18 @@ export function spawnClaude(
   // Open file for writing
   const outputFd = fs.openSync(outputPath, 'w');
 
-  // Spawn Claude with the prompt
-  // Using --print mode so output goes to stdout/stderr which we capture
-  const proc = spawn('claude', ['--print', '-p', prompt], {
+  // Save prompt to file for reference
+  const promptFile = outputPath.replace(/\.txt$/, '-prompt.txt');
+  fs.writeFileSync(promptFile, prompt);
+
+  // Spawn Claude with prompt as command-line argument
+  // Node's spawn handles escaping correctly for long prompts
+  // Using --dangerously-skip-permissions so Claude can write files without prompts
+  const proc = spawn('claude', [
+    '--dangerously-skip-permissions',
+    '-p',
+    prompt,  // Pass prompt directly as argument
+  ], {
     cwd,
     stdio: ['ignore', outputFd, outputFd],
     env: {
