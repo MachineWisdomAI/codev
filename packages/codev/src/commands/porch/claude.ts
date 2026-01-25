@@ -47,8 +47,9 @@ export function spawnClaude(
 
   // Spawn Claude with prompt as command-line argument
   // Node's spawn handles escaping correctly for long prompts
-  // Using --dangerously-skip-permissions so Claude can write files without prompts
+  // Using --print for non-interactive mode, --dangerously-skip-permissions for file writes
   const proc = spawn('claude', [
+    '--print',
     '--dangerously-skip-permissions',
     '-p',
     prompt,  // Pass prompt directly as argument

@@ -127,6 +127,7 @@ export interface ProjectState {
   iteration: number;                       // Current build-verify iteration (1-based)
   build_complete: boolean;                 // Has build finished this iteration?
   history: IterationRecord[];              // History of all iterations (for context)
+  context?: Record<string, string>;        // User-provided context (e.g., answers to questions)
   started_at: string;
   updated_at: string;
 }

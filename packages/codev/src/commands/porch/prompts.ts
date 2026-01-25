@@ -191,6 +191,12 @@ export function buildPhasePrompt(
     historyHeader = buildHistoryHeader(state.history, state.iteration);
   }
 
+  // Build user answers section if they asked clarifying questions
+  let userAnswersSection = '';
+  if (state.context?.user_answers) {
+    userAnswersSection = `# User Answers to Your Questions\n\n${state.context.user_answers}\n\n---\n\n`;
+  }
+
   // Try to load prompt from protocol directory
   const promptsDir = findPromptsDir(projectRoot, state.protocol);
   if (promptsDir) {
@@ -203,6 +209,11 @@ export function buildPhasePrompt(
       // Add goal/summary header if available
       if (summary) {
         result = `## Goal\n\n${summary}\n\n---\n\n` + result;
+      }
+
+      // Add user answers if Claude asked clarifying questions
+      if (userAnswersSection) {
+        result = userAnswersSection + result;
       }
 
       // Add plan phase context if applicable

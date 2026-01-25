@@ -12,7 +12,8 @@ import * as fs from 'node:fs';
 export type Signal =
   | { type: 'PHASE_COMPLETE' }
   | { type: 'GATE_NEEDED' }
-  | { type: 'BLOCKED'; reason: string };
+  | { type: 'BLOCKED'; reason: string }
+  | { type: 'AWAITING_INPUT'; content: string };
 
 export interface SignalWatcher {
   /**
@@ -47,6 +48,12 @@ export function watchForSignal(outputPath: string): SignalWatcher {
         // Only check new content since last position
         const newContent = content.slice(lastPosition);
         lastPosition = content.length;
+
+        // Check for XML-style signal with content: <signal type=AWAITING_INPUT>content</signal>
+        const awaitingMatch = newContent.match(/<signal\s+type=AWAITING_INPUT>([\s\S]*?)<\/signal>/i);
+        if (awaitingMatch) {
+          return { type: 'AWAITING_INPUT', content: awaitingMatch[1].trim() };
+        }
 
         // Look for signal markers
         // These should be on their own line, possibly in output blocks

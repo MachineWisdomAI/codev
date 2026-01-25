@@ -95,6 +95,21 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
 
       // Check if we need to run VERIFY (build just completed)
       if (state.build_complete) {
+        // First check if the artifact was actually created
+        const artifactPath = getArtifactForPhase(state);
+        if (artifactPath) {
+          const fullPath = path.join(projectRoot, artifactPath);
+          if (!fs.existsSync(fullPath)) {
+            console.log('');
+            console.log(chalk.yellow(`Artifact not found: ${artifactPath}`));
+            console.log(chalk.dim('Claude may have asked questions or encountered an error.'));
+            console.log(chalk.dim('Check the output file for details, then respawn.'));
+            state.build_complete = false;
+            writeState(statusPath, state);
+            continue;
+          }
+        }
+
         console.log('');
         console.log(chalk.cyan(`[${state.id}] VERIFY - Iteration ${state.iteration}/${maxIterations}`));
 
@@ -643,6 +658,45 @@ async function handleSignal(
       console.log(chalk.red(`Signal: BLOCKED - ${signal.reason}`));
       console.log(chalk.dim('Human intervention required.'));
       return false;
+
+    case 'AWAITING_INPUT':
+      console.log(chalk.yellow('═'.repeat(60)));
+      console.log(chalk.yellow.bold('  CLAUDE NEEDS INPUT'));
+      console.log(chalk.yellow('═'.repeat(60)));
+      console.log('');
+      console.log(signal.content);
+      console.log('');
+      console.log(chalk.dim('Answer the questions above, then Claude will be respawned.'));
+      console.log(chalk.dim('Your answers will be included in the next prompt.'));
+      console.log('');
+
+      // Wait for user input
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const answers = await new Promise<string>((resolve) => {
+        console.log(chalk.cyan('Enter your answers (end with a blank line):'));
+        let input = '';
+        rl.on('line', (line) => {
+          if (line === '') {
+            rl.close();
+            resolve(input.trim());
+          } else {
+            input += line + '\n';
+          }
+        });
+      });
+
+      // Store answers in state for next iteration
+      if (!state.context) state.context = {};
+      state.context.user_answers = answers;
+      writeState(statusPath, state);
+
+      console.log(chalk.green('\nAnswers recorded. Respawning Claude...'));
+      return true; // Respawn Claude
   }
 
   return false;
