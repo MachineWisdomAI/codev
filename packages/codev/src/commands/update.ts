@@ -15,7 +15,7 @@ import {
   isUserDataPath,
   isUpdatableFile,
 } from '../lib/templates.js';
-import { copyConsultTypes, copyProtocols } from '../lib/scaffold.js';
+import { copyConsultTypes } from '../lib/scaffold.js';
 
 interface UpdateOptions {
   dryRun?: boolean;
@@ -74,15 +74,8 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     }
   }
 
-  // Update protocols (with skipExisting to preserve user customizations)
-  if (!dryRun) {
-    const protocolsResult = copyProtocols(targetDir, templatesDir, { skipExisting: true });
-    if (protocolsResult.copied.length > 0) {
-      for (const file of protocolsResult.copied) {
-        console.log(chalk.green('  + (new)'), `codev/protocols/${file}`);
-      }
-    }
-  }
+  // Note: protocols are handled by the main hash-based loop below
+  // This ensures proper conflict detection for user-customized prompts
 
   const result: UpdateResult = {
     updated: [],
