@@ -289,8 +289,8 @@ export async function kickoff(options: KickoffOptions): Promise<void> {
     mkdirSync(afDir, { recursive: true });
   }
 
-  // Create the builder prompt that instructs Claude to run porch
-  const builderPrompt = `You are a Builder agent working on project ${projectId}.
+  // Create the builder role that instructs Claude to run porch
+  const builderRole = `You are a Builder agent working on project ${projectId}.
 
 Your job is to execute the porch protocol loop until completion.
 
@@ -307,18 +307,17 @@ After each run:
 2. If porch is waiting for a gate approval - wait for the architect to approve
 3. Otherwise - run \`${porchCmd} run ${projectId}\` again
 
-Keep running the porch loop. Do not stop until the protocol is complete or you hit a gate that requires approval.
+Keep running the porch loop. Do not stop until the protocol is complete or you hit a gate that requires approval.`;
 
-Start now by running: ${porchCmd} run ${projectId}`;
+  const rolePath = resolve(afDir, 'builder-role.md');
+  writeFileSync(rolePath, builderRole);
 
-  const promptPath = resolve(afDir, 'builder-prompt.md');
-  writeFileSync(promptPath, builderPrompt);
-
-  // Create launch script that starts Claude with the builder prompt as system prompt
+  // Create launch script that starts Claude with the builder role and initial task
+  const initialTask = `Run the porch protocol loop now: ${porchCmd} run ${projectId}`;
   const launchScript = resolve(afDir, 'launch.sh');
   writeFileSync(launchScript, `#!/bin/bash
 cd "${worktreePath}"
-exec claude --dangerously-skip-permissions --append-system-prompt "$(cat '${promptPath}')"
+exec claude --dangerously-skip-permissions --append-system-prompt "$(cat '${rolePath}')" "${initialTask}"
 `, { mode: 0o755 });
 
   logger.info('Creating tmux session...');
