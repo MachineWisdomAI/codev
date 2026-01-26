@@ -486,6 +486,75 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 }
 
 /**
+ * Get git diff of uncommitted changes (staged + unstaged)
+ */
+function getGitDiff(): string {
+  try {
+    // Get both staged and unstaged changes
+    const diff = execSync('git diff HEAD', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    return diff || '(no changes detected)';
+  } catch {
+    return '(unable to get git diff)';
+  }
+}
+
+/**
+ * Build query for implementation review
+ */
+function buildImplQuery(projectNumber: number, projectRoot: string): string {
+  const specPath = findSpec(projectRoot, projectNumber);
+  const planPath = findPlan(projectRoot, projectNumber);
+
+  // Get the git diff
+  const rawDiff = getGitDiff();
+
+  // Truncate diff if too large (keep first 50k chars)
+  const maxDiffSize = 50000;
+  const diff = rawDiff.length > maxDiffSize
+    ? rawDiff.substring(0, maxDiffSize) + '\n\n... (diff truncated, ' + rawDiff.length + ' chars total)'
+    : rawDiff;
+
+  let query = `Review Implementation for Project ${projectNumber}
+
+## Context Files
+`;
+
+  if (specPath) {
+    query += `- Spec: ${specPath}\n`;
+  }
+  if (planPath) {
+    query += `- Plan: ${planPath}\n`;
+  }
+
+  query += `
+## Code Changes (git diff HEAD)
+\`\`\`diff
+${diff}
+\`\`\`
+
+---
+
+Please review the implementation:
+1. **Spec Adherence**: Does the code fulfill the spec requirements?
+2. **Code Quality**: Is the code readable, maintainable, and bug-free?
+3. **Test Coverage**: Are there adequate tests for the changes?
+4. **Error Handling**: Are edge cases and errors handled properly?
+5. **Plan Alignment**: Does the implementation follow the plan?
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]`;
+
+  return query;
+}
+
+/**
  * Build query for plan review
  */
 function buildPlanQuery(planPath: string, specPath: string | null): string {
@@ -613,8 +682,25 @@ export async function consult(options: ConsultOptions): Promise<void> {
       break;
     }
 
+    case 'impl': {
+      if (args.length === 0) {
+        throw new Error('Project number required\nUsage: consult -m <model> impl <number>');
+      }
+      const implNumber = parseInt(args[0], 10);
+      if (isNaN(implNumber)) {
+        throw new Error(`Invalid project number: ${args[0]}`);
+      }
+      const specPath = findSpec(projectRoot, implNumber);
+      const planPath = findPlan(projectRoot, implNumber);
+      query = buildImplQuery(implNumber, projectRoot);
+      console.error(`Project: ${implNumber}`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      break;
+    }
+
     default:
-      throw new Error(`Unknown subcommand: ${subcommand}\nValid subcommands: pr, spec, plan, general`);
+      throw new Error(`Unknown subcommand: ${subcommand}\nValid subcommands: pr, spec, plan, impl, general`);
   }
 
   // Show the query/prompt being sent

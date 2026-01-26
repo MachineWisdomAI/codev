@@ -407,7 +407,7 @@ function getConsultArtifactType(phaseId: string): string {
     case 'plan':
       return 'plan';
     case 'implement':
-      return 'plan'; // Implementation reviews the plan phase
+      return 'impl'; // Implementation reviews the code diff
     case 'review':
       return 'spec'; // Review phase reviews overall work
     default:
