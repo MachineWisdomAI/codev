@@ -314,11 +314,11 @@ Start now by running: ${porchCmd} run ${projectId}`;
   const promptPath = resolve(afDir, 'builder-prompt.md');
   writeFileSync(promptPath, builderPrompt);
 
-  // Create launch script that starts Claude with the builder prompt
+  // Create launch script that starts Claude with the builder prompt as system prompt
   const launchScript = resolve(afDir, 'launch.sh');
   writeFileSync(launchScript, `#!/bin/bash
 cd "${worktreePath}"
-exec claude --dangerously-skip-permissions -p "$(cat '${promptPath}')"
+exec claude --dangerously-skip-permissions --append-system-prompt "$(cat '${promptPath}')"
 `, { mode: 0o755 });
 
   logger.info('Creating tmux session...');
