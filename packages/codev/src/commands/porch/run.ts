@@ -153,9 +153,90 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
         console.log(chalk.yellow('\nChanges requested. Feeding back to Claude...'));
 
         if (state.iteration >= maxIterations) {
-          console.log(chalk.yellow(`\nMax iterations (${maxIterations}) reached. Proceeding to gate.`));
+          // Max iterations reached without unanimity - summarize and interrupt user
+          console.log('');
+          console.log(chalk.red('═'.repeat(60)));
+          console.log(chalk.red.bold('  MAX ITERATIONS REACHED - NO UNANIMITY'));
+          console.log(chalk.red('═'.repeat(60)));
+          console.log('');
+          console.log(chalk.yellow(`After ${maxIterations} iterations, reviewers did not reach unanimity.`));
+          console.log('');
+          console.log(chalk.bold('Summary of reviewer positions:'));
 
-          // Run on_complete actions anyway
+          // Group reviews by verdict
+          const byVerdict: Record<string, string[]> = {};
+          for (const r of reviews) {
+            if (!byVerdict[r.verdict]) byVerdict[r.verdict] = [];
+            byVerdict[r.verdict].push(r.model);
+          }
+
+          for (const [verdict, models] of Object.entries(byVerdict)) {
+            const color = verdict === 'APPROVE' ? chalk.green :
+                          verdict === 'CONSULT_ERROR' ? chalk.red :
+                          verdict === 'REQUEST_CHANGES' ? chalk.yellow : chalk.blue;
+            console.log(`  ${color(verdict)}: ${models.join(', ')}`);
+          }
+
+          console.log('');
+          console.log(chalk.dim('Review files:'));
+          for (const r of reviews) {
+            console.log(`  ${r.model}: ${r.file}`);
+          }
+          console.log('');
+
+          // Check for identical REQUEST_CHANGES (may indicate missing context)
+          const requestChangesReviews = reviews.filter(r => r.verdict === 'REQUEST_CHANGES');
+          if (requestChangesReviews.length >= 2) {
+            console.log(chalk.yellow('Note: Multiple REQUEST_CHANGES may indicate missing file context.'));
+            console.log(chalk.dim('Check if the artifact path is correct and files are committed.'));
+            console.log('');
+          }
+
+          // Wait for user decision
+          const readline = await import('node:readline');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+
+          console.log('Options:');
+          console.log("  'c' or 'continue' - Proceed to gate anyway (let human decide)");
+          console.log("  'r' or 'retry'    - Reset iteration counter and try again");
+          console.log("  'q' or 'quit'     - Exit porch");
+          console.log('');
+
+          const action = await new Promise<string>((resolve) => {
+            rl.question(chalk.cyan(`[${state.id}] > `), (input) => {
+              rl.close();
+              resolve(input.trim().toLowerCase());
+            });
+          });
+
+          switch (action) {
+            case 'c':
+            case 'continue':
+              console.log(chalk.dim('\nProceeding to gate...'));
+              break;
+
+            case 'r':
+            case 'retry':
+              console.log(chalk.dim('\nResetting iteration counter...'));
+              state.iteration = 1;
+              state.build_complete = false;
+              state.history = [];
+              writeState(statusPath, state);
+              continue;
+
+            case 'q':
+            case 'quit':
+              console.log(chalk.yellow('\nExiting porch.'));
+              return;
+
+            default:
+              console.log(chalk.yellow('\nUnknown option. Proceeding to gate.'));
+          }
+
+          // Run on_complete actions
           await runOnComplete(projectRoot, state, protocol, reviews);
 
           // Request gate
@@ -335,12 +416,47 @@ function getConsultArtifactType(phaseId: string): string {
 }
 
 /**
- * Run a single consultation.
+ * Run a single consultation with retry on failure.
  * Writes output to file and returns result with file path.
+ *
+ * Retry logic:
+ * - Non-zero exit code = consultation failed (API key missing, network error, etc.)
+ * - Retry up to 3 times with exponential backoff
+ * - If all retries fail, return CONSULT_ERROR (not REQUEST_CHANGES)
  */
 const CONSULT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
+const CONSULT_MAX_RETRIES = 3;
+const CONSULT_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
 
 async function runConsult(
+  projectRoot: string,
+  model: string,
+  reviewType: string,
+  state: ProjectState,
+  outputFile: string
+): Promise<ReviewResult> {
+  for (let attempt = 0; attempt < CONSULT_MAX_RETRIES; attempt++) {
+    const result = await runConsultOnce(projectRoot, model, reviewType, state, outputFile);
+
+    // Success - got a valid verdict
+    if (result.verdict !== 'CONSULT_ERROR') {
+      return result;
+    }
+
+    // Consultation failed - retry if attempts remaining
+    if (attempt < CONSULT_MAX_RETRIES - 1) {
+      const delay = CONSULT_RETRY_DELAYS[attempt];
+      console.log(chalk.yellow(`  ${model}: failed, retrying in ${delay / 1000}s... (attempt ${attempt + 2}/${CONSULT_MAX_RETRIES})`));
+      await sleep(delay);
+    }
+  }
+
+  // All retries failed
+  console.log(chalk.red(`  ${model}: FAILED after ${CONSULT_MAX_RETRIES} attempts`));
+  return { model, verdict: 'CONSULT_ERROR', file: outputFile };
+}
+
+async function runConsultOnce(
   projectRoot: string,
   model: string,
   reviewType: string,
@@ -360,6 +476,7 @@ async function runConsult(
 
     let output = '';
     let resolved = false;
+    let exitCode: number | null = null;
 
     // Timeout after 1 hour
     const timeout = setTimeout(() => {
@@ -369,19 +486,28 @@ async function runConsult(
         const timeoutOutput = output + '\n\n[TIMEOUT: Consultation exceeded 1 hour limit]';
         fs.writeFileSync(outputFile, timeoutOutput);
         console.log(chalk.yellow(`  ${model}: timeout (1 hour limit)`));
-        resolve({ model, verdict: 'REQUEST_CHANGES', file: outputFile });
+        resolve({ model, verdict: 'CONSULT_ERROR', file: outputFile });
       }
     }, CONSULT_TIMEOUT_MS);
 
     proc.stdout.on('data', (data) => { output += data.toString(); });
     proc.stderr.on('data', (data) => { output += data.toString(); });
 
-    proc.on('close', () => {
+    proc.on('close', (code) => {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
+        exitCode = code;
+
         // Write output to file
         fs.writeFileSync(outputFile, output);
+
+        // Non-zero exit code = consultation failed (API key missing, etc.)
+        if (code !== 0) {
+          console.log(chalk.yellow(`  ${model}: exit code ${code}`));
+          resolve({ model, verdict: 'CONSULT_ERROR', file: outputFile });
+          return;
+        }
 
         // Parse verdict from output
         const verdict = parseVerdict(output);
@@ -396,7 +522,7 @@ async function runConsult(
         const errorOutput = `Error: ${err.message}`;
         fs.writeFileSync(outputFile, errorOutput);
         console.log(chalk.red(`  ${model}: error - ${err.message}`));
-        resolve({ model, verdict: 'REQUEST_CHANGES', file: outputFile });
+        resolve({ model, verdict: 'CONSULT_ERROR', file: outputFile });
       }
     });
   });
@@ -451,11 +577,17 @@ function parseVerdict(output: string): Verdict {
 }
 
 /**
- * Check if all reviewers approved (no REQUEST_CHANGES).
+ * Check if all reviewers approved (unanimity required).
+ *
+ * Returns true only if ALL reviewers explicitly APPROVE.
+ * COMMENT counts as approve (non-blocking feedback).
+ * CONSULT_ERROR and REQUEST_CHANGES block approval.
  */
 function allApprove(reviews: ReviewResult[]): boolean {
   if (reviews.length === 0) return true; // No verification = auto-approve
-  return reviews.every(r => r.verdict !== 'REQUEST_CHANGES');
+
+  // Unanimity: ALL must be APPROVE or COMMENT
+  return reviews.every(r => r.verdict === 'APPROVE' || r.verdict === 'COMMENT');
 }
 
 /**

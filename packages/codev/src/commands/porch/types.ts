@@ -92,8 +92,11 @@ export interface PlanPhase {
 
 /**
  * Verdict from a 3-way review
+ *
+ * CONSULT_ERROR: Consultation failed (API key missing, network error, timeout)
+ *                Not a valid review - triggers retry, not REQUEST_CHANGES
  */
-export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+export type Verdict = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | 'CONSULT_ERROR';
 
 /**
  * Review result with file path
