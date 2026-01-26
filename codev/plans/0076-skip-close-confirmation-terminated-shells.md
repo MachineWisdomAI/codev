@@ -218,6 +218,24 @@ After implementation, verify:
 **Not Incorporated**:
 None - all feedback was valid and addressed.
 
+### Verification Test (Iteration 2, 2026-01-26)
+
+Per user request, ran a verification test to confirm that Bugfix #132 does not work:
+
+```
+# Test script spawns tmux session with ttyd, exits the shell, checks process states
+
+Before shell exits:
+  tmux session 'test_session_25324' exists
+  ttyd process 25358 is running
+
+After shell exits (user types 'exit'):
+  tmux session 'test_session_25324' does NOT exist  ← Session correctly destroyed
+  ttyd process 25358 is STILL running               ← This is why Bugfix #132 fails!
+```
+
+**Conclusion**: Bugfix #132 (checking `isProcessRunning(ttyd_pid)`) does not work because ttyd remains alive after the shell terminates. Spec 0076's fix (checking `tmuxSessionExists`) is correct and necessary. This is not a duplicate.
+
 ---
 
 ## Technical Clarifications
@@ -267,3 +285,4 @@ This is tmux's default behavior. The `remain-on-exit` option (which would keep t
 | 2026-01-26 | Claude | Incorporated first Gemini (APPROVE) and Codex (REQUEST_CHANGES) feedback |
 | 2026-01-26 | Claude | Incorporated second Codex feedback: improved builder-path test, added PID fallback verification |
 | 2026-01-26 | Claude | Final approval: All 3 reviewers (Gemini, Codex, Claude) APPROVE with HIGH confidence |
+| 2026-01-26 | Claude | Verification test: Confirmed Bugfix #132 does not work (ttyd stays alive after shell exit) |
