@@ -123,12 +123,21 @@ function normalizePhase(p: unknown): ProtocolPhase {
   // Determine next phase from transition or gate
   let next: string | null | undefined;
   const transition = phase.transition as Record<string, unknown> | undefined;
-  const gate = phase.gate as Record<string, unknown> | undefined;
+
+  // Gate can be a string (gate name) or object { name, next }
+  let gateName: string | undefined;
+  if (typeof phase.gate === 'string') {
+    gateName = phase.gate;
+  } else if (typeof phase.gate === 'object' && phase.gate !== null) {
+    const gateObj = phase.gate as Record<string, unknown>;
+    gateName = gateObj.name as string | undefined;
+    if (gateObj.next !== undefined) {
+      next = gateObj.next as string | null;
+    }
+  }
 
   if (transition?.on_complete) {
     next = transition.on_complete as string;
-  } else if (gate?.next !== undefined) {
-    next = gate.next as string | null;
   }
 
   // Collect check names
@@ -176,7 +185,7 @@ function normalizePhase(p: unknown): ProtocolPhase {
     verify,
     max_iterations: (phase.max_iterations as number) ?? 7,
     on_complete,
-    gate: gate?.name as string | undefined,
+    gate: gateName,
     checks: checks.length > 0 ? checks : undefined,
     next,
   };
