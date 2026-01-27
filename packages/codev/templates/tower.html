@@ -930,6 +930,17 @@
 
     // Initialize
     async function init() {
+      // Check for key in URL (from QR code scan)
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyFromUrl = urlParams.get('key');
+      if (keyFromUrl) {
+        // Store the key and clean the URL
+        localStorage.setItem('codev_web_key', keyFromUrl);
+        // Remove key from URL for security (don't leave it in history/bookmarks)
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+
       // Show logout button if we have a key
       const key = localStorage.getItem('codev_web_key');
       if (key) {

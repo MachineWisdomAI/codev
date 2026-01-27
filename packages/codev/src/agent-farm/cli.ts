@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import crypto from 'node:crypto';
+import qrcode from 'qrcode-terminal';
 import { start, stop } from './commands/index.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
@@ -474,6 +475,29 @@ SECURITY NOTES
 For detailed documentation, see:
   codev/resources/tunnel-setup.md
 `);
+    });
+
+  webCmd
+    .command('qr')
+    .description('Generate QR code for easy mobile access')
+    .requiredOption('-u, --url <url>', 'Your tunnel URL (e.g., https://my-tunnel.cloudflare.com)')
+    .action((options) => {
+      const webKey = process.env.CODEV_WEB_KEY;
+      if (!webKey) {
+        console.error('Error: CODEV_WEB_KEY not set.');
+        console.error('Generate one with: af web keygen');
+        process.exit(1);
+      }
+
+      // Build URL with key as query param
+      const url = new URL(options.url);
+      url.searchParams.set('key', webKey);
+      const authUrl = url.toString();
+
+      console.log('\nScan this QR code with your phone:\n');
+      qrcode.generate(authUrl, { small: true });
+      console.log(`\nURL: ${authUrl}\n`);
+      console.log('The key is embedded in the URL - scanning auto-authenticates.\n');
     });
 
   // Parse with provided args
