@@ -45,7 +45,7 @@ const webMode = opts.web || false;
 // This prevents accidental public exposure without authentication
 if (webMode && !process.env.CODEV_WEB_KEY) {
   console.error('Error: --web requires CODEV_WEB_KEY to be set.');
-  console.error('Generate a key with: codev web keygen');
+  console.error('Generate a key with: af web keygen');
   console.error('Then set: export CODEV_WEB_KEY=<your-key>');
   process.exit(1);
 }
@@ -719,7 +719,10 @@ const server = http.createServer(async (req, res) => {
     // API: Receive notification from builder
     if (req.method === 'POST' && url.pathname === '/api/notify') {
       const body = await parseJsonBody(req);
-      const { type, title, body: messageBody, project } = body;
+      const type = typeof body.type === 'string' ? body.type : 'info';
+      const title = typeof body.title === 'string' ? body.title : '';
+      const messageBody = typeof body.body === 'string' ? body.body : '';
+      const project = typeof body.project === 'string' ? body.project : undefined;
 
       if (!title || !messageBody) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -729,7 +732,7 @@ const server = http.createServer(async (req, res) => {
 
       // Broadcast to all connected SSE clients
       broadcastNotification({
-        type: type || 'info',
+        type,
         title,
         body: messageBody,
         project,

@@ -6,6 +6,7 @@
  */
 
 import { Command } from 'commander';
+import crypto from 'node:crypto';
 import { start, stop } from './commands/index.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
@@ -127,6 +128,8 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--no-comment', 'Skip commenting on issue (bugfix mode only)')
     .option('--force', 'Override collision detection (bugfix mode only)')
     .option('--use-protocol <name>', 'Override default protocol (e.g., --use-protocol tick)')
+    .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
+    .option('--strict', 'Use strict mode (porch orchestrates)')
     .option('--no-role', 'Skip loading role prompt')
     .action(async (options) => {
       const { spawn } = await import('./commands/spawn.js');
@@ -144,6 +147,8 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           noComment: !options.comment,
           force: options.force,
           useProtocol: options.useProtocol,
+          soft: options.soft,
+          strict: options.strict,
           noRole: !options.role,
         });
       } catch (error) {
@@ -398,6 +403,77 @@ export async function runAgentFarm(args: string[]): Promise<void> {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
+    });
+
+  // Web command for remote access utilities
+  const webCmd = program
+    .command('web')
+    .description('Web access utilities for remote tower dashboard');
+
+  webCmd
+    .command('keygen')
+    .description('Generate a secure API key for remote web access')
+    .action(() => {
+      const key = crypto.randomBytes(32).toString('base64url');
+      console.log('\nGenerated API key for CODEV_WEB_KEY:\n');
+      console.log(`  ${key}\n`);
+      console.log('To enable remote access:');
+      console.log(`  export CODEV_WEB_KEY="${key}"`);
+      console.log('  af start\n');
+      console.log('Then expose with a tunnel (e.g., cloudflared, ngrok).\n');
+    });
+
+  webCmd
+    .command('tunnel')
+    .description('Show tunnel setup instructions for remote access')
+    .action(() => {
+      console.log(`
+╔══════════════════════════════════════════════════════════════════╗
+║                    Tower Remote Access Setup                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+STEP 1: Generate an API key
+────────────────────────────
+  af web keygen
+
+  Copy the generated key and set it as an environment variable:
+  export CODEV_WEB_KEY="<your-key>"
+
+STEP 2: Start Agent Farm
+────────────────────────
+  af start
+
+  Tower will now require authentication for all requests.
+
+STEP 3: Expose with a Tunnel
+────────────────────────────
+Option A: Cloudflare Tunnel (recommended, free)
+  # Install: brew install cloudflared
+  cloudflared tunnel --url http://localhost:4100
+
+Option B: ngrok
+  # Install: brew install ngrok
+  ngrok http 4100
+
+Option C: Tailscale Funnel (if using Tailscale)
+  tailscale funnel --bg 4100
+
+STEP 4: Access from Mobile/Remote
+─────────────────────────────────
+  1. Open the tunnel URL in your browser
+  2. Enter your API key on the login page
+  3. The key is stored in localStorage for future visits
+
+SECURITY NOTES
+──────────────
+• CODEV_WEB_KEY is REQUIRED for tunnel access (no bypass)
+• Always use HTTPS (tunnels provide this automatically)
+• API keys are compared using timing-safe comparison
+• Consider rotating keys periodically
+
+For detailed documentation, see:
+  codev/resources/tunnel-setup.md
+`);
     });
 
   // Parse with provided args

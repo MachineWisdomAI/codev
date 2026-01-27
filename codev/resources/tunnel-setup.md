@@ -12,13 +12,13 @@ Tower runs on `localhost:4100` by default. To access it remotely, you need:
 
 ```bash
 # Generate API key
-codev web keygen
+af web keygen
 
 # Set the key (add to ~/.bashrc or ~/.zshrc for persistence)
 export CODEV_WEB_KEY="<your-key>"
 
 # Start Tower
-codev tower start
+af start
 
 # In another terminal, start tunnel
 cloudflared tunnel --url http://localhost:4100
@@ -29,7 +29,7 @@ cloudflared tunnel --url http://localhost:4100
 ### 1. Generate an API Key
 
 ```bash
-codev web keygen
+af web keygen
 ```
 
 This generates a cryptographically secure 256-bit key in Base64URL format. Copy the generated key.
@@ -47,7 +47,7 @@ echo 'export CODEV_WEB_KEY="your-generated-key"' >> ~/.zshrc
 ### 3. Start Tower
 
 ```bash
-codev tower start
+af start
 ```
 
 When `CODEV_WEB_KEY` is set, Tower requires authentication for ALL requests. There is no localhost bypass because tunnel daemons (cloudflared, ngrok) run locally.
@@ -138,14 +138,14 @@ Consider rotating your API key periodically:
 
 ```bash
 # Generate new key
-codev web keygen
+af web keygen
 
 # Update environment
 export CODEV_WEB_KEY="<new-key>"
 
 # Restart Tower
-codev tower stop
-codev tower start
+af stop
+af start
 
 # Log in again on your devices with the new key
 ```
