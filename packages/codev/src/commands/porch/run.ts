@@ -19,6 +19,7 @@ import { watchForSignal, type Signal } from './signals.js';
 import { runRepl } from './repl.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
+import { notifyGateHit, notifyBlocked } from '../../agent-farm/utils/notifications.js';
 
 // Runtime artifacts go in project directory, not a hidden folder
 function getPorchDir(projectRoot: string, state: ProjectState): string {
@@ -828,12 +829,16 @@ async function handleSignal(
       if (gateName && !state.gates[gateName]) {
         state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
         writeState(statusPath, state);
+        // Send push notification to tower
+        await notifyGateHit(projectRoot, state.id, gateName);
       }
       return false;
 
     case 'BLOCKED':
       console.log(chalk.red(`Signal: BLOCKED - ${signal.reason}`));
       console.log(chalk.dim('Human intervention required.'));
+      // Send push notification to tower
+      await notifyBlocked(projectRoot, state.id, signal.reason || 'Unknown reason');
       return false;
 
     case 'AWAITING_INPUT':

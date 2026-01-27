@@ -8,6 +8,7 @@
 interface TowerOptions {
   port?: number;
   stop?: boolean;
+  web?: boolean;
 }
 
 /**
@@ -22,6 +23,6 @@ export async function tower(options: TowerOptions = {}): Promise<void> {
   if (options.stop) {
     await towerStop({ port });
   } else {
-    await towerStart({ port });
+    await towerStart({ port, web: options.web });
   }
 }

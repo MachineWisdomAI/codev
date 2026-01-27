@@ -31,6 +31,7 @@ const program = new Command()
   .argument('[port]', 'Port to listen on', String(DEFAULT_PORT))
   .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
   .option('-l, --log-file <path>', 'Log file path for server output')
+  .option('-w, --web', 'Enable web access mode (requires CODEV_WEB_KEY)')
   .parse(process.argv);
 
 const opts = program.opts();
@@ -38,6 +39,16 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
+const webMode = opts.web || false;
+
+// CRITICAL: --web MUST refuse to start without CODEV_WEB_KEY
+// This prevents accidental public exposure without authentication
+if (webMode && !process.env.CODEV_WEB_KEY) {
+  console.error('Error: --web requires CODEV_WEB_KEY to be set.');
+  console.error('Generate a key with: codev web keygen');
+  console.error('Then set: export CODEV_WEB_KEY=<your-key>');
+  process.exit(1);
+}
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -77,6 +88,14 @@ interface PortAllocation {
   last_used_at: string;
 }
 
+// Interface for gate status
+interface GateStatus {
+  hasGate: boolean;
+  gateName?: string;
+  builderId?: string;
+  timestamp?: number;
+}
+
 // Interface for instance status returned to UI
 interface InstanceStatus {
   projectPath: string;
@@ -93,6 +112,7 @@ interface InstanceStatus {
     url: string;
     active: boolean;
   }[];
+  gateStatus?: GateStatus;
 }
 
 /**
@@ -254,6 +274,42 @@ function broadcastNotification(notification: { type: string; title: string; body
 }
 
 /**
+ * Get gate status for a project by querying its dashboard API.
+ * Uses timeout to prevent hung projects from stalling tower status.
+ */
+async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000); // 2-second timeout
+
+  try {
+    const response = await fetch(`http://localhost:${basePort}/api/status`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { hasGate: false };
+
+    const projectStatus = await response.json();
+    // Check if any builder has a pending gate
+    const builderWithGate = projectStatus.builders?.find(
+      (b: { gateStatus?: { waiting?: boolean }; status?: string; currentGate?: string; id?: string }) =>
+        b.gateStatus?.waiting || b.status === 'gate-pending'
+    );
+
+    if (builderWithGate) {
+      return {
+        hasGate: true,
+        gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
+        builderId: builderWithGate.id,
+        timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
+      };
+    }
+  } catch {
+    // Project dashboard not responding or timeout
+  }
+  return { hasGate: false };
+}
+
+/**
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
@@ -274,6 +330,9 @@ async function getInstances(): Promise<InstanceStatus[]> {
 
     // Only check architect port if dashboard is active (to avoid unnecessary probing)
     const architectActive = dashboardActive ? await isPortListening(architectPort) : false;
+
+    // Get gate status if running
+    const gateStatus = dashboardActive ? await getGateStatusForProject(basePort) : { hasGate: false };
 
     const ports = [
       {
@@ -300,6 +359,7 @@ async function getInstances(): Promise<InstanceStatus[]> {
       lastUsed: allocation.last_used_at,
       running: dashboardActive,
       ports,
+      gateStatus,
     });
   }
 

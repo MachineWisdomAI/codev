@@ -91,11 +91,13 @@ towerCmd
   .command('start')
   .description('Start the tower dashboard')
   .option('-p, --port <port>', 'Port to run on (default: 4100)')
+  .option('-w, --web', 'Enable web access mode (requires CODEV_WEB_KEY)')
   .action(async (options) => {
     try {
       await tower({
         port: options.port ? parseInt(options.port, 10) : undefined,
         stop: false,
+        web: options.web || false,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
