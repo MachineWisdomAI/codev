@@ -2,14 +2,39 @@
  * Cleanup command - removes builder worktrees and branches
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Builder, Config } from '../types.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { loadState, removeBuilder } from '../state.js';
+
+/**
+ * Remove porch state for a project from codev/projects/
+ */
+async function cleanupPorchState(projectId: string, config: Config): Promise<void> {
+  const projectsDir = join(config.codevDir, 'projects');
+
+  if (!existsSync(projectsDir)) {
+    return;
+  }
+
+  try {
+    const entries = readdirSync(projectsDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith(`${projectId}-`)) {
+        const porchStatePath = join(projectsDir, entry.name);
+        logger.info(`Removing porch state: ${entry.name}`);
+        await rm(porchStatePath, { recursive: true, force: true });
+      }
+    }
+  } catch (error) {
+    logger.warn(`Warning: Failed to cleanup porch state: ${error}`);
+  }
+}
 
 /**
  * Get a namespaced tmux session name: builder-{project}-{id}
@@ -227,6 +252,11 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
 
   // Remove from state
   removeBuilder(builder.id);
+
+  // Clean up porch state (codev/projects/NNNN-*/) so fresh kickoff gets fresh state
+  if (!isShellMode) {
+    await cleanupPorchState(builder.id, config);
+  }
 
   // Always prune stale worktree entries to prevent "can't find session" errors
   // This catches any orphaned worktrees from crashes or manual kills
