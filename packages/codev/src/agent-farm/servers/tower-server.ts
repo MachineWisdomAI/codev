@@ -9,6 +9,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import { spawn, execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,7 @@ const program = new Command()
   .argument('[port]', 'Port to listen on', String(DEFAULT_PORT))
   .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
   .option('-l, --log-file <path>', 'Log file path for server output')
+  .option('-w, --web', 'Enable web access mode (requires CODEV_WEB_KEY)')
   .parse(process.argv);
 
 const opts = program.opts();
@@ -37,6 +39,16 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
+const webMode = opts.web || false;
+
+// CRITICAL: --web MUST refuse to start without CODEV_WEB_KEY
+// This prevents accidental public exposure without authentication
+if (webMode && !process.env.CODEV_WEB_KEY) {
+  console.error('Error: --web requires CODEV_WEB_KEY to be set.');
+  console.error('Generate a key with: codev web keygen');
+  console.error('Then set: export CODEV_WEB_KEY=<your-key>');
+  process.exit(1);
+}
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -76,6 +88,14 @@ interface PortAllocation {
   last_used_at: string;
 }
 
+// Interface for gate status
+interface GateStatus {
+  hasGate: boolean;
+  gateName?: string;
+  builderId?: string;
+  timestamp?: number;
+}
+
 // Interface for instance status returned to UI
 interface InstanceStatus {
   projectPath: string;
@@ -92,6 +112,7 @@ interface InstanceStatus {
     url: string;
     active: boolean;
   }[];
+  gateStatus?: GateStatus;
 }
 
 /**
@@ -137,6 +158,158 @@ function getProjectName(projectPath: string): string {
 }
 
 /**
+ * Get the base port for a project from global.db
+ * Returns null if project not found or not running
+ */
+async function getBasePortForProject(projectPath: string): Promise<number | null> {
+  try {
+    const db = getGlobalDb();
+    const row = db.prepare(
+      'SELECT base_port FROM port_allocations WHERE project_path = ?'
+    ).get(projectPath) as { base_port: number } | undefined;
+
+    if (!row) return null;
+
+    // Check if actually running
+    const isRunning = await isPortListening(row.base_port);
+    return isRunning ? row.base_port : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Timing-safe comparison of auth tokens to prevent timing attacks
+ */
+function isValidToken(provided: string | undefined, expected: string): boolean {
+  if (!provided) return false;
+
+  // Ensure both strings are same length for timing-safe comparison
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+
+  if (providedBuf.length !== expectedBuf.length) {
+    // Still do a comparison to maintain constant time
+    crypto.timingSafeEqual(expectedBuf, expectedBuf);
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuf, expectedBuf);
+}
+
+/**
+ * Generate HTML for login page
+ */
+function getLoginPageHtml(): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Tower Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui; background: #1a1a2e; color: #eee;
+           display: flex; justify-content: center; align-items: center;
+           min-height: 100vh; margin: 0; }
+    .login { background: #16213e; padding: 2rem; border-radius: 8px;
+             max-width: 400px; width: 90%; }
+    h1 { margin-top: 0; }
+    input { width: 100%; padding: 0.75rem; margin: 0.5rem 0;
+            border: 1px solid #444; border-radius: 4px;
+            background: #0f0f23; color: #eee; font-size: 1rem;
+            box-sizing: border-box; }
+    button { width: 100%; padding: 0.75rem; margin-top: 1rem;
+             background: #4a7c59; color: white; border: none;
+             border-radius: 4px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #5a9c69; }
+    .error { color: #ff6b6b; margin-top: 0.5rem; display: none; }
+  </style>
+</head>
+<body>
+  <div class="login">
+    <h1>🗼 Tower Login</h1>
+    <p>Enter your API key to access Agent Farm.</p>
+    <input type="password" id="key" placeholder="API Key" autofocus>
+    <div class="error" id="error">Invalid API key</div>
+    <button onclick="login()">Login</button>
+  </div>
+  <script>
+    function login() {
+      const key = document.getElementById('key').value;
+      if (!key) return;
+      localStorage.setItem('codev_web_key', key);
+      location.reload();
+    }
+    document.getElementById('key').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') login();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+// SSE (Server-Sent Events) infrastructure for push notifications
+interface SSEClient {
+  res: http.ServerResponse;
+  id: string;
+}
+
+const sseClients: SSEClient[] = [];
+let notificationIdCounter = 0;
+
+/**
+ * Broadcast a notification to all connected SSE clients
+ */
+function broadcastNotification(notification: { type: string; title: string; body: string; project?: string }): void {
+  const id = ++notificationIdCounter;
+  const data = JSON.stringify({ ...notification, id });
+  const message = `id: ${id}\ndata: ${data}\n\n`;
+
+  for (const client of sseClients) {
+    try {
+      client.res.write(message);
+    } catch {
+      // Client disconnected, will be cleaned up on next iteration
+    }
+  }
+}
+
+/**
+ * Get gate status for a project by querying its dashboard API.
+ * Uses timeout to prevent hung projects from stalling tower status.
+ */
+async function getGateStatusForProject(basePort: number): Promise<GateStatus> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000); // 2-second timeout
+
+  try {
+    const response = await fetch(`http://localhost:${basePort}/api/status`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { hasGate: false };
+
+    const projectStatus = await response.json();
+    // Check if any builder has a pending gate
+    const builderWithGate = projectStatus.builders?.find(
+      (b: { gateStatus?: { waiting?: boolean }; status?: string; currentGate?: string; id?: string }) =>
+        b.gateStatus?.waiting || b.status === 'gate-pending'
+    );
+
+    if (builderWithGate) {
+      return {
+        hasGate: true,
+        gateName: builderWithGate.gateStatus?.gateName || builderWithGate.currentGate,
+        builderId: builderWithGate.id,
+        timestamp: builderWithGate.gateStatus?.timestamp || Date.now(),
+      };
+    }
+  } catch {
+    // Project dashboard not responding or timeout
+  }
+  return { hasGate: false };
+}
+
+/**
  * Get all instances with their status
  */
 async function getInstances(): Promise<InstanceStatus[]> {
@@ -157,6 +330,9 @@ async function getInstances(): Promise<InstanceStatus[]> {
 
     // Only check architect port if dashboard is active (to avoid unnecessary probing)
     const architectActive = dashboardActive ? await isPortListening(architectPort) : false;
+
+    // Get gate status if running
+    const gateStatus = dashboardActive ? await getGateStatusForProject(basePort) : { hasGate: false };
 
     const ports = [
       {
@@ -183,6 +359,7 @@ async function getInstances(): Promise<InstanceStatus[]> {
       lastUsed: allocation.last_used_at,
       running: dashboardActive,
       ports,
+      gateStatus,
     });
   }
 
@@ -460,6 +637,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // CRITICAL: When CODEV_WEB_KEY is set, ALL requests require auth
+  // NO localhost bypass - tunnel daemons (cloudflared) run locally and proxy
+  // to localhost, so checking remoteAddress would incorrectly trust remote traffic
+  const webKey = process.env.CODEV_WEB_KEY;
+
+  if (webKey) {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace('Bearer ', '');
+
+    if (!isValidToken(token, webKey)) {
+      // Return login page for HTML requests, 401 for API
+      if (req.headers.accept?.includes('text/html')) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(getLoginPageHtml());
+        return;
+      }
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+  }
+  // When CODEV_WEB_KEY is NOT set: no auth required (local dev mode only)
+
   // CORS headers
   const origin = req.headers.origin;
   if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
@@ -483,6 +683,61 @@ const server = http.createServer(async (req, res) => {
       const instances = await getInstances();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ instances }));
+      return;
+    }
+
+    // API: Server-Sent Events for push notifications
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      const clientId = crypto.randomBytes(8).toString('hex');
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+
+      // Send initial connection event
+      res.write(`data: ${JSON.stringify({ type: 'connected', id: clientId })}\n\n`);
+
+      const client: SSEClient = { res, id: clientId };
+      sseClients.push(client);
+
+      log('INFO', `SSE client connected: ${clientId} (total: ${sseClients.length})`);
+
+      // Clean up on disconnect
+      req.on('close', () => {
+        const index = sseClients.findIndex((c) => c.id === clientId);
+        if (index !== -1) {
+          sseClients.splice(index, 1);
+        }
+        log('INFO', `SSE client disconnected: ${clientId} (total: ${sseClients.length})`);
+      });
+
+      return;
+    }
+
+    // API: Receive notification from builder
+    if (req.method === 'POST' && url.pathname === '/api/notify') {
+      const body = await parseJsonBody(req);
+      const { type, title, body: messageBody, project } = body;
+
+      if (!title || !messageBody) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Missing title or body' }));
+        return;
+      }
+
+      // Broadcast to all connected SSE clients
+      broadcastNotification({
+        type: type || 'info',
+        title,
+        body: messageBody,
+        project,
+      });
+
+      log('INFO', `Notification broadcast: ${title}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
       return;
     }
 
@@ -628,6 +883,94 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Reverse proxy: /project/:base64urlPath/:terminalType/* → localhost:calculatedPort/*
+    // Uses Base64URL (RFC 4648) encoding to avoid issues with slashes in paths
+    //
+    // Terminal port routing:
+    //   /project/<path>/              → base_port (project dashboard)
+    //   /project/<path>/architect/    → base_port + 1 (architect terminal)
+    //   /project/<path>/builder/<n>/  → base_port + 2 + n (builder terminals)
+    if (url.pathname.startsWith('/project/')) {
+      const pathParts = url.pathname.split('/');
+      // ['', 'project', base64urlPath, terminalType, ...rest]
+      const encodedPath = pathParts[2];
+      const terminalType = pathParts[3];
+      const rest = pathParts.slice(4);
+
+      if (!encodedPath) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Missing project path');
+        return;
+      }
+
+      // Decode Base64URL (RFC 4648) - NOT URL encoding
+      // Wrap in try/catch to handle malformed Base64 input gracefully
+      let projectPath: string;
+      try {
+        projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+        // Validate decoded path is reasonable (non-empty, looks like absolute path)
+        // Support both POSIX (/) and Windows (C:\) paths
+        if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+          throw new Error('Invalid project path');
+        }
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain' });
+        res.end('Invalid project path encoding');
+        return;
+      }
+
+      const basePort = await getBasePortForProject(projectPath);
+
+      if (!basePort) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Project not found or not running');
+        return;
+      }
+
+      // Calculate target port based on terminal type
+      let targetPort = basePort; // Default: project dashboard
+      let proxyPath = rest.join('/');
+
+      if (terminalType === 'architect') {
+        targetPort = basePort + 1; // Architect terminal
+      } else if (terminalType === 'builder' && rest[0]) {
+        const builderNum = parseInt(rest[0], 10);
+        if (!isNaN(builderNum)) {
+          targetPort = basePort + 2 + builderNum; // Builder terminal
+          proxyPath = rest.slice(1).join('/'); // Remove builder number from path
+        }
+      } else if (terminalType) {
+        proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
+      }
+
+      // Proxy the request
+      const proxyReq = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: targetPort,
+          path: '/' + proxyPath + (url.search || ''),
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: `localhost:${targetPort}`,
+          },
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+          proxyRes.pipe(res);
+        }
+      );
+
+      proxyReq.on('error', (err) => {
+        log('ERROR', `Proxy error: ${err.message}`);
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('Proxy error: ' + err.message);
+      });
+
+      req.pipe(proxyReq);
+      return;
+    }
+
     // 404 for everything else
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found');
@@ -641,6 +984,131 @@ const server = http.createServer(async (req, res) => {
 // SECURITY: Bind to localhost only to prevent network exposure
 server.listen(port, '127.0.0.1', () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
+});
+
+// WebSocket upgrade handler for proxying terminal connections
+// Same terminal port routing as HTTP proxy
+server.on('upgrade', async (req, socket, head) => {
+  const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
+
+  // CRITICAL: When CODEV_WEB_KEY is set, ALL WebSocket upgrades require auth
+  // NO localhost bypass - tunnel daemons run locally, so remoteAddress is unreliable
+  const webKey = process.env.CODEV_WEB_KEY;
+
+  if (webKey) {
+    // Check Sec-WebSocket-Protocol for auth token
+    const protocols = req.headers['sec-websocket-protocol']?.split(',').map((s) => s.trim()) || [];
+    const authProtocol = protocols.find((p) => p.startsWith('auth-'));
+    const token = authProtocol?.replace('auth-', '');
+
+    if (!isValidToken(token, webKey)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // IMPORTANT: Strip auth-<key> protocol before forwarding to ttyd
+    // Only forward 'tty' protocol to avoid confusing upstream servers
+    const cleanProtocols = protocols.filter((p) => !p.startsWith('auth-'));
+    req.headers['sec-websocket-protocol'] = cleanProtocols.join(', ') || 'tty';
+  }
+  // When CODEV_WEB_KEY is NOT set: no auth required (local dev mode only)
+
+  if (!reqUrl.pathname.startsWith('/project/')) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const pathParts = reqUrl.pathname.split('/');
+  // ['', 'project', base64urlPath, terminalType, ...rest]
+  const encodedPath = pathParts[2];
+  const terminalType = pathParts[3];
+  const rest = pathParts.slice(4);
+
+  if (!encodedPath) {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Decode Base64URL (RFC 4648) - NOT URL encoding
+  // Wrap in try/catch to handle malformed Base64 input gracefully
+  let projectPath: string;
+  try {
+    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    // Support both POSIX (/) and Windows (C:\) paths
+    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+      throw new Error('Invalid project path');
+    }
+  } catch {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const basePort = await getBasePortForProject(projectPath);
+
+  if (!basePort) {
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Calculate target port based on terminal type (same logic as HTTP proxy)
+  let targetPort = basePort; // Default: project dashboard
+  let proxyPath = rest.join('/');
+
+  if (terminalType === 'architect') {
+    targetPort = basePort + 1; // Architect terminal
+  } else if (terminalType === 'builder' && rest[0]) {
+    const builderNum = parseInt(rest[0], 10);
+    if (!isNaN(builderNum)) {
+      targetPort = basePort + 2 + builderNum; // Builder terminal
+      proxyPath = rest.slice(1).join('/'); // Remove builder number from path
+    }
+  } else if (terminalType) {
+    proxyPath = [terminalType, ...rest].join('/'); // Pass through other paths
+  }
+
+  // Connect to target
+  const proxySocket = net.connect(targetPort, '127.0.0.1', () => {
+    // Rewrite Origin header for ttyd compatibility
+    const headers = { ...req.headers };
+    headers.origin = 'http://localhost';
+    headers.host = `localhost:${targetPort}`;
+
+    // Forward the upgrade request
+    let headerStr = `${req.method} /${proxyPath}${reqUrl.search || ''} HTTP/1.1\r\n`;
+    for (const [key, value] of Object.entries(headers)) {
+      if (value) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            headerStr += `${key}: ${v}\r\n`;
+          }
+        } else {
+          headerStr += `${key}: ${value}\r\n`;
+        }
+      }
+    }
+    headerStr += '\r\n';
+
+    proxySocket.write(headerStr);
+    if (head.length > 0) proxySocket.write(head);
+
+    // Pipe bidirectionally
+    socket.pipe(proxySocket);
+    proxySocket.pipe(socket);
+  });
+
+  proxySocket.on('error', (err) => {
+    log('ERROR', `WebSocket proxy error: ${err.message}`);
+    socket.destroy();
+  });
+
+  socket.on('error', () => {
+    proxySocket.destroy();
+  });
 });
 
 // Handle uncaught errors

@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#252525">
   <title>AF Control Tower</title>
   <style>
     * {
@@ -197,6 +200,36 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+    }
+
+    .instance.gate-pending {
+      border-color: #f59e0b;
+      animation: gate-pulse 2s infinite;
+    }
+
+    @keyframes gate-pulse {
+      0%, 100% { border-color: #f59e0b; }
+      50% { border-color: #d97706; }
+    }
+
+    .gate-indicator {
+      padding: 8px 20px;
+      background: rgba(245, 158, 11, 0.15);
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      color: #f59e0b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .gate-indicator .gate-name {
+      font-weight: 600;
+    }
+
+    .gate-indicator .gate-builder {
+      color: var(--text-muted);
+      font-size: 12px;
     }
 
     .instance-header {
@@ -611,6 +644,132 @@
       }
     }
 
+    /* Mobile optimizations */
+    @media (max-width: 600px) {
+      body {
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+
+      .header {
+        padding: 16px;
+        padding-top: calc(16px + env(safe-area-inset-top, 0));
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .header h1 {
+        font-size: 18px;
+        width: 100%;
+      }
+
+      .header h1 .emoji {
+        font-size: 22px;
+      }
+
+      .header-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .main {
+        padding: 16px;
+        padding-left: calc(16px + env(safe-area-inset-left, 0));
+        padding-right: calc(16px + env(safe-area-inset-right, 0));
+      }
+
+      .btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 12px 16px;
+      }
+
+      .btn-small {
+        min-height: 44px;
+        padding: 10px 14px;
+      }
+
+      .instance-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .instance-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .port-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .port-actions {
+        width: 100%;
+      }
+
+      .port-actions a {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+      }
+
+      .launch-section {
+        padding: 16px;
+      }
+
+      .launch-form {
+        flex-direction: column;
+      }
+
+      .launch-form input[type="text"] {
+        min-height: 44px;
+      }
+
+      .btn-launch {
+        width: 100%;
+        min-height: 44px;
+      }
+
+      .recent-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .dialog-box {
+        min-width: auto;
+        width: calc(100% - 32px);
+        margin: 16px;
+      }
+
+      .toast-container {
+        left: 16px;
+        right: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom, 0));
+      }
+    }
+
+    /* Touch-friendly tap targets */
+    @media (pointer: coarse) {
+      .btn, .port-actions a, .autocomplete-item, .recent-item {
+        min-height: 44px;
+      }
+
+      .copy-btn {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    }
+
     /* Dialog styles */
     .dialog-overlay {
       position: fixed;
@@ -681,6 +840,7 @@
     </h1>
     <div class="header-actions">
       <button class="btn" onclick="refresh()">Refresh</button>
+      <button class="btn" id="logout-btn" onclick="logout()" style="display: none;">Logout</button>
     </div>
   </header>
 
@@ -742,17 +902,148 @@
     let runningInstances = [];
     let recentInstances = [];
 
+    // Auth helper: get headers with auth token if available
+    function getAuthHeaders() {
+      const key = localStorage.getItem('codev_web_key');
+      return key ? { 'Authorization': `Bearer ${key}` } : {};
+    }
+
+    // Auth helper: make authenticated fetch request
+    async function authFetch(url, options = {}) {
+      const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+      const response = await fetch(url, { ...options, headers });
+
+      // If 401, clear key and redirect to login
+      if (response.status === 401) {
+        localStorage.removeItem('codev_web_key');
+        location.reload();
+        throw new Error('Unauthorized');
+      }
+      return response;
+    }
+
+    // Logout function
+    function logout() {
+      localStorage.removeItem('codev_web_key');
+      window.location.href = '/';
+    }
+
     // Initialize
     async function init() {
+      // Show logout button if we have a key
+      const key = localStorage.getItem('codev_web_key');
+      if (key) {
+        document.getElementById('logout-btn').style.display = 'block';
+      }
+
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        try {
+          await Notification.requestPermission();
+        } catch (e) {
+          // Ignore errors, notifications are optional
+        }
+      }
+
+      // Subscribe to SSE for push notifications
+      subscribeToEvents();
+
       await refresh();
       // Poll every 5 seconds
       setInterval(refresh, 5000);
     }
 
+    // SSE subscription for real-time notifications
+    // Uses fetch + ReadableStream to support Authorization header
+    let sseController = null;
+
+    async function subscribeToEvents() {
+      // Abort any existing connection
+      if (sseController) {
+        sseController.abort();
+      }
+
+      sseController = new AbortController();
+
+      try {
+        const response = await fetch('/api/events', {
+          headers: getAuthHeaders(),
+          signal: sseController.signal,
+        });
+
+        if (!response.ok) {
+          console.log('SSE connection failed:', response.status);
+          setTimeout(subscribeToEvents, 5000);
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            console.log('SSE stream ended, reconnecting...');
+            setTimeout(subscribeToEvents, 5000);
+            return;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE format: "data: {...}\n\n"
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete message in buffer
+
+          for (const chunk of lines) {
+            const dataMatch = chunk.match(/^data:\s*(.+)$/m);
+            if (!dataMatch) continue;
+
+            try {
+              const data = JSON.parse(dataMatch[1]);
+
+              if (data.type === 'connected') {
+                console.log('SSE connected:', data.id);
+                continue;
+              }
+
+              // Show browser notification
+              if ('Notification' in window && Notification.permission === 'granted') {
+                const notification = new Notification(data.title, {
+                  body: data.body,
+                  icon: '/favicon.ico',
+                  tag: 'tower-notification-' + data.id,
+                });
+
+                // Auto-close after 5 seconds
+                setTimeout(() => notification.close(), 5000);
+              }
+
+              // Also show in-app toast
+              showToast(`${data.title}: ${data.body}`, data.type || 'info');
+
+              // Refresh to show updated status
+              refresh();
+            } catch (e) {
+              console.error('SSE parse error:', e);
+            }
+          }
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          // Intentional abort, don't reconnect
+          return;
+        }
+        console.error('SSE error:', e);
+        setTimeout(subscribeToEvents, 5000);
+      }
+    }
+
     // Refresh data from API
     async function refresh() {
       try {
-        const response = await fetch('/api/status');
+        const response = await authFetch('/api/status');
         if (!response.ok) throw new Error('Failed to fetch status');
 
         const data = await response.json();
@@ -810,8 +1101,12 @@
     function renderInstance(instance) {
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
+      const hasGate = instance.gateStatus?.hasGate;
 
-      const portsHtml = instance.ports.map(port => `
+      const portsHtml = instance.ports.map(port => {
+        // Use proxy URL instead of direct port URL
+        const proxyUrl = getProxyUrl(instance, port.type);
+        return `
         <div class="port-item">
           <div class="port-info">
             <span class="port-status ${port.active ? 'active' : 'inactive'}"></span>
@@ -819,19 +1114,28 @@
             <span class="port-url">Port ${port.port}</span>
           </div>
           <div class="port-actions">
-            <a href="${escapeHtml(port.url)}" target="_blank" class="${port.active ? '' : 'disabled'}">
+            <a href="${escapeHtml(proxyUrl)}" target="_blank" class="${port.active ? '' : 'disabled'}">
               Open
             </a>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       const lastUsed = instance.lastUsed
         ? formatDate(instance.lastUsed)
         : 'Never';
 
+      const gateIndicatorHtml = hasGate ? `
+        <div class="gate-indicator">
+          <span>⏳</span>
+          <span class="gate-name">${escapeHtml(instance.gateStatus.gateName || 'approval')}</span>
+          ${instance.gateStatus.builderId ? `<span class="gate-builder">(${escapeHtml(instance.gateStatus.builderId)})</span>` : ''}
+        </div>
+      ` : '';
+
       return `
-        <div class="instance">
+        <div class="instance ${hasGate ? 'gate-pending' : ''}" data-project="${escapeHtml(instance.projectPath)}">
           <div class="instance-header">
             <div class="instance-title">
               <span class="instance-name">${escapeHtml(instance.projectName)}</span>
@@ -849,6 +1153,7 @@
               `}
             </div>
           </div>
+          ${gateIndicatorHtml}
           <div class="instance-path-row">
             <span class="instance-path" title="${escapeHtml(instance.projectPath)}">
               ${escapeHtml(instance.projectPath)}
@@ -952,7 +1257,7 @@
       }
 
       try {
-        const response = await fetch('/api/browse?path=' + encodeURIComponent(inputPath));
+        const response = await authFetch('/api/browse?path=' + encodeURIComponent(inputPath));
         const data = await response.json();
         suggestions = data.suggestions || [];
         selectedIndex = -1;
@@ -1007,7 +1312,7 @@
     // Launch a specific path (from recents)
     async function launchPath(projectPath) {
       try {
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1033,7 +1338,7 @@
     // Stop an instance by port
     async function stopInstance(basePort) {
       try {
-        const response = await fetch('/api/stop', {
+        const response = await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ basePort })
@@ -1056,7 +1361,7 @@
     async function restartInstance(basePort, projectPath) {
       try {
         // First stop
-        await fetch('/api/stop', {
+        await authFetch('/api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ basePort })
@@ -1066,7 +1371,7 @@
         await new Promise(r => setTimeout(r, 1000));
 
         // Then start
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1096,7 +1401,7 @@
       }
 
       try {
-        const response = await fetch('/api/launch', {
+        const response = await authFetch('/api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1170,6 +1475,32 @@
         .replace(/'/g, '&#39;');
     }
 
+    // Base64URL encoding (RFC 4648) for project paths
+    // IMPORTANT: Use TextEncoder for Unicode support (btoa only handles Latin-1)
+    function toBase64URL(str) {
+      // Encode string to UTF-8 bytes, then to Base64, then to Base64URL
+      const bytes = new TextEncoder().encode(str);
+      const base64 = btoa(String.fromCharCode(...bytes));
+      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    // Generate proxy URL for a terminal
+    function getProxyUrl(instance, portType) {
+      const encodedPath = toBase64URL(instance.projectPath);
+      if (portType === 'Dashboard') {
+        return `/project/${encodedPath}/`;
+      } else if (portType === 'Architect') {
+        return `/project/${encodedPath}/architect/`;
+      } else if (portType.startsWith('Builder')) {
+        // Extract builder number from type (e.g., "Builder 0" -> 0)
+        const match = portType.match(/Builder\s*(\d+)/i);
+        const builderNum = match ? parseInt(match[1], 10) : 0;
+        return `/project/${encodedPath}/builder/${builderNum}/`;
+      }
+      // Fallback to dashboard
+      return `/project/${encodedPath}/`;
+    }
+
     // Toast notifications
     function showToast(message, type = 'info') {
       const container = document.getElementById('toast-container');
@@ -1219,7 +1550,7 @@
       hideCreateProjectDialog();
 
       try {
-        const response = await fetch('/api/create', {
+        const response = await authFetch('/api/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ parent, name })

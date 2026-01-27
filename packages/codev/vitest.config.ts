@@ -1,0 +1,18 @@
+/**
+ * Default Vitest configuration.
+ *
+ * Excludes E2E tests which are expensive (~$4/run, 20min+ per test).
+ * Run E2E separately with: npm run test:e2e
+ */
+
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/e2e/**',  // E2E tests excluded by default
+    ],
+  },
+});

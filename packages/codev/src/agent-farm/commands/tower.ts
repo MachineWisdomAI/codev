@@ -25,6 +25,7 @@ const STARTUP_CHECK_INTERVAL_MS = 200;
 
 export interface TowerStartOptions {
   port?: number;
+  web?: boolean;
 }
 
 export interface TowerStopOptions {
@@ -172,6 +173,11 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     args = [jsScript, String(port), '--log-file', LOG_FILE];
   } else {
     fatal('Tower server not found');
+  }
+
+  // Add --web flag if enabled
+  if (options.web) {
+    args.push('--web');
   }
 
   logger.header('Starting Tower');
