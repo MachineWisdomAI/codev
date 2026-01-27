@@ -299,14 +299,27 @@ Your job is to execute the porch protocol loop until completion.
 Run this command repeatedly until the protocol is complete:
 
 \`\`\`bash
-${porchCmd} run ${projectId}
+${porchCmd} run ${projectId} --single-iteration
 \`\`\`
+
+The \`--single-iteration\` flag runs ONE build-verify cycle then exits. This gives the architect visibility into each iteration's output.
 
 After each run:
 1. If porch prints "🎉 PROTOCOL COMPLETE" - you're done, exit
 2. If porch is waiting for a gate approval - wait for the architect to approve
 3. If porch exits with code 10 (AWAITING_INPUT) - inner Claude needs answers
-4. Otherwise - run \`${porchCmd} run ${projectId}\` again
+4. If porch prints "[--single-iteration] ... Exiting" - review the output, then run the command again
+5. Otherwise - run the command again
+
+## Reviewing Output Between Iterations
+
+After each iteration, **briefly review** what happened:
+- What phase are we in?
+- Did reviewers approve or request changes?
+- What feedback was given?
+- Is there anything blocking progress?
+
+Then continue with the next iteration unless blocked.
 
 ## Handling AWAITING_INPUT (exit code 10)
 

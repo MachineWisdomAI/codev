@@ -605,7 +605,20 @@ export async function cli(args: string[]): Promise<void> {
     switch (command) {
       case 'run':
         const { run } = await import('./run.js');
-        await run(projectRoot, getProjectId(rest[0]));
+        // Parse options for run command
+        const runOptions: { answer?: string; singleIteration?: boolean } = {};
+        let runProjectId: string | undefined;
+        for (let i = 0; i < rest.length; i++) {
+          if (rest[i] === '--answer' && rest[i + 1]) {
+            runOptions.answer = rest[i + 1];
+            i++; // Skip next arg
+          } else if (rest[i] === '--single-iteration' || rest[i] === '-1') {
+            runOptions.singleIteration = true;
+          } else if (!rest[i].startsWith('--')) {
+            runProjectId = rest[i];
+          }
+        }
+        await run(projectRoot, getProjectId(runProjectId), runOptions);
         break;
 
       case 'status':
@@ -641,13 +654,17 @@ export async function cli(args: string[]): Promise<void> {
         console.log('porch - Protocol Orchestrator');
         console.log('');
         console.log('Commands:');
-        console.log('  run [id]                 Run the protocol (auto-detects if one project)');
+        console.log('  run [id] [options]       Run the protocol (auto-detects if one project)');
         console.log('  status [id]              Show current state and instructions');
         console.log('  check [id]               Run checks for current phase');
         console.log('  done [id]                Advance to next phase (if checks pass)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
+        console.log('');
+        console.log('Run options:');
+        console.log('  --answer JSON            Provide answer to AWAITING_INPUT (for automation)');
+        console.log('  --single-iteration, -1   Run one build-verify cycle then exit');
         console.log('');
         console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');

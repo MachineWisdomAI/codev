@@ -46,6 +46,16 @@ function getOutputFileName(state: ProjectState): string {
   return `${parts.join('-')}.txt`;
 }
 
+export interface RunOptions {
+  /** Answer to provide for AWAITING_INPUT (from previous run) */
+  answer?: string;
+  /** Run a single build-verify iteration then exit (for step-by-step debugging) */
+  singleIteration?: boolean;
+}
+
+/** Exit code when AWAITING_INPUT is detected in non-interactive mode */
+export const EXIT_AWAITING_INPUT = 10;
+
 /**
  * Main run loop for porch.
  * Spawns Claude for each phase and monitors until protocol complete.
@@ -58,6 +68,8 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
 
   // Read initial state to get project directory
   let state = readState(statusPath);
+  const singleIteration = options.singleIteration || false;
+  let iterationCompleted = false;  // Track if we completed a build-verify cycle
 
   // Ensure project artifacts directory exists
   const porchDir = getPorchDir(projectRoot, state);
@@ -146,6 +158,12 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
           state.iteration = 1;
           state.history = [];
           writeState(statusPath, state);
+
+          // Single iteration mode: exit after completing a build-verify cycle
+          if (singleIteration) {
+            console.log(chalk.dim('\n[--single-iteration] Build-verify cycle complete. Exiting.'));
+            return;
+          }
           continue;
         }
 
@@ -248,6 +266,12 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
           state.iteration = 1;
           state.history = [];
           writeState(statusPath, state);
+
+          // Single iteration mode: exit after max iterations
+          if (singleIteration) {
+            console.log(chalk.dim('\n[--single-iteration] Max iterations reached. Exiting.'));
+            return;
+          }
           continue;
         }
 
@@ -255,6 +279,13 @@ export async function run(projectRoot: string, projectId: string): Promise<void>
         state.iteration++;
         state.build_complete = false;
         writeState(statusPath, state);
+
+        // Single iteration mode: exit after storing feedback
+        if (singleIteration) {
+          console.log(chalk.dim('\n[--single-iteration] Feedback stored for next iteration. Exiting.'));
+          console.log(chalk.dim(`  Next run will be iteration ${state.iteration} with reviewer feedback.`));
+          return;
+        }
         // Fall through to BUILD phase
       }
 
