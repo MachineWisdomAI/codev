@@ -19,7 +19,23 @@ The SPIDER protocol **requires** consultation with GPT-5 Codex AND Gemini Pro at
 
 ## Process
 
-### 1. Clarifying Questions (ALWAYS START HERE)
+### 0. Check for Existing Spec (ALWAYS DO THIS FIRST)
+
+**Before asking ANY questions**, check if a spec already exists:
+
+```bash
+ls codev/specs/{{project_id}}-*.md
+```
+
+**If a spec file exists:**
+1. READ IT COMPLETELY - the answers to your questions are already there
+2. The spec author has already made the key decisions
+3. DO NOT ask clarifying questions - proceed directly to consultation
+4. Your job is to REVIEW and IMPROVE the existing spec, not rewrite it from scratch
+
+**If no spec exists:** Proceed to Step 1 below.
+
+### 1. Clarifying Questions (ONLY IF NO SPEC EXISTS)
 
 Before writing anything, ask clarifying questions to understand:
 - What problem is being solved?
@@ -28,7 +44,9 @@ Before writing anything, ask clarifying questions to understand:
 - What's in scope vs out of scope?
 - What does success look like?
 
-If this is your first iteration, ask these questions now and wait for answers.
+If this is your first iteration AND no spec exists, ask these questions now and wait for answers.
+
+**CRITICAL**: Do NOT ask questions if a spec already exists. The spec IS the answer.
 
 **On subsequent iterations**: If questions were already answered, acknowledge the answers and proceed to the next step.
 

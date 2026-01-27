@@ -305,7 +305,26 @@ ${porchCmd} run ${projectId}
 After each run:
 1. If porch prints "🎉 PROTOCOL COMPLETE" - you're done, exit
 2. If porch is waiting for a gate approval - wait for the architect to approve
-3. Otherwise - run \`${porchCmd} run ${projectId}\` again
+3. If porch exits with code 10 (AWAITING_INPUT) - inner Claude needs answers
+4. Otherwise - run \`${porchCmd} run ${projectId}\` again
+
+## Handling AWAITING_INPUT (exit code 10)
+
+When porch exits with code 10, it means the protocol needs human input (clarifying questions).
+
+**CRITICAL: Do NOT answer these questions yourself.** You are an AI - you must not make up answers to questions intended for humans.
+
+Instead:
+1. Report that you are BLOCKED waiting for human input
+2. Display the question clearly so the architect can see it
+3. Wait for the architect to provide answers via \`af send\` or PR comments
+
+The architect will run:
+\`\`\`bash
+${porchCmd} run ${projectId} --answer '{"response": "Human's answer here..."}'
+\`\`\`
+
+Do NOT run this command yourself with made-up answers.
 
 Keep running the porch loop. Do not stop until the protocol is complete or you hit a gate that requires approval.`;
 
