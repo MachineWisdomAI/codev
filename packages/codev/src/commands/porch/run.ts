@@ -60,7 +60,7 @@ export const EXIT_AWAITING_INPUT = 10;
  * Main run loop for porch.
  * Spawns Claude for each phase and monitors until protocol complete.
  */
-export async function run(projectRoot: string, projectId: string): Promise<void> {
+export async function run(projectRoot: string, projectId: string, options: RunOptions = {}): Promise<void> {
   const statusPath = findStatusPath(projectRoot, projectId);
   if (!statusPath) {
     throw new Error(`Project ${projectId} not found.\nRun 'porch init' to create a new project.`);
