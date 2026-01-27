@@ -221,6 +221,28 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: null
     notes: "E2E test infrastructure for porch. 3-way review (Gemini/Codex/Claude) identified and fixed AWAITING_INPUT gap and git add policy violation."
 
+  - id: "0081"
+    title: "Web Tower - Mobile Access to All Agent Farms"
+    summary: "Reverse proxy for tower-server to access all projects through one port with auth, Cloudflare tunnel, and ntfy.sh notifications"
+    status: planned
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0081-simple-web-terminal-access.md
+      plan: codev/plans/0081-simple-web-terminal-access.md
+      review: null
+    dependencies: []
+    tags: [tower, remote-access, mobile, v2]
+    timestamps:
+      conceived_at: "2026-01-27T10:00:00-08:00"
+      specified_at: "2026-01-27T12:00:00-08:00"
+      planned_at: "2026-01-27T14:00:00-08:00"
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Enables mobile access to check on builders, approve gates, and monitor progress from phone."
+
   - id: "0075"
     title: "Porch Minimal Redesign"
     summary: "Redesign porch from 4800 lines to ~500 lines. Claude calls porch as a tool instead of porch spawning Claude."
