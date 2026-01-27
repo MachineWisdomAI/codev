@@ -105,7 +105,7 @@
       "transitions_to": "next_phase"
     },
     "TOO_COMPLEX": {
-      "description": "Bug is too complex for BUGFIX, escalate to SPIDER",
+      "description": "Bug is too complex for BUGFIX, escalate to SPIR",
       "transitions_to": "escalate"
     },
     "BLOCKED": {

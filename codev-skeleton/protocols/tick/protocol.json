@@ -2,7 +2,7 @@
   "$schema": "../../protocol-schema.json",
   "name": "tick",
   "version": "1.0.0",
-  "description": "Amendment workflow for existing SPIDER specifications",
+  "description": "Amendment workflow for existing SPIR specifications",
   "phases": [
     {
       "id": "identify",

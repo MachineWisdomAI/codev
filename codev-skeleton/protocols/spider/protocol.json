@@ -1,8 +1,9 @@
 {
   "$schema": "../../protocol-schema.json",
   "name": "spider",
-  "version": "2.0.0",
-  "description": "Specification-driven development with build-verify cycles",
+  "alias": "spir",
+  "version": "2.1.0",
+  "description": "SPIR: Specify → Plan → Implement → Review with build-verify cycles",
   "phases": [
     {
       "id": "specify",
@@ -47,7 +48,8 @@
       },
       "checks": {
         "plan_exists": "test -f codev/plans/${PROJECT_ID}-*.md",
-        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md"
+        "has_phases_json": "grep -q '\"phases\":' codev/plans/${PROJECT_ID}-*.md",
+        "min_two_phases": "grep -o '\"id\": *\"[^\"]*\"' codev/plans/${PROJECT_ID}-*.md | wc -l | awk '$1 >= 2 {exit 0} {exit 1}'"
       },
       "gate": "plan-approval",
       "next": "implement"

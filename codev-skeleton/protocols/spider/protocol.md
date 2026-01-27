@@ -1,4 +1,10 @@
-# SPIDER Protocol
+# SPIR Protocol (formerly SPIDER)
+
+> **Also known as**: SPIDER (legacy name)
+>
+> **SPIR** = **S**pecify → **P**lan → **I**mplement → **R**eview
+>
+> Each phase has one build-verify cycle with 3-way consultation.
 
 > **Quick Reference**: See `codev/resources/workflow-reference.md` for stage diagrams and common commands.
 
@@ -40,13 +46,21 @@ The user can specify different agents by saying: "use SPIDER with consultation f
 - **Review**: After review document
 
 ## Overview
-SPIDER is a structured development protocol that emphasizes specification-driven development with iterative implementation and continuous review. It builds upon the DAPPER methodology with a focus on context-first development and multi-agent collaboration.
+SPIR is a structured development protocol that emphasizes specification-driven development with iterative implementation and continuous review. It builds upon the DAPPER methodology with a focus on context-first development and multi-agent collaboration.
+
+**The SPIR Model**:
+- **S - Specify**: Write specification with 3-way review → Gate: `spec-approval`
+- **P - Plan**: Write implementation plan with 3-way review → Gate: `plan-approval`
+- **I - Implement**: Execute each plan phase with build-verify cycle (one cycle per phase)
+- **R - Review**: Final review and PR preparation with 3-way review
+
+Each phase follows a build-verify loop: build the artifact, then verify with 3-way consultation (Gemini, Codex, Claude).
 
 **Core Principle**: Each feature is tracked through exactly THREE documents - a specification, a plan, and a review with lessons learned - all sharing the same filename and sequential identifier.
 
-## When to Use SPIDER
+## When to Use SPIR
 
-### Use SPIDER for:
+### Use SPIR for:
 - New feature development
 - Architecture changes
 - Complex refactoring
@@ -54,7 +68,7 @@ SPIDER is a structured development protocol that emphasizes specification-driven
 - API design and implementation
 - Performance optimization initiatives
 
-### Skip SPIDER for:
+### Skip SPIR for:
 - Simple bug fixes (< 10 lines)
 - Documentation updates
 - Configuration changes
@@ -224,25 +238,21 @@ Each phase should be:
 **Template**: `templates/plan.md`
 **Review Required**: Yes - Technical lead approval AFTER consultations
 
-### (IDE) - Implementation Loop
+### I - Implement (Per Plan Phase)
 
-Execute for each phase in the plan. This is a strict cycle that must be completed in order.
-
-**⚠️ MANDATORY**: The I-D-E cycle MUST be completed for EACH PHASE, not just at the end of all phases. Skipping D (Defend) or E (Evaluate) for any phase is a PROTOCOL VIOLATION.
+Execute for each phase in the plan. Each phase follows a build-verify cycle.
 
 **CRITICAL PRECONDITION**: Before starting any phase, verify the previous phase was committed to git. No phase can begin without the prior phase's commit.
 
-**Phase Completion Process**:
-1. **Implement** - Build the code for this phase
-2. **Defend** - Write comprehensive tests that guard functionality
-3. **Evaluate** - Assess and discuss with user
+**Build-Verify Cycle Per Phase**:
+1. **Build** - Implement code and tests for this phase
+2. **Verify** - 3-way consultation (Gemini, Codex, Claude)
+3. **Iterate** - Address feedback until verification passes
 4. **Commit** - Single atomic commit for the phase (MANDATORY before next phase)
 5. **Proceed** - Move to next phase only after commit
 
 **Handling Failures**:
-- If **Defend** phase reveals gaps → return to **Implement** to fix
-- If **Evaluation** reveals unmet criteria → return to **Implement**
-- If user requests changes → return to **Implement**
+- If verification reveals gaps → iterate and fix
 - If fundamental plan flaws found → mark phase as `blocked` and revise plan
 
 **Commit Requirements**:
