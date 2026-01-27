@@ -43,13 +43,15 @@ export async function run(
 export function spawnDetached(
   command: string,
   args: string[],
-  options: { cwd?: string; logFile?: string } = {}
+  options: { cwd?: string; logFile?: string; env?: NodeJS.ProcessEnv } = {}
 ): ChildProcess {
   // Always capture stderr for error reporting, even when not logging
+  // Explicitly pass environment to ensure CODEV_WEB_KEY etc. are inherited
   const child = spawn(command, args, {
     cwd: options.cwd,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'], // Always capture stdout/stderr
+    env: options.env || process.env,
   });
 
   // Buffer stderr for error reporting (keeps last 4KB)
