@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import qrcode from 'qrcode-terminal';
 import { start, stop } from './commands/index.js';
 import { logger } from './utils/logger.js';
@@ -475,6 +476,79 @@ SECURITY NOTES
 For detailed documentation, see:
   codev/resources/tunnel-setup.md
 `);
+    });
+
+  webCmd
+    .command('start')
+    .description('Start cloudflared tunnel and show QR code for mobile access')
+    .option('-p, --port <port>', 'Tower port to tunnel', '4100')
+    .action(async (options) => {
+      // Check if cloudflared is installed
+      try {
+        const { execSync } = await import('node:child_process');
+        execSync('which cloudflared', { stdio: 'ignore' });
+      } catch {
+        console.error('Error: cloudflared not installed.');
+        console.error('Install with: brew install cloudflared');
+        process.exit(1);
+      }
+
+      // Get or generate web key
+      let webKey = process.env.CODEV_WEB_KEY;
+      if (!webKey) {
+        webKey = crypto.randomBytes(32).toString('base64url');
+        console.log('\nGenerated CODEV_WEB_KEY (add to your shell profile for persistence):');
+        console.log(`  export CODEV_WEB_KEY="${webKey}"\n`);
+        process.env.CODEV_WEB_KEY = webKey;
+      }
+
+      console.log(`Starting cloudflared tunnel to localhost:${options.port}...`);
+      console.log('Waiting for tunnel URL...\n');
+
+      // Start cloudflared and capture URL from output
+      const cf = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${options.port}`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let tunnelUrl: string | null = null;
+
+      const handleOutput = (data: Buffer) => {
+        const text = data.toString();
+        // Look for the tunnel URL in output
+        const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+        if (match && !tunnelUrl) {
+          tunnelUrl = match[0];
+
+          // Build auth URL and show QR
+          const url = new URL(tunnelUrl);
+          url.searchParams.set('key', webKey!);
+          const authUrl = url.toString();
+
+          console.log('╔══════════════════════════════════════════════════════════════════╗');
+          console.log('║                    Tunnel Ready! Scan to connect:                 ║');
+          console.log('╚══════════════════════════════════════════════════════════════════╝\n');
+          qrcode.generate(authUrl, { small: true });
+          console.log(`\nTunnel URL: ${tunnelUrl}`);
+          console.log(`Auth URL: ${authUrl}\n`);
+          console.log('Press Ctrl+C to stop the tunnel.\n');
+        }
+      };
+
+      cf.stdout.on('data', handleOutput);
+      cf.stderr.on('data', handleOutput);
+
+      cf.on('close', (code) => {
+        if (code !== 0 && code !== null) {
+          console.error(`cloudflared exited with code ${code}`);
+        }
+        process.exit(code || 0);
+      });
+
+      // Handle Ctrl+C gracefully
+      process.on('SIGINT', () => {
+        console.log('\nStopping tunnel...');
+        cf.kill();
+      });
     });
 
   webCmd
