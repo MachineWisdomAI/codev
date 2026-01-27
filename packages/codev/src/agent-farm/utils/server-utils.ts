@@ -52,11 +52,18 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
 
 /**
  * Security: Validate request origin to prevent CSRF and DNS rebinding attacks
- * Allows only localhost and 127.0.0.1 hosts/origins
+ * When CODEV_WEB_KEY is set, allows any host (auth handles security)
+ * Otherwise, allows only localhost and 127.0.0.1
  * @param req - HTTP incoming message
  * @returns true if request should be allowed
  */
 export function isRequestAllowed(req: http.IncomingMessage): boolean {
+  // When CODEV_WEB_KEY is set, allow any host - auth will handle security
+  // This is needed for tunnel access (cloudflared, ngrok, etc.)
+  if (process.env.CODEV_WEB_KEY) {
+    return true;
+  }
+
   const host = req.headers.host;
   const origin = req.headers.origin;
 

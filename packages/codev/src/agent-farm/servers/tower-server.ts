@@ -233,6 +233,15 @@ function getLoginPageHtml(): string {
     <button onclick="login()">Login</button>
   </div>
   <script>
+    // Check for key in URL (from QR code scan)
+    const urlParams = new URLSearchParams(window.location.search);
+    const keyFromUrl = urlParams.get('key');
+    if (keyFromUrl) {
+      localStorage.setItem('codev_web_key', keyFromUrl);
+      // Clean URL and reload to authenticate
+      window.location.href = window.location.pathname;
+    }
+
     function login() {
       const key = document.getElementById('key').value;
       if (!key) return;
