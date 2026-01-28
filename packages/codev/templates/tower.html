@@ -1125,15 +1125,14 @@
       const statusText = instance.running ? 'Running' : 'Stopped';
       const hasGate = instance.gateStatus?.hasGate;
 
-      const portsHtml = instance.ports.map(port => {
-        // Use proxy URL instead of direct port URL
+      const terminalsHtml = instance.ports.map(port => {
+        // Use proxy URL - works both locally and through tunnel
         const proxyUrl = getProxyUrl(instance, port.type);
         return `
         <div class="port-item">
           <div class="port-info">
             <span class="port-status ${port.active ? 'active' : 'inactive'}"></span>
             <span class="port-type">${escapeHtml(port.type)}</span>
-            <span class="port-url">Port ${port.port}</span>
           </div>
           <div class="port-actions">
             <a href="${escapeHtml(proxyUrl)}" target="_blank" class="${port.active ? '' : 'disabled'}">
@@ -1184,11 +1183,10 @@
           </div>
           <div class="instance-body">
             <div class="ports-list">
-              ${portsHtml}
+              ${terminalsHtml}
             </div>
             <div class="instance-meta">
               <span>Last active: ${lastUsed}</span>
-              <span>Port block: ${instance.basePort}-${instance.basePort + 99}</span>
             </div>
           </div>
         </div>
