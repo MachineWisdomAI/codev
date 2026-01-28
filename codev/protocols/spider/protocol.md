@@ -48,10 +48,13 @@ porch pending
 
 When a gate is reached, porch notifies the architect and blocks until approved.
 
-**USING AF KICKOFF (Architect-Builder Pattern):**
+**USING AF SPAWN (Architect-Builder Pattern):**
 ```bash
-# Create worktree and start porch-driven builder
-af kickoff 0073
+# Create worktree and start porch-driven builder (default)
+af spawn -p 0073
+
+# Or for flexible, protocol-guided work (soft mode)
+af spawn --soft -p 0073
 
 # Monitor builder status
 af status

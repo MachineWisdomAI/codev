@@ -105,6 +105,10 @@ export interface SpawnOptions {
   // Protocol override
   useProtocol?: string; // Override default protocol: --use-protocol
 
+  // Mode control
+  soft?: boolean;       // Soft mode: AI follows protocol, architect verifies: --soft
+  strict?: boolean;     // Strict mode: porch orchestrates: --strict
+
   // General options
   noRole?: boolean;
   instruction?: string;

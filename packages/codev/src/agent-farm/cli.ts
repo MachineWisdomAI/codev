@@ -6,10 +6,8 @@
  */
 
 import { Command } from 'commander';
-import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
-import qrcode from 'qrcode-terminal';
 import { start, stop } from './commands/index.js';
+import { towerStart, towerStop } from './commands/tower.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
 import { version } from '../version.js';
@@ -47,8 +45,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     initializePorts();
   });
 
-  // Start command
-  program
+  // Dashboard command group (project-level dashboard)
+  const dashCmd = program
+    .command('dash')
+    .description('Project dashboard - start/stop the architect dashboard for this project');
+
+  dashCmd
     .command('start')
     .description('Start the architect dashboard')
     .option('-c, --cmd <command>', 'Command to run in architect terminal')
@@ -74,10 +76,9 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Stop command
-  program
+  dashCmd
     .command('stop')
-    .description('Stop all agent farm processes')
+    .description('Stop all agent farm processes for this project')
     .action(async () => {
       try {
         await stop();
@@ -159,41 +160,15 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Kickoff command - porch-driven builder
+  // Shell command
   program
-    .command('kickoff')
-    .description('Kickoff a new porch-driven builder for a spec')
-    .requiredOption('-p, --project <id>', 'Project/spec ID to kickoff')
-    .option('-t, --title <name>', 'Project title (required if no spec exists)')
-    .option('--protocol <name>', 'Protocol to use (default: spider)')
-    .option('--no-role', 'Skip loading builder role prompt')
-    .option('--resume', 'Resume existing porch state')
-    .action(async (options) => {
-      const { kickoff } = await import('./commands/kickoff.js');
-      try {
-        await kickoff({
-          project: options.project,
-          title: options.title,
-          protocol: options.protocol,
-          noRole: !options.role,
-          resume: options.resume,
-        });
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
-  // Util/Shell command
-  program
-    .command('util')
-    .alias('shell')
+    .command('shell')
     .description('Spawn a utility shell terminal')
     .option('-n, --name <name>', 'Name for the shell terminal')
     .action(async (options) => {
-      const { util } = await import('./commands/util.js');
+      const { shell } = await import('./commands/shell.js');
       try {
-        await util({ name: options.name });
+        await shell({ name: options.name });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
@@ -328,23 +303,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       logger.info(`Remaining allocations: ${result.remaining}`);
     });
 
-  // Tutorial command
-  program
-    .command('tutorial')
-    .description('Interactive tutorial for new users')
-    .option('--reset', 'Start tutorial fresh')
-    .option('--skip', 'Skip current step')
-    .option('--status', 'Show tutorial progress')
-    .action(async (options) => {
-      const { tutorial } = await import('./commands/tutorial.js');
-      try {
-        await tutorial(options);
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
   // Database commands
   const dbCmd = program
     .command('db')
@@ -407,171 +365,39 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Web command for remote access utilities
-  const webCmd = program
-    .command('web')
-    .description('Web access utilities for remote tower dashboard');
+  // Tower command - cross-project dashboard
+  const towerCmd = program
+    .command('tower')
+    .description('Cross-project dashboard showing all agent-farm instances');
 
-  webCmd
-    .command('keygen')
-    .description('Generate a secure API key for remote web access')
-    .action(() => {
-      const key = crypto.randomBytes(32).toString('base64url');
-      console.log('\nGenerated API key for CODEV_WEB_KEY:\n');
-      console.log(`  ${key}\n`);
-      console.log('To enable remote access:');
-      console.log(`  export CODEV_WEB_KEY="${key}"`);
-      console.log('  af start\n');
-      console.log('Then expose with a tunnel (e.g., cloudflared, ngrok).\n');
-    });
-
-  webCmd
-    .command('tunnel')
-    .description('Show tunnel setup instructions for remote access')
-    .action(() => {
-      console.log(`
-╔══════════════════════════════════════════════════════════════════╗
-║                    Tower Remote Access Setup                      ║
-╚══════════════════════════════════════════════════════════════════╝
-
-STEP 1: Generate an API key
-────────────────────────────
-  af web keygen
-
-  Copy the generated key and set it as an environment variable:
-  export CODEV_WEB_KEY="<your-key>"
-
-STEP 2: Start Agent Farm
-────────────────────────
-  af start
-
-  Tower will now require authentication for all requests.
-
-STEP 3: Expose with a Tunnel
-────────────────────────────
-Option A: Cloudflare Tunnel (recommended, free)
-  # Install: brew install cloudflared
-  cloudflared tunnel --url http://localhost:4100
-
-Option B: ngrok
-  # Install: brew install ngrok
-  ngrok http 4100
-
-Option C: Tailscale Funnel (if using Tailscale)
-  tailscale funnel --bg 4100
-
-STEP 4: Access from Mobile/Remote
-─────────────────────────────────
-  1. Open the tunnel URL in your browser
-  2. Enter your API key on the login page
-  3. The key is stored in localStorage for future visits
-
-SECURITY NOTES
-──────────────
-• CODEV_WEB_KEY is REQUIRED for tunnel access (no bypass)
-• Always use HTTPS (tunnels provide this automatically)
-• API keys are compared using timing-safe comparison
-• Consider rotating keys periodically
-
-For detailed documentation, see:
-  codev/resources/tunnel-setup.md
-`);
-    });
-
-  webCmd
+  towerCmd
     .command('start')
-    .description('Start cloudflared tunnel and show QR code for mobile access')
-    .option('-p, --port <port>', 'Tower port to tunnel', '4100')
+    .description('Start the tower dashboard')
+    .option('-p, --port <port>', 'Port to run on (default: 4100)')
     .action(async (options) => {
-      // Check if cloudflared is installed
       try {
-        const { execSync } = await import('node:child_process');
-        execSync('which cloudflared', { stdio: 'ignore' });
-      } catch {
-        console.error('Error: cloudflared not installed.');
-        console.error('Install with: brew install cloudflared');
+        await towerStart({
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-
-      // Get or generate web key
-      let webKey = process.env.CODEV_WEB_KEY;
-      if (!webKey) {
-        webKey = crypto.randomBytes(32).toString('base64url');
-        console.log('\nGenerated CODEV_WEB_KEY (add to your shell profile for persistence):');
-        console.log(`  export CODEV_WEB_KEY="${webKey}"\n`);
-        process.env.CODEV_WEB_KEY = webKey;
-      }
-
-      console.log(`Starting cloudflared tunnel to localhost:${options.port}...`);
-      console.log('Waiting for tunnel URL...\n');
-
-      // Start cloudflared and capture URL from output
-      const cf = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${options.port}`], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let tunnelUrl: string | null = null;
-
-      const handleOutput = (data: Buffer) => {
-        const text = data.toString();
-        // Look for the tunnel URL in output
-        const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-        if (match && !tunnelUrl) {
-          tunnelUrl = match[0];
-
-          // Build auth URL and show QR
-          const url = new URL(tunnelUrl);
-          url.searchParams.set('key', webKey!);
-          const authUrl = url.toString();
-
-          console.log('╔══════════════════════════════════════════════════════════════════╗');
-          console.log('║                    Tunnel Ready! Scan to connect:                 ║');
-          console.log('╚══════════════════════════════════════════════════════════════════╝\n');
-          qrcode.generate(authUrl, { small: true });
-          console.log(`\nTunnel URL: ${tunnelUrl}`);
-          console.log(`Auth URL: ${authUrl}\n`);
-          console.log('Press Ctrl+C to stop the tunnel.\n');
-        }
-      };
-
-      cf.stdout.on('data', handleOutput);
-      cf.stderr.on('data', handleOutput);
-
-      cf.on('close', (code) => {
-        if (code !== 0 && code !== null) {
-          console.error(`cloudflared exited with code ${code}`);
-        }
-        process.exit(code || 0);
-      });
-
-      // Handle Ctrl+C gracefully
-      process.on('SIGINT', () => {
-        console.log('\nStopping tunnel...');
-        cf.kill();
-      });
     });
 
-  webCmd
-    .command('qr')
-    .description('Generate QR code for easy mobile access')
-    .requiredOption('-u, --url <url>', 'Your tunnel URL (e.g., https://my-tunnel.cloudflare.com)')
-    .action((options) => {
-      const webKey = process.env.CODEV_WEB_KEY;
-      if (!webKey) {
-        console.error('Error: CODEV_WEB_KEY not set.');
-        console.error('Generate one with: af web keygen');
+  towerCmd
+    .command('stop')
+    .description('Stop the tower dashboard')
+    .option('-p, --port <port>', 'Port to stop (default: 4100)')
+    .action(async (options) => {
+      try {
+        await towerStop({
+          port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
       }
-
-      // Build URL with key as query param
-      const url = new URL(options.url);
-      url.searchParams.set('key', webKey);
-      const authUrl = url.toString();
-
-      console.log('\nScan this QR code with your phone:\n');
-      qrcode.generate(authUrl, { small: true });
-      console.log(`\nURL: ${authUrl}\n`);
-      console.log('The key is embedded in the URL - scanning auto-authenticates.\n');
     });
 
   // Parse with provided args

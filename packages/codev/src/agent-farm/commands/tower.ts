@@ -25,7 +25,6 @@ const STARTUP_CHECK_INTERVAL_MS = 200;
 
 export interface TowerStartOptions {
   port?: number;
-  web?: boolean;
 }
 
 export interface TowerStopOptions {
@@ -175,21 +174,12 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
     fatal('Tower server not found');
   }
 
-  // Add --web flag if enabled
-  if (options.web) {
-    args.push('--web');
-  }
-
   logger.header('Starting Tower');
   logger.kv('Port', port);
   logger.kv('Log file', LOG_FILE);
-  if (process.env.CODEV_WEB_KEY) {
-    logger.kv('Web auth', 'enabled (CODEV_WEB_KEY set)');
-  }
 
   logToFile(`Starting tower server on port ${port}`);
   logToFile(`Command: ${command} ${args.join(' ')}`);
-  logToFile(`CODEV_WEB_KEY: ${process.env.CODEV_WEB_KEY ? 'set' : 'not set'}`);
 
   // Start tower server - explicitly pass env to ensure CODEV_WEB_KEY is inherited
   const serverProcess = spawnDetached(command, args, {

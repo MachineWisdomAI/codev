@@ -323,15 +323,29 @@ project-root/
     └── state.db                  # SQLite database
 ```
 
+#### Builder Modes
+
+Builders can run in two modes:
+
+| Mode | Flag | Behavior |
+|------|------|----------|
+| **Strict** (default) | `af spawn -p XXXX` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn --soft -p XXXX` | AI follows protocol - architect verifies compliance |
+
+**Strict mode** (default for `--project`): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously.
+
+**Soft mode**: Builder reads and follows the protocol document, but you monitor and verify compliance. Use `--soft` flag or non-project modes (task, shell, worktree).
+
 #### Builder Types
 
-| Type | Flag | Worktree | Branch | Initial Prompt |
-|------|------|----------|--------|----------------|
-| `spec` | `--project/-p` | Yes | `builder/{id}-{name}` | Implement spec |
-| `task` | `--task` | Yes | `builder/task-{id}` | User-provided task |
-| `protocol` | `--protocol` | Yes | `builder/{protocol}-{id}` | Run protocol |
-| `shell` | `--shell` | No | None | None |
-| `worktree` | `--worktree` | Yes | `builder/worktree-{id}` | None |
+| Type | Flag | Worktree | Branch | Default Mode |
+|------|------|----------|--------|--------------|
+| `spec` | `--project/-p` | Yes | `builder/{id}-{name}` | Strict (porch) |
+| `task` | `--task` | Yes | `builder/task-{id}` | Soft |
+| `protocol` | `--protocol` | Yes | `builder/{protocol}-{id}` | Soft |
+| `shell` | `--shell` | No | None | Soft |
+| `worktree` | `--worktree` | Yes | `builder/worktree-{id}` | Soft |
+| `bugfix` | `--issue/-i` | Yes | `builder/bugfix-{id}` | Soft |
 
 #### Cleanup Process
 
@@ -1071,9 +1085,10 @@ af start                      # Start architect dashboard
 af stop                       # Stop all agent-farm processes
 
 # Managing builders
-af spawn --project 0003       # Spawn a builder for spec 0003
-af spawn -p 0003              # Short form
-af spawn --issue 42           # Spawn a builder for GitHub issue #42 (BUGFIX protocol)
+af spawn -p 0003              # Spawn builder (strict mode - porch orchestrates, default)
+af spawn --soft -p 0003       # Soft mode - AI follows protocol, you verify compliance
+af spawn -p 0003 -t "name"    # Strict mode with title (if no spec exists yet)
+af spawn --issue 42           # Spawn builder for GitHub issue (BUGFIX protocol)
 af spawn -i 42                # Short form for --issue
 af status                     # Check all agent status
 af cleanup --project 0003     # Clean up builder (checks for uncommitted work)
@@ -2000,7 +2015,7 @@ See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
 
 ---
 
-**Last Updated**: 2026-01-07 (Maintenance Run 0005)
-**Version**: Pre-v1.6.0-Gothic
-**Changes**: Added BUGFIX protocol documentation, updated CLI commands for --issue flag, added v1.6.0 features
-**Next Review**: After v1.6.0 release
+**Last Updated**: 2026-01-27
+**Version**: v2.0.0-rc.25 (Pre-release)
+**Changes**: Unified `af spawn` command with strict/soft modes. Strict (porch-driven) is now default for `--project`. Use `--soft` to opt out.
+**Next Review**: After v2.0.0 release

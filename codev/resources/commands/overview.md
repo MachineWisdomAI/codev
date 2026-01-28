@@ -21,7 +21,7 @@ codev adopt
 codev doctor
 
 # Start the architect dashboard
-af start
+af dash start
 
 # Consult an AI model about a spec
 consult -m gemini spec 42
@@ -46,7 +46,6 @@ This installs all three commands globally: `codev`, `af`, and `consult`.
 | `codev doctor` | Check system dependencies |
 | `codev update` | Update codev templates and protocols |
 | `codev import <source>` | AI-assisted protocol import from other projects |
-| `codev tower` | Cross-project dashboard |
 
 See [codev.md](codev.md) for full documentation.
 
@@ -54,14 +53,15 @@ See [codev.md](codev.md) for full documentation.
 
 | Command | Description |
 |---------|-------------|
-| `af start` | Start the architect dashboard |
-| `af stop` | Stop all agent farm processes |
+| `af dash start` | Start the architect dashboard |
+| `af dash stop` | Stop all agent farm processes |
 | `af spawn` | Spawn a new builder |
 | `af status` | Show status of all agents |
 | `af cleanup` | Clean up a builder worktree |
 | `af send` | Send instructions to a builder |
 | `af open` | Open file annotation viewer |
-| `af util` | Spawn a utility shell |
+| `af shell` | Spawn a utility shell |
+| `af tower` | Cross-project dashboard |
 
 See [agent-farm.md](agent-farm.md) for full documentation.
 

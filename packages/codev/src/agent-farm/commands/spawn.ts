@@ -18,6 +18,159 @@ import { run, commandExists, findAvailablePort, spawnTtyd } from '../utils/shell
 import { loadState, upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 
+// =============================================================================
+// Template Rendering
+// =============================================================================
+
+/**
+ * Context object for rendering builder-prompt.md templates
+ */
+interface TemplateContext {
+  protocol_name: string;
+  mode: 'strict' | 'soft';
+  mode_soft: boolean;
+  mode_strict: boolean;
+  project_id?: string;
+  input_description: string;
+  spec?: {
+    path: string;
+    name: string;
+  };
+  plan?: {
+    path: string;
+    name: string;
+  };
+  issue?: {
+    number: number;
+    title: string;
+    body: string;
+  };
+  task_text?: string;
+}
+
+/**
+ * Simple Handlebars-like template renderer
+ * Supports: {{variable}}, {{#if condition}}...{{/if}}, {{object.property}}
+ */
+function renderTemplate(template: string, context: TemplateContext): string {
+  let result = template;
+
+  // Process {{#if condition}}...{{/if}} blocks
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const ifMatch = result.match(/\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/);
+    if (!ifMatch) break;
+
+    const [fullMatch, condition, content] = ifMatch;
+    const value = getNestedValue(context, condition);
+    result = result.replace(fullMatch, value ? content : '');
+  }
+
+  // Process {{variable}} and {{object.property}} substitutions
+  result = result.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_, path) => {
+    const value = getNestedValue(context, path);
+    if (value === undefined || value === null) return '';
+    return String(value);
+  });
+
+  // Clean up any double newlines left from removed sections
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result.trim();
+}
+
+/**
+ * Get nested value from object using dot notation
+ */
+function getNestedValue(obj: TemplateContext, path: string): unknown {
+  const parts = path.split('.');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let current: any = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+/**
+ * Load builder-prompt.md template for a protocol
+ */
+function loadBuilderPromptTemplate(config: Config, protocolName: string): string | null {
+  const templatePath = resolve(config.codevDir, 'protocols', protocolName, 'builder-prompt.md');
+  if (existsSync(templatePath)) {
+    return readFileSync(templatePath, 'utf-8');
+  }
+  return null;
+}
+
+/**
+ * Build the prompt using protocol template or fallback to inline prompt
+ */
+function buildPromptFromTemplate(
+  config: Config,
+  protocolName: string,
+  context: TemplateContext
+): string {
+  const template = loadBuilderPromptTemplate(config, protocolName);
+  if (template) {
+    logger.info(`Using template: protocols/${protocolName}/builder-prompt.md`);
+    return renderTemplate(template, context);
+  }
+  // Fallback: no template found, return a basic prompt
+  logger.debug(`No template found for ${protocolName}, using inline prompt`);
+  return buildFallbackPrompt(protocolName, context);
+}
+
+/**
+ * Build a fallback prompt when no template exists
+ */
+function buildFallbackPrompt(protocolName: string, context: TemplateContext): string {
+  const modeInstructions = context.mode === 'strict'
+    ? `## Mode: STRICT
+Porch orchestrates your work. Run: \`porch run ${context.project_id || ''}\``
+    : `## Mode: SOFT
+You follow the protocol yourself. The architect monitors your work and verifies compliance.`;
+
+  let prompt = `# ${protocolName.toUpperCase()} Builder (${context.mode} mode)
+
+You are implementing ${context.input_description}.
+
+${modeInstructions}
+
+## Protocol
+Follow the ${protocolName.toUpperCase()} protocol: \`codev/protocols/${protocolName}/protocol.md\`
+Read and internalize the protocol before starting any work.
+`;
+
+  if (context.spec) {
+    prompt += `\n## Spec\nRead the specification at: \`${context.spec.path}\`\n`;
+  }
+
+  if (context.plan) {
+    prompt += `\n## Plan\nFollow the implementation plan at: \`${context.plan.path}\`\n`;
+  }
+
+  if (context.issue) {
+    prompt += `\n## Issue #${context.issue.number}
+**Title**: ${context.issue.title}
+
+**Description**:
+${context.issue.body || '(No description provided)'}
+`;
+  }
+
+  if (context.task_text) {
+    prompt += `\n## Task\n${context.task_text}\n`;
+  }
+
+  return prompt;
+}
+
+// =============================================================================
+// ID and Session Management
+// =============================================================================
+
 /**
  * Generate a short 4-character base64-encoded ID
  * Uses URL-safe base64 (a-z, A-Z, 0-9, -, _) for filesystem-safe IDs
@@ -49,24 +202,30 @@ function generateShortId(): string {
 }
 
 /**
- * Validate spawn options - ensure exactly one mode is selected
+ * Validate spawn options - ensure exactly one input mode is selected
+ * Note: --protocol serves dual purpose:
+ *   1. As an input mode when used alone (e.g., `af spawn --protocol experiment`)
+ *   2. As a protocol override when combined with other input modes (e.g., `af spawn -p 0001 --protocol tick`)
  */
 function validateSpawnOptions(options: SpawnOptions): void {
-  const modes = [
+  // Count input modes (excluding --protocol which can be used as override)
+  const inputModes = [
     options.project,
     options.task,
-    options.protocol,
     options.shell,
     options.worktree,
     options.issue,
   ].filter(Boolean);
 
-  if (modes.length === 0) {
+  // --protocol alone is a valid input mode
+  const protocolAlone = options.protocol && inputModes.length === 0;
+
+  if (inputModes.length === 0 && !protocolAlone) {
     fatal('Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree\n\nRun "af spawn --help" for examples.');
   }
 
-  if (modes.length > 1) {
-    fatal('Flags --project, --issue, --task, --protocol, --shell, --worktree are mutually exclusive');
+  if (inputModes.length > 1) {
+    fatal('Flags --project, --issue, --task, --shell, --worktree are mutually exclusive');
   }
 
   if (options.files && !options.task) {
@@ -76,18 +235,32 @@ function validateSpawnOptions(options: SpawnOptions): void {
   if ((options.noComment || options.force) && !options.issue) {
     fatal('--no-comment and --force require --issue');
   }
+
+  // --protocol as override cannot be used with --shell or --worktree
+  if (options.protocol && inputModes.length > 0 && (options.shell || options.worktree)) {
+    fatal('--protocol cannot be used with --shell or --worktree (no protocol applies)');
+  }
+
+  // --use-protocol is now deprecated in favor of --protocol as universal override
+  // Keep for backwards compatibility but prefer --protocol
+  if (options.useProtocol && (options.shell || options.worktree)) {
+    fatal('--use-protocol cannot be used with --shell or --worktree (no protocol applies)');
+  }
 }
 
 /**
  * Determine the spawn mode from options
+ * Note: --protocol can be used as both an input mode (alone) or an override (with other modes)
  */
 function getSpawnMode(options: SpawnOptions): BuilderType {
+  // Primary input modes take precedence over --protocol as override
   if (options.project) return 'spec';
   if (options.issue) return 'bugfix';
   if (options.task) return 'task';
-  if (options.protocol) return 'protocol';
   if (options.shell) return 'shell';
   if (options.worktree) return 'worktree';
+  // --protocol alone is the protocol input mode
+  if (options.protocol) return 'protocol';
   throw new Error('No mode specified');
 }
 
@@ -180,18 +353,35 @@ function loadProtocol(config: Config, protocolName: string): ProtocolDefinition 
 
 /**
  * Resolve which protocol to use based on precedence:
- * 1. Explicit --use-protocol flag (always wins)
- * 2. Spec file **Protocol**: header (for --project mode)
- * 3. Hardcoded defaults (spider for specs, bugfix for issues)
+ * 1. Explicit --protocol flag when used as override (with other input modes)
+ * 2. Explicit --use-protocol flag (backwards compatibility)
+ * 3. Spec file **Protocol**: header (for --project mode)
+ * 4. Hardcoded defaults (spider for specs, bugfix for issues)
  */
 async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
-  // 1. Explicit --use-protocol override always wins
+  // Count input modes to determine if --protocol is being used as override
+  const inputModes = [
+    options.project,
+    options.task,
+    options.shell,
+    options.worktree,
+    options.issue,
+  ].filter(Boolean);
+  const protocolAsOverride = options.protocol && inputModes.length > 0;
+
+  // 1. --protocol as override always wins when combined with other input modes
+  if (protocolAsOverride) {
+    validateProtocol(config, options.protocol!);
+    return options.protocol!.toLowerCase();
+  }
+
+  // 2. Explicit --use-protocol override (backwards compatibility)
   if (options.useProtocol) {
     validateProtocol(config, options.useProtocol);
     return options.useProtocol.toLowerCase();
   }
 
-  // 2. For spec mode, check spec file header (preserves existing behavior)
+  // 3. For spec mode, check spec file header (preserves existing behavior)
   if (options.project) {
     const specFile = await findSpecFile(config.codevDir, options.project);
     if (specFile) {
@@ -211,9 +401,10 @@ async function resolveProtocol(options: SpawnOptions, config: Config): Promise<s
     }
   }
 
-  // 3. Hardcoded defaults based on input type
+  // 4. Hardcoded defaults based on input type
   if (options.project) return 'spider';
   if (options.issue) return 'bugfix';
+  // --protocol alone (not as override) uses the protocol name itself
   if (options.protocol) return options.protocol.toLowerCase();
   if (options.task) return 'spider';
 
@@ -221,6 +412,42 @@ async function resolveProtocol(options: SpawnOptions, config: Config): Promise<s
 }
 
 // Note: GitHubIssue interface is defined later in the file
+
+/**
+ * Resolve the builder mode (strict vs soft)
+ * Precedence:
+ * 1. Explicit --strict or --soft flags (always win)
+ * 2. Protocol defaults from protocol.json
+ * 3. Input type defaults (spec = strict, all others = soft)
+ */
+function resolveMode(
+  options: SpawnOptions,
+  protocol: ProtocolDefinition | null,
+): 'strict' | 'soft' {
+  // 1. Explicit flags always win
+  if (options.strict && options.soft) {
+    fatal('--strict and --soft are mutually exclusive');
+  }
+  if (options.strict) {
+    return 'strict';
+  }
+  if (options.soft) {
+    return 'soft';
+  }
+
+  // 2. Protocol defaults from protocol.json
+  if (protocol?.defaults?.mode) {
+    return protocol.defaults.mode;
+  }
+
+  // 3. Input type defaults: only spec mode defaults to strict
+  if (options.project) {
+    return 'strict';
+  }
+
+  // All other modes default to soft
+  return 'soft';
+}
 
 /**
  * Execute pre-spawn hooks defined in protocol.json
@@ -494,25 +721,31 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   // Load protocol definition for potential hooks/config
   const protocolDef = loadProtocol(config, protocol);
 
-  logger.kv('Protocol', protocol.toUpperCase());
+  // Resolve mode: --soft flag > protocol defaults > input type defaults
+  const mode = resolveMode(options, protocolDef);
 
-  // Build the prompt
+  logger.kv('Protocol', protocol.toUpperCase());
+  logger.kv('Mode', mode.toUpperCase());
+
+  // Build the prompt using template
   const specRelPath = `codev/specs/${specName}.md`;
   const planRelPath = `codev/plans/${specName}.md`;
 
-  let initialPrompt = `## Protocol
-Follow the ${protocol.toUpperCase()} protocol STRICTLY: ${protocolPath}
-Read and internalize the protocol before starting any work.
+  const templateContext: TemplateContext = {
+    protocol_name: protocol.toUpperCase(),
+    mode,
+    mode_soft: mode === 'soft',
+    mode_strict: mode === 'strict',
+    project_id: projectId,
+    input_description: `the feature specified in ${specRelPath}`,
+    spec: { path: specRelPath, name: specName },
+  };
 
-## Task
-Implement the feature specified in ${specRelPath}.`;
   if (hasPlan) {
-    initialPrompt += ` Follow the implementation plan in ${planRelPath}.`;
+    templateContext.plan = { path: planRelPath, name: specName };
   }
-  initialPrompt += `
 
-Start by reading the protocol, spec${hasPlan ? ', and plan' : ''}, then begin implementation.`;
-
+  const initialPrompt = buildPromptFromTemplate(config, protocol, templateContext);
   const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.
 
 ${initialPrompt}`;
@@ -548,6 +781,7 @@ ${initialPrompt}`;
 
   logger.blank();
   logger.success(`Builder ${builderId} spawned!`);
+  logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
   logger.kv('Terminal', `http://localhost:${port}`);
 }
 
@@ -574,13 +808,29 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Build the prompt
-  let prompt = taskText;
+  // Resolve protocol (tasks can specify --protocol override, default is 'spider')
+  const protocol = await resolveProtocol(options, config);
+  const protocolDef = loadProtocol(config, protocol);
+  const mode = resolveMode(options, protocolDef);
+
+  // Build the prompt using template
+  let taskDescription = taskText;
   if (options.files && options.files.length > 0) {
-    prompt += `\n\nRelevant files to consider:\n${options.files.map(f => `- ${f}`).join('\n')}`;
+    taskDescription += `\n\nRelevant files to consider:\n${options.files.map(f => `- ${f}`).join('\n')}`;
   }
 
-  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition. ${prompt}`;
+  const templateContext: TemplateContext = {
+    protocol_name: protocol.toUpperCase(),
+    mode,
+    mode_soft: mode === 'soft',
+    mode_strict: mode === 'strict',
+    project_id: builderId,
+    input_description: 'an ad-hoc task',
+    task_text: taskDescription,
+  };
+
+  const prompt = buildPromptFromTemplate(config, protocol, templateContext);
+  const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
 
   // Load role
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
@@ -638,8 +888,23 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Build the prompt
-  const prompt = `You are running the ${protocolName} protocol. Start by reading codev/protocols/${protocolName}/protocol.md and follow its instructions.`;
+  // Load protocol definition and resolve mode
+  const protocolDef = loadProtocol(config, protocolName);
+  const mode = resolveMode(options, protocolDef);
+
+  logger.kv('Mode', mode.toUpperCase());
+
+  // Build the prompt using template
+  const templateContext: TemplateContext = {
+    protocol_name: protocolName.toUpperCase(),
+    mode,
+    mode_soft: mode === 'soft',
+    mode_strict: mode === 'strict',
+    project_id: builderId,
+    input_description: `running the ${protocolName.toUpperCase()} protocol`,
+  };
+
+  const prompt = buildPromptFromTemplate(config, protocolName, templateContext);
 
   // Load protocol-specific role or fall back to builder role
   const role = options.noRole ? null : loadProtocolRole(config, protocolName);
@@ -945,10 +1210,14 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   const protocol = await resolveProtocol(options, config);
   const protocolDef = loadProtocol(config, protocol);
 
+  // Resolve mode: --soft flag > protocol defaults > input type defaults (bugfix defaults to soft)
+  const mode = resolveMode(options, protocolDef);
+
   logger.kv('Title', issue.title);
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
   logger.kv('Protocol', protocol.toUpperCase());
+  logger.kv('Mode', mode.toUpperCase());
 
   // Execute pre-spawn hooks from protocol.json (collision check, issue comment)
   // If protocol has hooks defined, use them; otherwise fall back to hardcoded behavior
@@ -977,32 +1246,22 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   await checkDependencies();
   await createWorktree(config, branchName, worktreePath);
 
-  // Build the prompt with issue context
-  const protocolPath = `codev/protocols/${protocol}/protocol.md`;
-  const prompt = `You are a Builder working on a ${protocol.toUpperCase()} task.
+  // Build the prompt using template
+  const templateContext: TemplateContext = {
+    protocol_name: protocol.toUpperCase(),
+    mode,
+    mode_soft: mode === 'soft',
+    mode_strict: mode === 'strict',
+    project_id: builderId,
+    input_description: `a fix for GitHub Issue #${issueNumber}`,
+    issue: {
+      number: issueNumber,
+      title: issue.title,
+      body: issue.body || '(No description provided)',
+    },
+  };
 
-## Protocol
-Follow the ${protocol.toUpperCase()} protocol: ${protocolPath}
-
-## Issue #${issueNumber}
-**Title**: ${issue.title}
-
-**Description**:
-${issue.body || '(No description provided)'}
-
-## Your Mission
-1. Reproduce the bug
-2. Identify root cause
-3. Implement fix (< 300 LOC)
-4. Add regression test
-5. Run CMAP review (3-way parallel: Gemini, Codex, Claude)
-6. Create PR with "Fixes #${issueNumber}" in body
-
-If the fix is too complex (> 300 LOC or architectural changes), notify the Architect via:
-  af send architect "Issue #${issueNumber} is more complex than expected. [Reason]. Recommend escalating to SPIDER/TICK."
-
-Start by reading the issue and reproducing the bug.`;
-
+  const prompt = buildPromptFromTemplate(config, protocol, templateContext);
   const builderPrompt = `You are a Builder. Read codev/roles/builder.md for your full role definition.\n\n${prompt}`;
 
   // Load role
@@ -1037,6 +1296,7 @@ Start by reading the issue and reproducing the bug.`;
 
   logger.blank();
   logger.success(`Bugfix builder for issue #${issueNumber} spawned!`);
+  logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
   logger.kv('Terminal', `http://localhost:${port}`);
 }
 

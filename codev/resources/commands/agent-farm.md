@@ -18,12 +18,16 @@ af <command> [options]
 
 ## Commands
 
-### af start
+### af dash
+
+Project dashboard commands - start/stop the architect dashboard for this project.
+
+#### af dash start
 
 Start the architect dashboard.
 
 ```bash
-af start [options]
+af dash start [options]
 ```
 
 **Options:**
@@ -47,16 +51,16 @@ The dashboard is accessible via browser at `http://localhost:<port>`.
 
 ```bash
 # Start with defaults
-af start
+af dash start
 
 # Start with custom port
-af start -p 4300
+af dash start -p 4300
 
 # Start with specific command
-af start -c "claude --model opus"
+af dash start -c "claude --model opus"
 
 # Start on remote machine
-af start --remote user@host
+af dash start --remote user@host
 ```
 
 #### Remote Access
@@ -65,13 +69,13 @@ Start Agent Farm on a remote machine and access it from your local workstation w
 
 ```bash
 # On your local machine - one command does everything:
-af start --remote user@remote-host
+af dash start --remote user@remote-host
 
 # Or with explicit project path:
-af start --remote user@remote-host:/path/to/project
+af dash start --remote user@remote-host:/path/to/project
 
 # With custom port:
-af start --remote user@remote-host --port 4300
+af dash start --remote user@remote-host --port 4300
 ```
 
 This single command:
@@ -112,19 +116,17 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ```bash
 # DEPRECATED: Exposes dashboard without authentication
-af start --allow-insecure-remote
+af dash start --allow-insecure-remote
 ```
 
 The `--allow-insecure-remote` flag binds to `0.0.0.0` with no authentication. Use `--remote` instead for secure access via SSH.
 
----
+#### af dash stop
 
-### af stop
-
-Stop all agent farm processes.
+Stop all agent farm processes for this project.
 
 ```bash
-af stop
+af dash stop
 ```
 
 **Description:**
@@ -306,15 +308,13 @@ af open src/auth/login.ts
 
 ---
 
-### af util
+### af shell
 
 Spawn a utility shell terminal.
 
 ```bash
-af util [options]
+af shell [options]
 ```
-
-**Aliases:** `af shell`
 
 **Options:**
 - `-n, --name <name>` - Name for the shell terminal
@@ -330,10 +330,10 @@ Opens a general-purpose shell terminal in the dashboard. Useful for:
 
 ```bash
 # Open utility shell
-af util
+af shell
 
 # Open with custom name
-af util -n "test-runner"
+af shell -n "test-runner"
 ```
 
 ---
@@ -355,25 +355,6 @@ af rename <id> <name>
 ```bash
 af rename 0042 "auth-rework"
 ```
-
----
-
-### af tutorial
-
-Interactive tutorial for new users.
-
-```bash
-af tutorial [options]
-```
-
-**Options:**
-- `--reset` - Start tutorial fresh
-- `--skip` - Skip current step
-- `--status` - Show tutorial progress
-
-**Description:**
-
-Walks through the basics of using agent-farm with guided steps.
 
 ---
 
@@ -410,7 +391,7 @@ Removes entries for projects that no longer exist.
 
 ### af tower
 
-Manage the tower dashboard.
+Manage the cross-project tower dashboard. Tower shows all agent-farm instances across projects.
 
 #### af tower start
 
@@ -422,6 +403,7 @@ af tower start [options]
 
 **Options:**
 - `-p, --port <port>` - Port to run on (default: 4100)
+- `-w, --web` - Enable web access mode (requires CODEV_WEB_KEY)
 
 #### af tower stop
 

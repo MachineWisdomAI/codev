@@ -213,7 +213,7 @@ async function startRemote(options: StartOptions): Promise<void> {
     : `cd ${projectName} 2>/dev/null || cd ~/${projectName} 2>/dev/null`;
   // Always pass --no-browser to remote since we open browser locally
   // Wrap in bash -l to source login environment (gets PATH from .profile)
-  const innerCommand = `${cdCommand} && af start --port ${localPort} --no-browser`;
+  const innerCommand = `${cdCommand} && af dash start --port ${localPort} --no-browser`;
   const remoteCommand = `bash -l -c '${innerCommand.replace(/'/g, "'\\''")}'`;
 
   // Check passwordless SSH is configured
@@ -414,9 +414,9 @@ done
   const bindHost = options.allowInsecureRemote ? '0.0.0.0' : undefined;
 
   if (options.allowInsecureRemote) {
-    logger.warn('⚠️  INSECURE MODE: Binding to 0.0.0.0 - accessible from any network!');
-    logger.warn('   No authentication - anyone on your network can access the terminal.');
-    logger.warn('   DEPRECATED: Use `af start --remote user@host` for secure remote access instead.');
+    logger.warn('   Running remotely with 0.0.0.0 is INSECURE. Anyone can access your dashboard.');
+    logger.warn('   DEPRECATED: Use `af dash start --remote user@host` for secure remote access instead.');
+    logger.warn('   This option will be removed in a future version.\n');
   }
 
   const ttydProcess = spawnTtyd({
@@ -529,6 +529,7 @@ async function startDashboard(projectRoot: string, port: number, _architectPort:
 
   const serverProcess = spawnDetached(command, args, {
     cwd: projectRoot,
+    env: process.env,
   });
 
   if (!serverProcess.pid) {

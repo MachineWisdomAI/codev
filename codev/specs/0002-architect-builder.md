@@ -3,6 +3,7 @@
 **Spec ID**: 0002
 **Title**: Architect-Builder Pattern for Parallel AI Development
 **Status**: Draft
+**Protocol**: TICK
 **Author**: Claude (with human guidance)
 **Date**: 2025-12-02
 
@@ -523,3 +524,144 @@ Power users prefer direct terminal access without browser overhead. Currently, a
 - Added Phase 8: Direct CLI Access implementation
 
 **Review**: See `reviews/0002-architect-builder-tick-001.md`
+
+---
+
+### TICK-002: Protocol-Agnostic Spawn System (2026-01-27)
+
+**Summary**: Refactor `af spawn` to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic.
+
+**Problem Addressed**:
+Currently, specific protocols are deeply baked into `af spawn`:
+- `spawnBugfix()` hardcodes BUGFIX protocol path and instructions
+- `spawnSpec()` defaults to SPIDER with protocol-specific prompts
+- Adding a new protocol requires modifying spawn.ts
+
+This violates the open-closed principle and makes the system harder to extend.
+
+**Proposed Design**:
+
+Separate three orthogonal concerns:
+
+1. **Input Type** (what the builder starts from):
+   - `--project/-p`: Start from a spec file
+   - `--issue/-i`: Start from a GitHub issue
+   - `--task`: Start from ad-hoc text
+   - `--protocol`: Start from protocol name alone
+   - `--worktree`: Interactive (no input)
+
+2. **Mode** (who orchestrates):
+   - `strict`: Porch drives the protocol (default for `--project`)
+   - `soft`: AI reads and follows protocol.md
+
+3. **Protocol** (what workflow to follow):
+   - Explicit via `--protocol <name>`
+   - From spec metadata if input is spec
+   - Default based on input type (spider for specs, bugfix for issues)
+
+**Key Changes**:
+
+1. **Add `--protocol` as universal flag** that works with any input type:
+   ```bash
+   af spawn -p 0001 --protocol tick     # Spec with TICK protocol
+   af spawn -i 42 --protocol spider     # Issue with SPIDER protocol (unusual)
+   ```
+
+2. **Protocol-defined prompts**: Each protocol provides `protocols/{name}/builder-prompt.md` template with placeholders:
+   ```markdown
+   # {{PROTOCOL_NAME}} Builder
+
+   You are implementing {{INPUT_DESCRIPTION}}.
+
+   ## Protocol
+   Follow: codev/protocols/{{protocol}}/protocol.md
+
+   {{#if spec}}## Spec: {{spec_path}}{{/if}}
+   {{#if issue}}## Issue #{{issue.number}}: {{issue.title}}{{/if}}
+   ```
+
+3. **Protocol-defined input requirements** in protocol.json:
+   ```json
+   {
+     "name": "bugfix",
+     "input": {
+       "type": "github-issue",
+       "required": false,
+       "default_for": ["--issue"]
+     },
+     "hooks": {
+       "pre-spawn": {
+         "collision-check": true,
+         "comment-on-issue": "On it! Working on a fix now."
+       }
+     },
+     "defaults": {
+       "mode": "soft"
+     }
+   }
+   ```
+
+4. **Refactored spawn flow**:
+   ```typescript
+   async function spawn(options) {
+     // 1. Resolve input (fetch issue, find spec, etc.)
+     const input = await resolveInput(options);
+
+     // 2. Determine protocol (explicit > spec metadata > input default)
+     const protocol = resolveProtocol(options, input);
+
+     // 3. Load protocol definition
+     const protocolDef = loadProtocolDefinition(protocol);
+
+     // 4. Run protocol hooks (collision checks, comments, etc.)
+     await runPreSpawnHooks(protocolDef, input, options);
+
+     // 5. Determine mode (explicit > protocol default > global default)
+     const mode = resolveMode(options, protocolDef);
+
+     // 6. Build prompt from protocol template
+     const prompt = buildPrompt(protocolDef, input, mode);
+
+     // 7. Start builder
+     await startBuilder(input, prompt, mode, config);
+   }
+   ```
+
+**Defaults**:
+
+| Input Type | Default Protocol | Default Mode |
+|------------|------------------|--------------|
+| `--project` | spider (or from spec) | strict |
+| `--issue` | bugfix | soft |
+| `--protocol X` | X | soft |
+| `--task` | none | soft |
+
+**Example Commands After Refactor**:
+
+```bash
+# Standard usage (unchanged behavior)
+af spawn -p 0001                    # strict, spider
+af spawn -i 42                      # soft, bugfix
+
+# New flexibility
+af spawn -p 0001 --protocol tick    # strict, tick
+af spawn -i 42 --protocol spider    # soft, spider (escalate bug to full feature)
+af spawn --protocol maintain        # soft, maintain
+af spawn --strict --protocol experiment  # strict, experiment via porch
+```
+
+**Benefits**:
+- New protocols work automatically (just add protocol.json + builder-prompt.md)
+- Clear separation of concerns (input × mode × protocol)
+- Existing commands work unchanged
+- Protocol-specific behaviors defined in data, not code
+
+**Spec Changes**:
+- Updated Architecture section with protocol-agnostic design
+- Added protocol.json schema for input requirements and hooks
+- Updated CLI Interface with `--protocol` flag
+
+**Plan Changes**:
+- Added Phase: Protocol-Agnostic Spawn Refactor
+
+**Review**: See `reviews/0002-architect-builder-tick-002.md`

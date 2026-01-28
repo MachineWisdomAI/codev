@@ -18,7 +18,7 @@ af web keygen
 export CODEV_WEB_KEY="<your-key>"
 
 # Start Tower
-af start
+af tower start
 
 # In another terminal, start tunnel
 cloudflared tunnel --url http://localhost:4100
@@ -47,7 +47,7 @@ echo 'export CODEV_WEB_KEY="your-generated-key"' >> ~/.zshrc
 ### 3. Start Tower
 
 ```bash
-af start
+af tower start
 ```
 
 When `CODEV_WEB_KEY` is set, Tower requires authentication for ALL requests. There is no localhost bypass because tunnel daemons (cloudflared, ngrok) run locally.
@@ -144,8 +144,8 @@ af web keygen
 export CODEV_WEB_KEY="<new-key>"
 
 # Restart Tower
-af stop
-af start
+af tower stop
+af tower start
 
 # Log in again on your devices with the new key
 ```

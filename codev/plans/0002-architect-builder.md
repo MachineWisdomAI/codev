@@ -632,6 +632,125 @@ export async function architect(args: string[]): Promise<void> {
 
 ---
 
+### Phase 9: Protocol-Agnostic Spawn Refactor (TICK-002)
+
+**Goal**: Decouple input types from protocols in `af spawn`, making the system extensible without hardcoding protocol-specific logic.
+
+**Tasks**:
+
+1. **Add `--protocol` universal flag** to cli.ts:
+   ```typescript
+   .option('--protocol <name>', 'Protocol to use (overrides default)')
+   ```
+
+2. **Update protocol.json schema** to include input requirements and hooks:
+   ```json
+   {
+     "name": "bugfix",
+     "version": "1.0.0",
+     "input": {
+       "type": "github-issue",
+       "required": false,
+       "default_for": ["--issue"]
+     },
+     "hooks": {
+       "pre-spawn": {
+         "collision-check": true,
+         "comment-on-issue": "On it! Working on a fix now."
+       }
+     },
+     "defaults": {
+       "mode": "soft"
+     },
+     "phases": [...]
+   }
+   ```
+
+3. **Create protocol prompt templates** at `protocols/{name}/builder-prompt.md`:
+   ```markdown
+   # {{PROTOCOL_NAME}} Builder ({{MODE}} mode)
+
+   You are implementing {{INPUT_DESCRIPTION}}.
+
+   {{#if mode_soft}}
+   ## Mode: SOFT
+   - Follow the protocol document yourself
+   - The architect monitors your work
+   - Run consultations manually when required
+   {{/if}}
+
+   {{#if mode_strict}}
+   ## Mode: STRICT
+   - Porch orchestrates your work
+   - Run: porch run {{project_id}}
+   {{/if}}
+
+   ## Protocol
+   Follow: codev/protocols/{{protocol}}/protocol.md
+
+   {{#if spec}}
+   ## Spec
+   {{spec_path}}
+   {{/if}}
+
+   {{#if issue}}
+   ## Issue #{{issue.number}}
+   **Title**: {{issue.title}}
+   **Description**: {{issue.body}}
+   {{/if}}
+
+   {{#if task}}
+   ## Task
+   {{task_text}}
+   {{/if}}
+   ```
+
+4. **Refactor spawn.ts** into modular components:
+   ```
+   spawn.ts
+   ├── resolveInput(options) → InputResult
+   ├── resolveProtocol(options, input) → string
+   ├── loadProtocolDefinition(name) → ProtocolDef
+   ├── runPreSpawnHooks(protocolDef, input, options) → void
+   ├── resolveMode(options, protocolDef) → 'strict' | 'soft'
+   ├── buildPrompt(protocolDef, input, mode) → string
+   └── startBuilder(input, prompt, mode, config) → void
+   ```
+
+5. **Move input-specific logic to input handlers**:
+   - `resolveSpecInput()` - finds spec file, detects plan
+   - `resolveIssueInput()` - fetches GitHub issue, runs collision checks
+   - `resolveTaskInput()` - takes task text as-is
+   - `resolveProtocolInput()` - protocol name only
+
+6. **Update existing protocols** with protocol.json additions:
+   - `spider/protocol.json` - add input/hooks/defaults
+   - `bugfix/protocol.json` - add input/hooks/defaults (move collision logic here)
+   - `tick/protocol.json` - add input/hooks/defaults
+   - `maintain/protocol.json` - add input/hooks/defaults
+
+7. **Create default builder-prompt.md templates** for each protocol
+
+**Files to modify**:
+- `packages/codev/src/agent-farm/cli.ts` - add --protocol flag
+- `packages/codev/src/agent-farm/commands/spawn.ts` - refactor to modular design
+- `packages/codev/src/agent-farm/types.ts` - add ProtocolDefinition types
+- `codev-skeleton/protocols/*/protocol.json` - add input/hooks/defaults
+- `codev-skeleton/protocols/*/builder-prompt.md` - create templates
+
+**Acceptance criteria**:
+- [ ] `af spawn -p 0001 --protocol tick` uses TICK instead of SPIDER
+- [ ] `af spawn -i 42 --protocol spider` uses SPIDER instead of BUGFIX
+- [ ] `af spawn --protocol maintain` works with soft mode
+- [ ] Protocol-specific hooks (collision check, issue comment) are data-driven
+- [ ] New protocols work by adding protocol.json + builder-prompt.md (no code changes)
+- [ ] Existing commands work unchanged (backwards compatible)
+- [ ] Prompt templates render correctly with all input types
+
+**Estimated Effort**: 4-6 hours
+
+---
+
 ## Amendment History
 
 ### TICK-001: Direct CLI Access (2025-12-27)
@@ -641,3 +760,13 @@ export async function architect(args: string[]): Promise<void> {
 - New command: `af architect` for terminal-first architect access
 
 **Review**: See `reviews/0002-architect-builder-tick-001.md`
+
+### TICK-002: Protocol-Agnostic Spawn System (2026-01-27)
+
+**Changes**:
+- Added Phase 9: Protocol-Agnostic Spawn Refactor
+- New flag: `--protocol` to override default protocol for any input type
+- Protocol definitions extended with input requirements, hooks, and defaults
+- Protocol-specific prompt templates
+
+**Review**: See `reviews/0002-architect-builder-tick-002.md`

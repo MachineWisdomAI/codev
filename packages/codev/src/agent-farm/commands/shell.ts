@@ -1,5 +1,5 @@
 /**
- * Util command - spawns a utility terminal
+ * Shell command - spawns a utility shell terminal
  *
  * When the dashboard is running, this creates a tab in the dashboard.
  * When the dashboard is not running, it spawns the terminal directly.
@@ -53,9 +53,9 @@ async function tryDashboardApi(name?: string): Promise<boolean> {
 }
 
 /**
- * Spawn a utility terminal
+ * Spawn a utility shell terminal
  */
-export async function util(options: UtilOptions = {}): Promise<void> {
+export async function shell(options: UtilOptions = {}): Promise<void> {
   const config = getConfig();
 
   // Try to use dashboard API first (if dashboard is running)

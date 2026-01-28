@@ -210,7 +210,7 @@ af --help
 codev doctor
 
 # Test starting the dashboard
-af start
+af dash start
 ```
 
 ---
@@ -223,7 +223,7 @@ af start
 - [ ] `af --help` shows available commands
 - [ ] `consult --help` shows available commands
 - [ ] `codev doctor` passes all checks (AI CLIs show "working")
-- [ ] Dashboard starts with `af start`
+- [ ] Dashboard starts with `af dash start`
 - [ ] Your specs in `codev/specs/` are intact
 - [ ] Your plans in `codev/plans/` are intact
 - [ ] Your reviews in `codev/reviews/` are intact
@@ -259,7 +259,7 @@ Please:
    - Sort active projects to the top
 8. Create codev/config.json with shell command configuration
 9. Run codev doctor to verify all dependencies work
-10. Test af start/stop
+10. Test af dash start/stop
 
 Do NOT blindly overwrite - check for local modifications first.
 Preserve all existing project entries when updating projectlist.md.

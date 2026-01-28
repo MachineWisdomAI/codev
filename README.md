@@ -36,7 +36,7 @@ codev init
 codev doctor
 
 # 4. Start the dashboard (optional)
-af start
+af dash start
 ```
 
 Then tell your AI agent: *"I want to build X using the SPIDER protocol"*
@@ -344,7 +344,7 @@ For parallel AI-assisted development, Codev includes the Architect-Builder patte
 
 ```bash
 # Start the architect dashboard
-af start
+af dash start
 
 # Spawn a builder for a spec
 af spawn --project 0003
@@ -353,7 +353,7 @@ af spawn --project 0003
 af status
 
 # Stop everything
-af stop
+af dash stop
 ```
 
 The `af` command is globally available after installing `@cluesmith/codev`.
@@ -364,7 +364,7 @@ Access Agent Farm from another device (iPad, laptop, etc.) via SSH tunnel:
 
 ```bash
 # Step 1: Start Agent Farm
-af start
+af dash start
 
 # Step 2: Get SSH command (shows your local IPs)
 af tunnel
@@ -382,7 +382,7 @@ The dashboard and all terminals work identically via the tunnel. SSH handles aut
 **Legacy mode** (not recommended):
 ```bash
 # DEPRECATED: Exposes dashboard without authentication
-af start --allow-insecure-remote
+af dash start --allow-insecure-remote
 ```
 
 See [CLI Reference](codev/resources/commands/agent-farm.md#remote-access) for full details.

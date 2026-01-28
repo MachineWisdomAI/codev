@@ -12,7 +12,7 @@ import net from 'node:net';
 import httpProxy from 'http-proxy';
 import { spawn, execSync, exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const execAsync = promisify(exec);
@@ -1119,6 +1119,119 @@ function isRequestAllowed(req: http.IncomingMessage): boolean {
   return isRequestAllowedBase(req);
 }
 
+/**
+ * Timing-safe token comparison to prevent timing attacks
+ */
+function isValidToken(provided: string | undefined, expected: string): boolean {
+  if (!provided) return false;
+
+  // Ensure both strings are same length for timing-safe comparison
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+
+  if (providedBuf.length !== expectedBuf.length) {
+    // Still do a comparison to maintain constant time
+    timingSafeEqual(expectedBuf, expectedBuf);
+    return false;
+  }
+
+  return timingSafeEqual(providedBuf, expectedBuf);
+}
+
+/**
+ * Generate HTML for login page
+ */
+function getLoginPageHtml(): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Dashboard Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui; background: #1a1a2e; color: #eee;
+           display: flex; justify-content: center; align-items: center;
+           min-height: 100vh; margin: 0; }
+    .login { background: #16213e; padding: 2rem; border-radius: 8px;
+             max-width: 400px; width: 90%; }
+    h1 { margin-top: 0; }
+    input { width: 100%; padding: 0.75rem; margin: 0.5rem 0;
+            border: 1px solid #444; border-radius: 4px;
+            background: #0f0f23; color: #eee; font-size: 1rem;
+            box-sizing: border-box; }
+    button { width: 100%; padding: 0.75rem; margin-top: 1rem;
+             background: #4a7c59; color: white; border: none;
+             border-radius: 4px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #5a9c69; }
+    .error { color: #ff6b6b; margin-top: 0.5rem; display: none; }
+  </style>
+</head>
+<body>
+  <div class="login">
+    <h1>Agent Farm Login</h1>
+    <p>Enter your API key to access the dashboard.</p>
+    <input type="password" id="key" placeholder="API Key" autofocus>
+    <div class="error" id="error">Invalid API key</div>
+    <button onclick="login()">Login</button>
+  </div>
+  <script>
+    // Check for key in URL (from QR code scan) or localStorage
+    (async function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyFromUrl = urlParams.get('key');
+      const keyFromStorage = localStorage.getItem('codev_web_key');
+      const key = keyFromUrl || keyFromStorage;
+
+      if (key) {
+        if (keyFromUrl) {
+          localStorage.setItem('codev_web_key', keyFromUrl);
+        }
+        await verifyAndLoadDashboard(key);
+      }
+    })();
+
+    async function verifyAndLoadDashboard(key) {
+      try {
+        // Fetch the actual dashboard with auth header
+        const res = await fetch(window.location.pathname, {
+          headers: {
+            'Authorization': 'Bearer ' + key,
+            'Accept': 'text/html'
+          }
+        });
+        if (res.ok) {
+          // Replace entire page with dashboard
+          const html = await res.text();
+          document.open();
+          document.write(html);
+          document.close();
+          // Clean URL without reload
+          history.replaceState({}, '', window.location.pathname);
+        } else {
+          // Key invalid
+          localStorage.removeItem('codev_web_key');
+          document.getElementById('error').style.display = 'block';
+          document.getElementById('error').textContent = 'Invalid API key';
+        }
+      } catch (e) {
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').textContent = 'Connection error';
+      }
+    }
+
+    async function login() {
+      const key = document.getElementById('key').value;
+      if (!key) return;
+      localStorage.setItem('codev_web_key', key);
+      await verifyAndLoadDashboard(key);
+    }
+    document.getElementById('key').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') login();
+    });
+  </script>
+</body>
+</html>`;
+}
+
 // Create server
 const server = http.createServer(async (req, res) => {
   // Security: Validate Host and Origin headers
@@ -1128,16 +1241,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // CRITICAL: When CODEV_WEB_KEY is set, ALL requests require auth
+  // NO localhost bypass - tunnel daemons (cloudflared) run locally and proxy
+  // to localhost, so checking remoteAddress would incorrectly trust remote traffic
+  const webKey = process.env.CODEV_WEB_KEY;
+
+  if (webKey) {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace('Bearer ', '');
+
+    if (!isValidToken(token, webKey)) {
+      // Return login page for HTML requests, 401 for API
+      if (req.headers.accept?.includes('text/html')) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(getLoginPageHtml());
+        return;
+      }
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+  }
+  // When CODEV_WEB_KEY is NOT set: no auth required (local dev mode only)
+
   // CORS headers
   const origin = req.headers.origin;
-  if (insecureRemoteMode) {
-    // Allow any origin in insecure remote mode
+  if (insecureRemoteMode || webKey) {
+    // Allow any origin in insecure remote mode or when using auth (tunnel access)
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
   } else if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   // Prevent caching of API responses
   res.setHeader('Cache-Control', 'no-store');
@@ -2163,11 +2299,33 @@ const server = http.createServer(async (req, res) => {
 // WebSocket upgrade handler for terminal proxy (Spec 0062)
 // ttyd uses WebSocket for bidirectional terminal communication
 server.on('upgrade', (req, socket, head) => {
-  // Security check
+  // Security check for non-auth mode
   const host = req.headers.host;
-  if (!insecureRemoteMode && host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
+  if (!insecureRemoteMode && !process.env.CODEV_WEB_KEY && host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
     socket.destroy();
     return;
+  }
+
+  // CRITICAL: When CODEV_WEB_KEY is set, ALL WebSocket upgrades require auth
+  // NO localhost bypass - tunnel daemons run locally, so remoteAddress is unreliable
+  const webKey = process.env.CODEV_WEB_KEY;
+
+  if (webKey && !insecureRemoteMode) {
+    // Check Sec-WebSocket-Protocol for auth token
+    // Format: "auth-<token>, tty" or just "tty"
+    const protocols = req.headers['sec-websocket-protocol']?.split(',').map((p) => p.trim()) || [];
+    const authProtocol = protocols.find((p) => p.startsWith('auth-'));
+    const token = authProtocol?.substring(5); // Remove 'auth-' prefix
+
+    if (!isValidToken(token, webKey)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    // Remove auth protocol from the list before forwarding
+    const cleanProtocols = protocols.filter((p) => !p.startsWith('auth-'));
+    req.headers['sec-websocket-protocol'] = cleanProtocols.join(', ') || 'tty';
   }
 
   const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);

@@ -9,22 +9,29 @@ import { describe, it, expect } from 'vitest';
 import type { SpawnOptions, BuilderType } from '../types.js';
 
 // Re-implement the validation logic for testing (avoids importing with side effects)
+// Updated to match the new protocol-agnostic approach:
+// - --protocol serves dual purpose: input mode (alone) OR override (with other inputs)
+// - --use-protocol is backwards-compatible alias for --protocol override
+// - --strict and --soft control orchestration mode
 function validateSpawnOptions(options: SpawnOptions): string | null {
-  const modes = [
+  // Count input modes (excluding --protocol which can be used as override)
+  const inputModes = [
     options.project,
     options.task,
-    options.protocol,
     options.shell,
     options.worktree,
     options.issue,
   ].filter(Boolean);
 
-  if (modes.length === 0) {
+  // --protocol alone is a valid input mode
+  const protocolAlone = options.protocol && inputModes.length === 0;
+
+  if (inputModes.length === 0 && !protocolAlone) {
     return 'Must specify one of: --project (-p), --issue (-i), --task, --protocol, --shell, --worktree';
   }
 
-  if (modes.length > 1) {
-    return 'Flags --project, --issue, --task, --protocol, --shell, --worktree are mutually exclusive';
+  if (inputModes.length > 1) {
+    return 'Flags --project, --issue, --task, --shell, --worktree are mutually exclusive';
   }
 
   if (options.files && !options.task) {
@@ -35,16 +42,33 @@ function validateSpawnOptions(options: SpawnOptions): string | null {
     return '--no-comment and --force require --issue';
   }
 
+  // --protocol as override cannot be used with --shell or --worktree
+  if (options.protocol && inputModes.length > 0 && (options.shell || options.worktree)) {
+    return '--protocol cannot be used with --shell or --worktree (no protocol applies)';
+  }
+
+  // --use-protocol backwards compatibility
+  if (options.useProtocol && (options.shell || options.worktree)) {
+    return '--use-protocol cannot be used with --shell or --worktree (no protocol applies)';
+  }
+
+  // --strict and --soft are mutually exclusive
+  if (options.strict && options.soft) {
+    return '--strict and --soft are mutually exclusive';
+  }
+
   return null; // Valid
 }
 
 function getSpawnMode(options: SpawnOptions): BuilderType {
+  // Primary input modes take precedence over --protocol as override
   if (options.project) return 'spec';
   if (options.issue) return 'bugfix';
   if (options.task) return 'task';
-  if (options.protocol) return 'protocol';
   if (options.shell) return 'shell';
   if (options.worktree) return 'worktree';
+  // --protocol alone is the protocol input mode
+  if (options.protocol) return 'protocol';
   throw new Error('No mode specified');
 }
 
@@ -145,16 +169,16 @@ describe('Spawn Command', () => {
         expect(error).toContain('mutually exclusive');
       });
 
-      it('should reject --task + --protocol', () => {
-        const options: SpawnOptions = { task: 'Fix bug', protocol: 'cleanup' };
-        const error = validateSpawnOptions(options);
-        expect(error).toContain('mutually exclusive');
-      });
-
-      it('should reject --protocol + --shell', () => {
+      it('should reject --protocol + --shell (protocol as override)', () => {
         const options: SpawnOptions = { protocol: 'cleanup', shell: true };
         const error = validateSpawnOptions(options);
-        expect(error).toContain('mutually exclusive');
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
+      });
+
+      it('should reject --protocol + --worktree (protocol as override)', () => {
+        const options: SpawnOptions = { protocol: 'cleanup', worktree: true };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
       });
 
       it('should reject --shell + --worktree', () => {
@@ -275,6 +299,47 @@ describe('Spawn Command', () => {
     });
   });
 
+  describe('bugfix mode', () => {
+    it('should return "bugfix" for --issue', () => {
+      expect(getSpawnMode({ issue: 42 })).toBe('bugfix');
+    });
+
+    it('slugify converts issue title to URL-safe slug', () => {
+      // Slugify truncates to 30 chars, so result ends with trailing dash due to truncation
+      const result = slugify('Login fails when username has spaces');
+      expect(result.length).toBeLessThanOrEqual(30);
+      expect(result).toMatch(/^login-fails-when-username-has/);
+    });
+
+    it('slugify removes special characters', () => {
+      const result = slugify("Can't authenticate with OAuth2.0!");
+      expect(result.length).toBeLessThanOrEqual(30);
+      expect(result).toMatch(/^can-t-authenticate-with-oauth2/);
+    });
+
+    it('slugify handles empty string', () => {
+      expect(slugify('')).toBe('');
+    });
+
+    it('slugify truncates to 30 characters', () => {
+      const longTitle = 'This is a very long issue title that exceeds thirty characters';
+      expect(slugify(longTitle).length).toBeLessThanOrEqual(30);
+    });
+
+    it('bugfix IDs match pattern bugfix-{issueNumber}', () => {
+      const issueNumber = 42;
+      const builderId = `bugfix-${issueNumber}`;
+      expect(builderId).toBe('bugfix-42');
+    });
+
+    it('bugfix branches include issue number and slug', () => {
+      const issueNumber = 42;
+      const slug = slugify('Login fails with special chars');
+      const branchName = `builder/bugfix-${issueNumber}-${slug}`;
+      expect(branchName).toBe('builder/bugfix-42-login-fails-with-special-chars');
+    });
+  });
+
   describe('ID format patterns', () => {
     it('task IDs should match pattern task-{rand4}', () => {
       const shortId = generateShortId();
@@ -353,4 +418,270 @@ describe('Spawn Command', () => {
       expect(sessionName).toMatch(/^builder-worktree-[a-zA-Z0-9_-]{4}$/);
     });
   });
+
+  describe('protocol override (--use-protocol)', () => {
+    describe('valid combinations', () => {
+      it('should accept --project with --use-protocol', () => {
+        const options: SpawnOptions = { project: '0009', useProtocol: 'tick' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --use-protocol', () => {
+        const options: SpawnOptions = { issue: 42, useProtocol: 'spider' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --task with --use-protocol', () => {
+        const options: SpawnOptions = { task: 'Fix bug', useProtocol: 'experiment' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --protocol without --use-protocol (protocol-only mode)', () => {
+        const options: SpawnOptions = { protocol: 'maintain' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+    });
+
+    describe('invalid combinations', () => {
+      it('should reject --shell with --use-protocol', () => {
+        const options: SpawnOptions = { shell: true, useProtocol: 'spider' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
+      });
+
+      it('should reject --worktree with --use-protocol', () => {
+        const options: SpawnOptions = { worktree: true, useProtocol: 'spider' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--use-protocol cannot be used with --shell or --worktree');
+      });
+    });
+  });
+
+  describe('soft mode (--soft)', () => {
+    describe('valid combinations', () => {
+      it('should accept --project with --soft', () => {
+        const options: SpawnOptions = { project: '0009', soft: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --soft', () => {
+        const options: SpawnOptions = { issue: 42, soft: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --task with --soft', () => {
+        const options: SpawnOptions = { task: 'Fix bug', soft: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --project with both --soft and --use-protocol', () => {
+        const options: SpawnOptions = { project: '0009', soft: true, useProtocol: 'tick' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+    });
+  });
+
+  describe('strict mode (--strict)', () => {
+    describe('valid combinations', () => {
+      it('should accept --project with --strict', () => {
+        const options: SpawnOptions = { project: '0009', strict: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --strict', () => {
+        const options: SpawnOptions = { issue: 42, strict: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --task with --strict', () => {
+        const options: SpawnOptions = { task: 'Fix bug', strict: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --project with both --strict and --protocol override', () => {
+        const options: SpawnOptions = { project: '0009', strict: true, protocol: 'tick' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+    });
+
+    describe('invalid combinations', () => {
+      it('should reject --strict with --soft', () => {
+        const options: SpawnOptions = { project: '0009', strict: true, soft: true };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--strict and --soft are mutually exclusive');
+      });
+    });
+  });
+
+  describe('--protocol as universal override', () => {
+    describe('valid combinations', () => {
+      it('should accept --project with --protocol override', () => {
+        const options: SpawnOptions = { project: '0009', protocol: 'tick' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --issue with --protocol override', () => {
+        const options: SpawnOptions = { issue: 42, protocol: 'spider' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --task with --protocol override', () => {
+        const options: SpawnOptions = { task: 'Fix bug', protocol: 'experiment' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --protocol alone as input mode', () => {
+        const options: SpawnOptions = { protocol: 'maintain' };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+
+      it('should accept --project with --protocol and --strict', () => {
+        const options: SpawnOptions = { project: '0009', protocol: 'tick', strict: true };
+        expect(validateSpawnOptions(options)).toBeNull();
+      });
+    });
+
+    describe('invalid combinations', () => {
+      it('should reject --shell with --protocol override', () => {
+        const options: SpawnOptions = { shell: true, protocol: 'spider' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
+      });
+
+      it('should reject --worktree with --protocol override', () => {
+        const options: SpawnOptions = { worktree: true, protocol: 'spider' };
+        const error = validateSpawnOptions(options);
+        expect(error).toContain('--protocol cannot be used with --shell or --worktree');
+      });
+    });
+
+    describe('mode detection with --protocol override', () => {
+      it('--project + --protocol still returns spec mode', () => {
+        expect(getSpawnMode({ project: '0009', protocol: 'tick' })).toBe('spec');
+      });
+
+      it('--issue + --protocol still returns bugfix mode', () => {
+        expect(getSpawnMode({ issue: 42, protocol: 'spider' })).toBe('bugfix');
+      });
+
+      it('--task + --protocol still returns task mode', () => {
+        expect(getSpawnMode({ task: 'Fix bug', protocol: 'experiment' })).toBe('task');
+      });
+
+      it('--protocol alone returns protocol mode', () => {
+        expect(getSpawnMode({ protocol: 'maintain' })).toBe('protocol');
+      });
+    });
+  });
+
+  describe('mode resolution', () => {
+    // Re-implement resolveMode for testing
+    function resolveMode(
+      options: SpawnOptions,
+      protocol: { defaults?: { mode?: 'strict' | 'soft' } } | null,
+    ): 'strict' | 'soft' {
+      // 1. Explicit flags always win
+      if (options.strict && options.soft) {
+        throw new Error('--strict and --soft are mutually exclusive');
+      }
+      if (options.strict) {
+        return 'strict';
+      }
+      if (options.soft) {
+        return 'soft';
+      }
+
+      // 2. Protocol defaults from protocol.json
+      if (protocol?.defaults?.mode) {
+        return protocol.defaults.mode;
+      }
+
+      // 3. Input type defaults: only spec mode defaults to strict
+      if (options.project) {
+        return 'strict';
+      }
+
+      // All other modes default to soft
+      return 'soft';
+    }
+
+    describe('explicit --strict flag', () => {
+      it('--strict overrides issue default to soft', () => {
+        const options: SpawnOptions = { issue: 42, strict: true };
+        expect(resolveMode(options, null)).toBe('strict');
+      });
+
+      it('--strict overrides protocol soft default', () => {
+        const options: SpawnOptions = { issue: 42, strict: true };
+        const protocol = { defaults: { mode: 'soft' as const } };
+        expect(resolveMode(options, protocol)).toBe('strict');
+      });
+
+      it('--strict + --soft throws error', () => {
+        const options: SpawnOptions = { project: '0009', strict: true, soft: true };
+        expect(() => resolveMode(options, null)).toThrow('--strict and --soft are mutually exclusive');
+      });
+    });
+
+    describe('explicit --soft flag', () => {
+      it('--soft overrides spec default to strict', () => {
+        const options: SpawnOptions = { project: '0009', soft: true };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+
+      it('--soft overrides protocol defaults', () => {
+        const options: SpawnOptions = { project: '0009', soft: true };
+        const protocol = { defaults: { mode: 'strict' as const } };
+        expect(resolveMode(options, protocol)).toBe('soft');
+      });
+    });
+
+    describe('protocol defaults', () => {
+      it('uses protocol default mode when no --soft flag', () => {
+        const options: SpawnOptions = { issue: 42 };
+        const protocol = { defaults: { mode: 'strict' as const } };
+        expect(resolveMode(options, protocol)).toBe('strict');
+      });
+
+      it('protocol soft default overrides input type default', () => {
+        const options: SpawnOptions = { project: '0009' };
+        const protocol = { defaults: { mode: 'soft' as const } };
+        expect(resolveMode(options, protocol)).toBe('soft');
+      });
+    });
+
+    describe('input type defaults', () => {
+      it('spec mode defaults to strict', () => {
+        const options: SpawnOptions = { project: '0009' };
+        expect(resolveMode(options, null)).toBe('strict');
+      });
+
+      it('issue mode defaults to soft', () => {
+        const options: SpawnOptions = { issue: 42 };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+
+      it('task mode defaults to soft', () => {
+        const options: SpawnOptions = { task: 'Fix bug' };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+
+      it('protocol mode defaults to soft', () => {
+        const options: SpawnOptions = { protocol: 'maintain' };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+
+      it('shell mode defaults to soft', () => {
+        const options: SpawnOptions = { shell: true };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+
+      it('worktree mode defaults to soft', () => {
+        const options: SpawnOptions = { worktree: true };
+        expect(resolveMode(options, null)).toBe('soft');
+      });
+    });
+  });
+
 });
+

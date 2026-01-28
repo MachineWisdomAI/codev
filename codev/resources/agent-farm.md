@@ -17,9 +17,9 @@ No aliases needed - `af`, `consult`, and `codev` work from any directory.
 ### Starting and Stopping
 
 ```bash
-af start                    # Start architect dashboard
-af start --port 4300        # Start on specific port
-af stop                     # Stop all agent-farm processes
+af dash start               # Start architect dashboard
+af dash start --port 4300   # Start on specific port
+af dash stop                # Stop all agent-farm processes
 af status                   # Show status of all agents
 ```
 

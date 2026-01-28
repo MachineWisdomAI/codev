@@ -839,8 +839,8 @@
       Agent Farm Control Tower
     </h1>
     <div class="header-actions">
+      <button class="btn" id="share-btn" onclick="showShareDialog()" style="display: none;" title="Share via QR code">📱 Share</button>
       <button class="btn" onclick="refresh()">Refresh</button>
-      <button class="btn" id="logout-btn" onclick="logout()" style="display: none;">Logout</button>
     </div>
   </header>
 
@@ -893,6 +893,23 @@
         </div>
       </div>
     </div>
+
+    <!-- Share Dialog (QR Code) -->
+    <div class="dialog-overlay" id="share-dialog" style="display: none;">
+      <div class="dialog-box" style="text-align: center;">
+        <h3>📱 Share via QR Code</h3>
+        <div id="share-content">
+          <div class="loading">
+            <div class="spinner"></div>
+            <p>Starting tunnel...</p>
+          </div>
+        </div>
+        <div class="dialog-actions" style="margin-top: 16px;">
+          <button class="btn" onclick="hideShareDialog()">Close</button>
+          <button class="btn" id="stop-tunnel-btn" onclick="stopTunnelAndClose()" style="display: none;">Stop Tunnel</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div class="toast-container" id="toast-container"></div>
@@ -930,21 +947,15 @@
 
     // Initialize
     async function init() {
-      // Check for key in URL (from QR code scan)
-      const urlParams = new URLSearchParams(window.location.search);
-      const keyFromUrl = urlParams.get('key');
-      if (keyFromUrl) {
-        // Store the key and clean the URL
-        localStorage.setItem('codev_web_key', keyFromUrl);
-        // Remove key from URL for security (don't leave it in history/bookmarks)
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
-      }
-
-      // Show logout button if we have a key
-      const key = localStorage.getItem('codev_web_key');
-      if (key) {
-        document.getElementById('logout-btn').style.display = 'block';
+      // Check if cloudflared is available and show share button
+      try {
+        const tunnelRes = await fetch('/api/tunnel/status');
+        const tunnelStatus = await tunnelRes.json();
+        if (tunnelStatus.available) {
+          document.getElementById('share-btn').style.display = 'inline-block';
+        }
+      } catch (e) {
+        // Tunnel not available, button stays hidden
       }
 
       // Request notification permission
@@ -1076,7 +1087,7 @@
           <div class="empty-state">
             <div class="icon">📭</div>
             <h2>No running instances</h2>
-            <p>Start a new instance below or run <code>af start</code> in a project directory.</p>
+            <p>Start a new instance below or run <code>af dash start</code> in a project directory.</p>
           </div>
         `;
       } else {
@@ -1523,6 +1534,94 @@
       setTimeout(() => {
         toast.remove();
       }, 4000);
+    }
+
+    // Share dialog functions (QR code for mobile access)
+    async function showShareDialog() {
+      const dialog = document.getElementById('share-dialog');
+      const content = document.getElementById('share-content');
+      const stopBtn = document.getElementById('stop-tunnel-btn');
+
+      dialog.style.display = 'flex';
+      content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Starting tunnel...</p></div>';
+      stopBtn.style.display = 'none';
+
+      try {
+        // Check if tunnel is already running
+        const statusRes = await fetch('/api/tunnel/status');
+        const status = await statusRes.json();
+
+        if (status.running && status.url) {
+          showQRCode(status.url);
+          return;
+        }
+
+        // Start tunnel
+        const res = await fetch('/api/tunnel/start', { method: 'POST' });
+        const result = await res.json();
+
+        if (result.success && result.url) {
+          showQRCode(result.url);
+        } else {
+          content.innerHTML = `<p style="color: var(--danger);">Failed to start tunnel: ${result.error || 'Unknown error'}</p>`;
+        }
+      } catch (e) {
+        content.innerHTML = `<p style="color: var(--danger);">Error: ${e.message}</p>`;
+      }
+    }
+
+    function showQRCode(tunnelUrl) {
+      const content = document.getElementById('share-content');
+      const stopBtn = document.getElementById('stop-tunnel-btn');
+
+      // Generate QR code using qrcode.js (loaded from CDN)
+      content.innerHTML = `
+        <p style="margin-bottom: 16px;">Scan to access from mobile:</p>
+        <div id="qrcode" style="display: inline-block; padding: 16px; background: white; border-radius: 8px;"></div>
+        <p style="margin-top: 16px; font-size: 12px; color: var(--muted);">
+          <a href="${tunnelUrl}" target="_blank" style="color: var(--primary);">${tunnelUrl}</a>
+        </p>
+      `;
+
+      // Load QRCode library and generate
+      if (!window.QRCode) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+        script.onload = () => generateQR(tunnelUrl);
+        document.head.appendChild(script);
+      } else {
+        generateQR(tunnelUrl);
+      }
+
+      stopBtn.style.display = 'inline-block';
+    }
+
+    function generateQR(url) {
+      const container = document.getElementById('qrcode');
+      if (container && window.QRCode) {
+        container.innerHTML = '';
+        new QRCode(container, {
+          text: url,
+          width: 200,
+          height: 200,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+        });
+      }
+    }
+
+    function hideShareDialog() {
+      document.getElementById('share-dialog').style.display = 'none';
+    }
+
+    async function stopTunnelAndClose() {
+      try {
+        await fetch('/api/tunnel/stop', { method: 'POST' });
+      } catch (e) {
+        // Ignore
+      }
+      hideShareDialog();
+      showToast('Tunnel stopped', 'success');
     }
 
     // Create project dialog functions

@@ -9,7 +9,6 @@ import { doctor } from './commands/doctor.js';
 import { init } from './commands/init.js';
 import { adopt } from './commands/adopt.js';
 import { update } from './commands/update.js';
-import { tower } from './commands/tower.js';
 import { consult } from './commands/consult/index.js';
 import { cli as porchCli } from './commands/porch/index.js';
 import { importCommand } from './commands/import.js';
@@ -75,45 +74,6 @@ program
   .action(async (options) => {
     try {
       await update({ dryRun: options.dryRun, force: options.force });
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  });
-
-// Tower command with subcommands
-const towerCmd = program
-  .command('tower')
-  .description('Cross-project dashboard showing all agent-farm instances');
-
-towerCmd
-  .command('start')
-  .description('Start the tower dashboard')
-  .option('-p, --port <port>', 'Port to run on (default: 4100)')
-  .option('-w, --web', 'Enable web access mode (requires CODEV_WEB_KEY)')
-  .action(async (options) => {
-    try {
-      await tower({
-        port: options.port ? parseInt(options.port, 10) : undefined,
-        stop: false,
-        web: options.web || false,
-      });
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  });
-
-towerCmd
-  .command('stop')
-  .description('Stop the tower dashboard')
-  .option('-p, --port <port>', 'Port to stop (default: 4100)')
-  .action(async (options) => {
-    try {
-      await tower({
-        port: options.port ? parseInt(options.port, 10) : undefined,
-        stop: true,
-      });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);

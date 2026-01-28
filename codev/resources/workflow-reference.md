@@ -77,7 +77,7 @@ AI agents must stop and wait for human action at these gates.
 
 ```bash
 # Start the dashboard
-af start
+af dash start
 
 # Spawn a builder for a project
 af spawn -p 0044
@@ -95,7 +95,7 @@ af open codev/specs/0044-name.md
 af cleanup -p 0044
 
 # Stop everything
-af stop
+af dash stop
 ```
 
 ### Builder Commands

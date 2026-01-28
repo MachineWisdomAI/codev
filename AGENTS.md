@@ -376,16 +376,19 @@ The Architect-Builder pattern enables parallel AI-assisted development by separa
 
 ```bash
 # Start the architect dashboard
-af start
+af dash start
 
-# Spawn a builder for a spec
-af spawn --project 0003
+# Spawn a builder for a spec (strict mode - porch orchestrates, default)
+af spawn -p 0003
+
+# Spawn in soft mode (AI follows protocol, you verify compliance)
+af spawn --soft -p 0003
 
 # Check status of all builders
 af status
 
 # Open a utility shell
-af util
+af shell
 
 # Open files in annotation viewer
 af open src/auth/login.ts
@@ -397,7 +400,7 @@ af cleanup --project 0003
 af cleanup --project 0003 --force
 
 # Stop all agent-farm processes
-af stop
+af dash stop
 
 # Manage port allocations (for multi-project support)
 af ports list
@@ -410,13 +413,13 @@ Start Agent Farm on a remote machine and access it from your local workstation:
 
 ```bash
 # On your local machine - one command does everything:
-af start --remote user@remote-host
+af dash start --remote user@remote-host
 
 # Or with explicit project path:
-af start --remote user@remote-host:/path/to/project
+af dash start --remote user@remote-host:/path/to/project
 
 # With custom port:
-af start --remote user@remote-host --port 4300
+af dash start --remote user@remote-host --port 4300
 ```
 
 This single command:
@@ -753,28 +756,36 @@ porch run 0073 --dry-run        # Show what would happen
 porch run 0073 --no-claude      # Skip Claude invocations
 ```
 
-### AF Kickoff (Porch-Driven Builders)
+### Spawning Builders
 
-Use `af kickoff` to spawn a builder with porch orchestration:
+`af spawn -p` uses **strict mode by default** (porch orchestrates autonomously):
 
 ```bash
-# Kickoff a porch-driven builder for a spec
-af kickoff -p 0073
+# Strict mode (default) - porch orchestrates, runs to completion
+af spawn -p 0073
+
+# With project title (if no spec exists yet)
+af spawn -p 0073 -t "feature-name"
 
 # With specific protocol
-af kickoff -p 0073 --protocol spider
+af spawn -p 0073 --use-protocol spider
 
 # Resume existing porch state
-af kickoff -p 0073 --resume
+af spawn -p 0073 --resume
 
 # Without role prompt
-af kickoff -p 0073 --no-role
+af spawn -p 0073 --no-role
 ```
 
 This combines:
 1. Creating a git worktree
 2. Initializing porch state
 3. Starting the builder with porch context
+
+For soft mode (AI follows protocol, you verify compliance), use `--soft`:
+```bash
+af spawn --soft -p 0073  # AI follows protocol, architect verifies
+```
 
 ### Project State
 

@@ -441,7 +441,7 @@ Create `codev/config.json` to customize commands:
 
 Override via CLI:
 ```bash
-af start --architect-cmd "claude --model opus"
+af dash start --architect-cmd "claude --model opus"
 af spawn --project 0003 --builder-cmd "claude"
 ```
 
@@ -449,7 +449,7 @@ af spawn --project 0003 --builder-cmd "claude"
 
 ```bash
 # Start the architect dashboard
-af start
+af dash start
 
 # Spawn a builder for a spec
 af spawn --project 0003
@@ -458,7 +458,7 @@ af spawn --project 0003
 af status
 
 # Open a utility shell
-af util
+af shell
 
 # Open a file in annotation viewer
 af open src/auth/login.ts
@@ -470,7 +470,7 @@ af cleanup --project 0003
 af cleanup --project 0003 --force
 
 # Stop the architect and all builders
-af stop
+af dash stop
 
 # Manage port allocations (for multi-project support)
 af ports list

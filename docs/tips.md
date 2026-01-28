@@ -116,8 +116,8 @@ Builders work in isolated git worktrees. Their changes don't affect your main br
 ### Dashboard Won't Start
 
 ```bash
-af stop    # Kill any orphaned processes
-af start   # Fresh start
+af dash stop    # Kill any orphaned processes
+af dash start   # Fresh start
 ```
 
 ### Orphaned Sessions

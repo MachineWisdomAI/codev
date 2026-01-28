@@ -25,7 +25,7 @@ export async function consult(
   const state = loadState();
 
   if (!state.architect) {
-    fatal('Dashboard not running. Start with: af start');
+    fatal('Dashboard not running. Start with: af dash start');
   }
 
   const config = getConfig();

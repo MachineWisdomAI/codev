@@ -194,9 +194,9 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   console.log('');
   console.log(chalk.bold('Next steps:'));
   console.log('');
-  console.log('  git remote -v                # Verify remote is configured (required for builders)');
-  console.log('  codev doctor                 # Check dependencies');
-  console.log('  af start                     # Start the architect dashboard');
+  console.log('  codev consult plan           # Review the plan with an architect');
+  console.log('  af dash start                # Start the architect dashboard');
+  console.log('  af spawn                     # Spawn a builder to implement the plan');
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));
 

@@ -31,7 +31,6 @@ const program = new Command()
   .argument('[port]', 'Port to listen on', String(DEFAULT_PORT))
   .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
   .option('-l, --log-file <path>', 'Log file path for server output')
-  .option('-w, --web', 'Enable web access mode (requires CODEV_WEB_KEY)')
   .parse(process.argv);
 
 const opts = program.opts();
@@ -39,16 +38,6 @@ const args = program.args;
 const portArg = opts.port || args[0] || String(DEFAULT_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
-const webMode = opts.web || false;
-
-// CRITICAL: --web MUST refuse to start without CODEV_WEB_KEY
-// This prevents accidental public exposure without authentication
-if (webMode && !process.env.CODEV_WEB_KEY) {
-  console.error('Error: --web requires CODEV_WEB_KEY to be set.');
-  console.error('Generate a key with: af web keygen');
-  console.error('Then set: export CODEV_WEB_KEY=<your-key>');
-  process.exit(1);
-}
 
 // Logging utility
 function log(level: 'INFO' | 'ERROR' | 'WARN', message: string): void {
@@ -178,117 +167,79 @@ async function getBasePortForProject(projectPath: string): Promise<number | null
   }
 }
 
-/**
- * Timing-safe comparison of auth tokens to prevent timing attacks
- */
-function isValidToken(provided: string | undefined, expected: string): boolean {
-  if (!provided) return false;
+// Cloudflared tunnel management
+let tunnelProcess: ReturnType<typeof spawn> | null = null;
+let tunnelUrl: string | null = null;
 
-  // Ensure both strings are same length for timing-safe comparison
-  const providedBuf = Buffer.from(provided);
-  const expectedBuf = Buffer.from(expected);
-
-  if (providedBuf.length !== expectedBuf.length) {
-    // Still do a comparison to maintain constant time
-    crypto.timingSafeEqual(expectedBuf, expectedBuf);
+function isCloudflaredInstalled(): boolean {
+  try {
+    execSync('which cloudflared', { stdio: 'ignore' });
+    return true;
+  } catch {
     return false;
   }
-
-  return crypto.timingSafeEqual(providedBuf, expectedBuf);
 }
 
-/**
- * Generate HTML for login page
- */
-function getLoginPageHtml(): string {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <title>Tower Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { font-family: system-ui; background: #1a1a2e; color: #eee;
-           display: flex; justify-content: center; align-items: center;
-           min-height: 100vh; margin: 0; }
-    .login { background: #16213e; padding: 2rem; border-radius: 8px;
-             max-width: 400px; width: 90%; }
-    h1 { margin-top: 0; }
-    input { width: 100%; padding: 0.75rem; margin: 0.5rem 0;
-            border: 1px solid #444; border-radius: 4px;
-            background: #0f0f23; color: #eee; font-size: 1rem;
-            box-sizing: border-box; }
-    button { width: 100%; padding: 0.75rem; margin-top: 1rem;
-             background: #4a7c59; color: white; border: none;
-             border-radius: 4px; font-size: 1rem; cursor: pointer; }
-    button:hover { background: #5a9c69; }
-    .error { color: #ff6b6b; margin-top: 0.5rem; display: none; }
-  </style>
-</head>
-<body>
-  <div class="login">
-    <h1>🗼 Tower Login</h1>
-    <p>Enter your API key to access Agent Farm.</p>
-    <input type="password" id="key" placeholder="API Key" autofocus>
-    <div class="error" id="error">Invalid API key</div>
-    <button onclick="login()">Login</button>
-  </div>
-  <script>
-    // Check for key in URL (from QR code scan) or localStorage
-    (async function() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const keyFromUrl = urlParams.get('key');
-      const keyFromStorage = localStorage.getItem('codev_web_key');
-      const key = keyFromUrl || keyFromStorage;
+function getTunnelStatus(): { available: boolean; running: boolean; url: string | null } {
+  return {
+    available: isCloudflaredInstalled(),
+    running: tunnelProcess !== null && tunnelUrl !== null,
+    url: tunnelUrl,
+  };
+}
 
-      if (key) {
-        if (keyFromUrl) {
-          localStorage.setItem('codev_web_key', keyFromUrl);
-        }
-        await verifyAndLoadDashboard(key);
-      }
-    })();
+async function startTunnel(port: number): Promise<{ success: boolean; url?: string; error?: string }> {
+  if (!isCloudflaredInstalled()) {
+    return { success: false, error: 'cloudflared not installed. Install with: brew install cloudflared' };
+  }
 
-    async function verifyAndLoadDashboard(key) {
-      try {
-        // Fetch the actual dashboard with auth header
-        const res = await fetch(window.location.pathname, {
-          headers: {
-            'Authorization': 'Bearer ' + key,
-            'Accept': 'text/html'
-          }
-        });
-        if (res.ok) {
-          // Replace entire page with dashboard
-          const html = await res.text();
-          document.open();
-          document.write(html);
-          document.close();
-          // Clean URL without reload
-          history.replaceState({}, '', window.location.pathname);
-        } else {
-          // Key invalid
-          localStorage.removeItem('codev_web_key');
-          document.getElementById('error').style.display = 'block';
-          document.getElementById('error').textContent = 'Invalid API key';
-        }
-      } catch (e) {
-        document.getElementById('error').style.display = 'block';
-        document.getElementById('error').textContent = 'Connection error';
-      }
-    }
+  if (tunnelProcess) {
+    return { success: true, url: tunnelUrl || undefined };
+  }
 
-    async function login() {
-      const key = document.getElementById('key').value;
-      if (!key) return;
-      localStorage.setItem('codev_web_key', key);
-      await verifyAndLoadDashboard(key);
-    }
-    document.getElementById('key').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') login();
+  return new Promise((resolve) => {
+    tunnelProcess = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-  </script>
-</body>
-</html>`;
+
+    const handleOutput = (data: Buffer) => {
+      const text = data.toString();
+      const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (match && !tunnelUrl) {
+        tunnelUrl = match[0];
+        log('INFO', `Cloudflared tunnel started: ${tunnelUrl}`);
+        resolve({ success: true, url: tunnelUrl });
+      }
+    };
+
+    tunnelProcess.stdout?.on('data', handleOutput);
+    tunnelProcess.stderr?.on('data', handleOutput);
+
+    tunnelProcess.on('close', (code) => {
+      log('INFO', `Cloudflared tunnel closed with code ${code}`);
+      tunnelProcess = null;
+      tunnelUrl = null;
+    });
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      if (!tunnelUrl) {
+        tunnelProcess?.kill();
+        tunnelProcess = null;
+        resolve({ success: false, error: 'Tunnel startup timed out' });
+      }
+    }, 30000);
+  });
+}
+
+function stopTunnel(): { success: boolean } {
+  if (tunnelProcess) {
+    tunnelProcess.kill();
+    tunnelProcess = null;
+    tunnelUrl = null;
+    log('INFO', 'Cloudflared tunnel stopped');
+  }
+  return { success: true };
 }
 
 // SSE (Server-Sent Events) infrastructure for push notifications
@@ -681,29 +632,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // CRITICAL: When CODEV_WEB_KEY is set, ALL requests require auth
-  // NO localhost bypass - tunnel daemons (cloudflared) run locally and proxy
-  // to localhost, so checking remoteAddress would incorrectly trust remote traffic
-  const webKey = process.env.CODEV_WEB_KEY;
-
-  if (webKey) {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.replace('Bearer ', '');
-
-    if (!isValidToken(token, webKey)) {
-      // Return login page for HTML requests, 401 for API
-      if (req.headers.accept?.includes('text/html')) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(getLoginPageHtml());
-        return;
-      }
-      res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
-  }
-  // When CODEV_WEB_KEY is NOT set: no auth required (local dev mode only)
-
   // CORS headers
   const origin = req.headers.origin;
   if (origin && (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
@@ -894,6 +822,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // API: Get tunnel status (cloudflared availability and running tunnel)
+    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
+      const status = getTunnelStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(status));
+      return;
+    }
+
+    // API: Start cloudflared tunnel
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/start') {
+      const result = await startTunnel(port);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    // API: Stop cloudflared tunnel
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/stop') {
+      const result = stopTunnel();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
     // API: Stop an instance
     if (req.method === 'POST' && url.pathname === '/api/stop') {
       const body = await parseJsonBody(req);
@@ -1037,29 +989,6 @@ server.listen(port, '127.0.0.1', () => {
 // Same terminal port routing as HTTP proxy
 server.on('upgrade', async (req, socket, head) => {
   const reqUrl = new URL(req.url || '/', `http://localhost:${port}`);
-
-  // CRITICAL: When CODEV_WEB_KEY is set, ALL WebSocket upgrades require auth
-  // NO localhost bypass - tunnel daemons run locally, so remoteAddress is unreliable
-  const webKey = process.env.CODEV_WEB_KEY;
-
-  if (webKey) {
-    // Check Sec-WebSocket-Protocol for auth token
-    const protocols = req.headers['sec-websocket-protocol']?.split(',').map((s) => s.trim()) || [];
-    const authProtocol = protocols.find((p) => p.startsWith('auth-'));
-    const token = authProtocol?.replace('auth-', '');
-
-    if (!isValidToken(token, webKey)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-
-    // IMPORTANT: Strip auth-<key> protocol before forwarding to ttyd
-    // Only forward 'tty' protocol to avoid confusing upstream servers
-    const cleanProtocols = protocols.filter((p) => !p.startsWith('auth-'));
-    req.headers['sec-websocket-protocol'] = cleanProtocols.join(', ') || 'tty';
-  }
-  // When CODEV_WEB_KEY is NOT set: no auth required (local dev mode only)
 
   if (!reqUrl.pathname.startsWith('/project/')) {
     socket.write('HTTP/1.1 404 Not Found\r\n\r\n');

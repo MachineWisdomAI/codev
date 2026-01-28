@@ -58,6 +58,11 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
  * @returns true if request should be allowed
  */
 export function isRequestAllowed(req: http.IncomingMessage): boolean {
+  // INSECURE MODE: Skip all checks (for testing only!)
+  if (process.env.CODEV_WEB_INSECURE === '1') {
+    return true;
+  }
+
   // When CODEV_WEB_KEY is set, allow any host - auth will handle security
   // This is needed for tunnel access (cloudflared, ngrok, etc.)
   if (process.env.CODEV_WEB_KEY) {
