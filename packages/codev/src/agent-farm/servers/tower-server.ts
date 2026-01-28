@@ -485,7 +485,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   // Do NOT use bash -c with string concatenation
   try {
     // First, stop any existing (possibly stale) instance
-    const stopChild = spawn('codev', ['af', 'stop'], {
+    const stopChild = spawn('codev', ['af', 'dash', 'stop'], {
       cwd: projectPath,
       stdio: 'ignore',
     });
@@ -500,9 +500,9 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
     // Small delay to ensure cleanup
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Now start using codev af (avoids npx caching issues)
+    // Now start using codev af dash start (avoids npx caching issues)
     // Capture output to detect errors
-    const child = spawn('codev', ['af', 'start'], {
+    const child = spawn('codev', ['af', 'dash', 'start'], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: projectPath,

@@ -1,5 +1,26 @@
 // Dashboard Utility Functions
 
+// Get the base path for API calls (handles tower proxy context)
+// When accessed via tower proxy at /project/<encoded>/, API calls need to go through the proxy
+// When accessed directly at /, API calls go to root
+function getApiBase() {
+  const path = window.location.pathname;
+  // Check if we're in tower proxy context: /project/<encoded>/
+  const match = path.match(/^(\/project\/[^/]+\/)/);
+  if (match) {
+    return match[1]; // Returns /project/<encoded>/
+  }
+  return '/'; // Direct access
+}
+
+// Build API URL that works both directly and through tower proxy
+function apiUrl(endpoint) {
+  const base = getApiBase();
+  // Remove leading slash from endpoint if present
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  return base + cleanEndpoint;
+}
+
 // Escape HTML special characters to prevent XSS
 function escapeHtml(text) {
   return String(text)
@@ -87,7 +108,7 @@ async function openFileTab(filePath, options = {}) {
     }
 
     // Create new tab
-    const response = await fetch('/api/tabs/file', {
+    const response = await fetch(apiUrl('api/tabs/file'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: filePath })

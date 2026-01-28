@@ -22,7 +22,7 @@ function stopFilesPolling() {
 // Check if files have changed and refresh if needed
 async function checkFilesForChanges() {
   try {
-    const response = await fetch(`/api/files/hash?t=${Date.now()}`);
+    const response = await fetch(apiUrl(`api/files/hash?t=${Date.now()}`));
     if (!response.ok) return;
 
     const data = await response.json();
@@ -42,7 +42,7 @@ async function checkFilesForChanges() {
 async function loadFilesTree() {
   try {
     // Add cache-busting param to ensure fresh data
-    const response = await fetch(`/api/files?t=${Date.now()}`);
+    const response = await fetch(apiUrl(`api/files?t=${Date.now()}`));
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }

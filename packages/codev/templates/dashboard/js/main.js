@@ -34,7 +34,7 @@ async function openFileFromMessage(filePath, lineNumber) {
 // Refresh state from API
 async function refresh() {
   try {
-    const response = await fetch('/api/state');
+    const response = await fetch(apiUrl('api/state'));
     if (!response.ok) throw new Error('Failed to fetch state');
 
     const newState = await response.json();
@@ -65,7 +65,7 @@ function stopPolling() {
 // Poll for projectlist.md creation when in starter mode
 async function pollForProjectlistCreation() {
   try {
-    const response = await fetch('/api/projectlist-exists');
+    const response = await fetch(apiUrl('api/projectlist-exists'));
     if (!response.ok) return;
 
     const { exists } = await response.json();
@@ -420,7 +420,7 @@ async function pollHotReload() {
   if (!hotReloadEnabled) return;
 
   try {
-    const response = await fetch('/api/hot-reload');
+    const response = await fetch(apiUrl('api/hot-reload'));
     if (!response.ok) return;
 
     const data = await response.json();

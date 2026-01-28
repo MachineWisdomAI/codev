@@ -140,7 +140,7 @@ function parseProjectlist(content) {
 // Load projectlist.md from disk
 async function loadProjectlist() {
   try {
-    const response = await fetch('/file?path=codev/projectlist.md');
+    const response = await fetch(apiUrl('file?path=codev/projectlist.md'));
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -181,7 +181,7 @@ async function pollProjectlist() {
   if (activeTabId !== 'dashboard') return;
 
   try {
-    const response = await fetch('/file?path=codev/projectlist.md');
+    const response = await fetch(apiUrl('file?path=codev/projectlist.md'));
     if (!response.ok) return;
 
     const text = await response.text();
@@ -300,7 +300,7 @@ function renderStageCell(project, stage) {
 // Open a project file in a new annotation tab
 async function openProjectFile(path) {
   try {
-    const response = await fetch('/api/tabs/file', {
+    const response = await fetch(apiUrl('api/tabs/file'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path })

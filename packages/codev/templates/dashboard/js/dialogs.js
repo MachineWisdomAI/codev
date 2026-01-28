@@ -20,7 +20,7 @@ async function closeTab(tabId, event) {
   // Check if process is still running before showing confirmation (Bugfix #132)
   // If the shell/builder already exited, close immediately without confirmation
   try {
-    const response = await fetch(`/api/tabs/${encodeURIComponent(tabId)}/running`);
+    const response = await fetch(apiUrl(`api/tabs/${encodeURIComponent(tabId)}/running`));
     if (response.ok) {
       const { running } = await response.json();
       if (!running) {
@@ -56,7 +56,7 @@ async function doCloseTab(tabId) {
   if (!tab) return;
 
   try {
-    await fetch(`/api/tabs/${encodeURIComponent(tabId)}`, { method: 'DELETE' });
+    await fetch(apiUrl(`api/tabs/${encodeURIComponent(tabId)}`), { method: 'DELETE' });
 
     tabs = tabs.filter(t => t.id !== tabId);
 
@@ -224,7 +224,7 @@ async function createFile() {
   }
 
   try {
-    const response = await fetch('/api/files', {
+    const response = await fetch(apiUrl('api/files'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: filePath, content: '' })
@@ -251,7 +251,7 @@ async function createFile() {
 // Spawn worktree builder
 async function spawnBuilder() {
   try {
-    const response = await fetch('/api/tabs/builder', {
+    const response = await fetch(apiUrl('api/tabs/builder'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
@@ -283,7 +283,7 @@ async function spawnBuilder() {
 // Spawn shell
 async function spawnShell() {
   try {
-    const response = await fetch('/api/tabs/shell', {
+    const response = await fetch(apiUrl('api/tabs/shell'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
@@ -325,7 +325,7 @@ async function spawnShell() {
 // Create new utility shell (quick action button)
 async function createNewShell() {
   try {
-    const response = await fetch('/api/tabs/shell', { method: 'POST' });
+    const response = await fetch(apiUrl('api/tabs/shell'), { method: 'POST' });
     const data = await response.json();
     if (!data.success && data.error) {
       showToast(data.error || 'Failed to create shell', 'error');
@@ -347,7 +347,7 @@ async function createNewWorktreeShell() {
   if (branch === null) return;
 
   try {
-    const response = await fetch('/api/tabs/shell', {
+    const response = await fetch(apiUrl('api/tabs/shell'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ worktree: true, branch: branch || undefined })
