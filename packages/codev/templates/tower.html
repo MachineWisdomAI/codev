@@ -1535,18 +1535,31 @@
     }
 
     // Share dialog functions (QR code for mobile access)
+    let tunnelAbortController = null;
+
     async function showShareDialog() {
       const dialog = document.getElementById('share-dialog');
       const content = document.getElementById('share-content');
       const stopBtn = document.getElementById('stop-tunnel-btn');
 
       dialog.style.display = 'flex';
-      content.innerHTML = '<div class="loading"><div class="spinner"></div><p>Starting tunnel...</p></div>';
       stopBtn.style.display = 'none';
+
+      // Create abort controller for cancellation
+      tunnelAbortController = new AbortController();
+
+      content.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Starting tunnel...</p>
+          <p style="font-size: 12px; color: var(--muted); margin-top: 8px;">This may take up to 30 seconds</p>
+          <button class="btn" style="margin-top: 16px;" onclick="cancelTunnelStart()">Cancel</button>
+        </div>
+      `;
 
       try {
         // Check if tunnel is already running
-        const statusRes = await fetch('/api/tunnel/status');
+        const statusRes = await fetch('/api/tunnel/status', { signal: tunnelAbortController.signal });
         const status = await statusRes.json();
 
         if (status.running && status.url) {
@@ -1555,7 +1568,7 @@
         }
 
         // Start tunnel
-        const res = await fetch('/api/tunnel/start', { method: 'POST' });
+        const res = await fetch('/api/tunnel/start', { method: 'POST', signal: tunnelAbortController.signal });
         const result = await res.json();
 
         if (result.success && result.url) {
@@ -1564,8 +1577,22 @@
           content.innerHTML = `<p style="color: var(--danger);">Failed to start tunnel: ${result.error || 'Unknown error'}</p>`;
         }
       } catch (e) {
-        content.innerHTML = `<p style="color: var(--danger);">Error: ${e.message}</p>`;
+        if (e.name === 'AbortError') {
+          content.innerHTML = '<p>Tunnel start cancelled.</p>';
+        } else {
+          content.innerHTML = `<p style="color: var(--danger);">Error: ${e.message}</p>`;
+        }
+      } finally {
+        tunnelAbortController = null;
       }
+    }
+
+    function cancelTunnelStart() {
+      if (tunnelAbortController) {
+        tunnelAbortController.abort();
+      }
+      // Also stop any tunnel that might have started
+      fetch('/api/tunnel/stop', { method: 'POST' }).catch(() => {});
     }
 
     function showQRCode(tunnelUrl) {
