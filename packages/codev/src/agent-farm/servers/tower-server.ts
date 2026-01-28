@@ -233,20 +233,55 @@ function getLoginPageHtml(): string {
     <button onclick="login()">Login</button>
   </div>
   <script>
-    // Check for key in URL (from QR code scan)
-    const urlParams = new URLSearchParams(window.location.search);
-    const keyFromUrl = urlParams.get('key');
-    if (keyFromUrl) {
-      localStorage.setItem('codev_web_key', keyFromUrl);
-      // Clean URL and reload to authenticate
-      window.location.href = window.location.pathname;
+    // Check for key in URL (from QR code scan) or localStorage
+    (async function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyFromUrl = urlParams.get('key');
+      const keyFromStorage = localStorage.getItem('codev_web_key');
+      const key = keyFromUrl || keyFromStorage;
+
+      if (key) {
+        if (keyFromUrl) {
+          localStorage.setItem('codev_web_key', keyFromUrl);
+        }
+        await verifyAndLoadDashboard(key);
+      }
+    })();
+
+    async function verifyAndLoadDashboard(key) {
+      try {
+        // Fetch the actual dashboard with auth header
+        const res = await fetch(window.location.pathname, {
+          headers: {
+            'Authorization': 'Bearer ' + key,
+            'Accept': 'text/html'
+          }
+        });
+        if (res.ok) {
+          // Replace entire page with dashboard
+          const html = await res.text();
+          document.open();
+          document.write(html);
+          document.close();
+          // Clean URL without reload
+          history.replaceState({}, '', window.location.pathname);
+        } else {
+          // Key invalid
+          localStorage.removeItem('codev_web_key');
+          document.getElementById('error').style.display = 'block';
+          document.getElementById('error').textContent = 'Invalid API key';
+        }
+      } catch (e) {
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').textContent = 'Connection error';
+      }
     }
 
-    function login() {
+    async function login() {
       const key = document.getElementById('key').value;
       if (!key) return;
       localStorage.setItem('codev_web_key', key);
-      location.reload();
+      await verifyAndLoadDashboard(key);
     }
     document.getElementById('key').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') login();
