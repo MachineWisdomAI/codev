@@ -65,25 +65,61 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
   }
 
   // Fall back to direct spawn
+  // Generate ID and name
+  const id = generateUtilId();
+  const name = options.name || `util-${id}`;
+
+  // Get shell command from config (hierarchy: CLI > config.json > default)
+  const commands = getResolvedCommands();
+  const shellCmd = commands.shell;
+
+  logger.header(`Spawning Utility Terminal`);
+  logger.kv('ID', id);
+  logger.kv('Name', name);
+
+  // node-pty backend: create PTY session via REST API
+  if (config.terminalBackend === 'node-pty') {
+    logger.info('Using node-pty terminal backend');
+    try {
+      const dashboardPort = config.dashboardPort;
+      const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: shellCmd, args: [], cwd: config.projectRoot, cols: 200, rows: 50 }),
+      });
+
+      if (!response.ok) {
+        fatal(`Failed to create PTY session: ${response.status} ${await response.text()}`);
+      }
+
+      const result = await response.json() as { id: string };
+      const utilTerminal: UtilTerminal = {
+        id,
+        name,
+        port: 0,
+        pid: 0,
+      };
+      addUtil(utilTerminal);
+
+      logger.blank();
+      logger.success(`Utility terminal spawned via node-pty!`);
+      logger.kv('Terminal ID', result.id);
+
+      // Open dashboard (terminal is accessible via WebSocket)
+      await openBrowser(`http://localhost:${config.dashboardPort}`);
+      return;
+    } catch (error) {
+      logger.warn(`node-pty failed, falling back to ttyd: ${error}`);
+    }
+  }
+
   // Check for ttyd
   if (!(await commandExists('ttyd'))) {
     fatal('ttyd not found. Install with: brew install ttyd');
   }
 
-  // Generate ID and name
-  const id = generateUtilId();
-  const name = options.name || `util-${id}`;
-
   // Find available port
   const port = await findAvailablePort(config.utilPortRange[0]);
-
-  // Get shell command from config (hierarchy: CLI > config.json > default)
-  const commands = getResolvedCommands();
-  const shell = commands.shell;
-
-  logger.header(`Spawning Utility Terminal`);
-  logger.kv('ID', id);
-  logger.kv('Name', name);
   logger.kv('Port', port);
 
   // Start ttyd
@@ -93,7 +129,7 @@ export async function shell(options: UtilOptions = {}): Promise<void> {
     '-t', `titleFixed=${name}`,
     '-t', 'fontSize=14',
     '-t', 'rightClickSelectsWord=true',  // Enable word selection on right-click for better UX
-    shell,
+    shellCmd,
   ];
 
   const ttydProcess = spawnDetached('ttyd', ttydArgs, {

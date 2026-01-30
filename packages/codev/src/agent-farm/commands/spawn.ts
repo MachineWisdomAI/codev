@@ -546,6 +546,32 @@ async function createWorktree(config: Config, branchName: string, worktreePath: 
 }
 
 /**
+ * Create a terminal session via the node-pty terminal manager REST API.
+ * The dashboard server must be running with node-pty backend enabled.
+ */
+async function createPtySession(
+  config: Config,
+  command: string,
+  args: string[],
+  cwd: string,
+): Promise<{ terminalId: string }> {
+  const dashboardPort = config.dashboardPort;
+  const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, args, cwd, cols: 200, rows: 50 }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to create PTY session: ${response.status} ${text}`);
+  }
+
+  const result = await response.json() as { id: string };
+  return { terminalId: result.id };
+}
+
+/**
  * Start tmux session and ttyd for a builder
  */
 async function startBuilderSession(
@@ -556,7 +582,7 @@ async function startBuilderSession(
   prompt: string,
   roleContent: string | null,
   roleSource: string | null,
-): Promise<{ port: number; pid: number; sessionName: string }> {
+): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
   const port = await findFreePort(config);
   const sessionName = getSessionName(config, builderId);
 
@@ -601,6 +627,24 @@ done
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
+  // node-pty backend: create PTY session via REST API instead of tmux+ttyd
+  if (config.terminalBackend === 'node-pty') {
+    logger.info('Using node-pty terminal backend');
+    try {
+      const { terminalId } = await createPtySession(
+        config,
+        '/bin/bash',
+        [scriptPath],
+        worktreePath,
+      );
+      logger.info(`Terminal session created: ${terminalId}`);
+      // Return port=0 and pid=0 since PTY is managed by dashboard server
+      return { port: 0, pid: 0, sessionName, terminalId };
+    } catch (error) {
+      logger.warn(`node-pty session creation failed, falling back to ttyd: ${error}`);
+    }
+  }
+
   // Create tmux session running the script
   await run(`tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${worktreePath}" "${scriptPath}"`);
   await run(`tmux set-option -t "${sessionName}" status off`);
@@ -643,9 +687,26 @@ async function startShellSession(
   config: Config,
   shellId: string,
   baseCmd: string,
-): Promise<{ port: number; pid: number; sessionName: string }> {
+): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
   const port = await findFreePort(config);
   const sessionName = `shell-${shellId}`;
+
+  // node-pty backend: create PTY session via REST API
+  if (config.terminalBackend === 'node-pty') {
+    logger.info('Using node-pty terminal backend for shell');
+    try {
+      const { terminalId } = await createPtySession(
+        config,
+        '/bin/bash',
+        ['-c', baseCmd],
+        config.projectRoot,
+      );
+      logger.info(`Shell terminal session created: ${terminalId}`);
+      return { port: 0, pid: 0, sessionName, terminalId };
+    } catch (error) {
+      logger.warn(`node-pty session creation failed, falling back to ttyd: ${error}`);
+    }
+  }
 
   logger.info('Creating tmux session...');
 
@@ -754,7 +815,7 @@ ${initialPrompt}`;
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
 
-  const { port, pid, sessionName } = await startBuilderSession(
+  const { port, pid, sessionName, terminalId } = await startBuilderSession(
     config,
     builderId,
     worktreePath,
@@ -775,6 +836,7 @@ ${initialPrompt}`;
     branch: branchName,
     tmuxSession: sessionName,
     type: 'spec',
+    terminalId,
   };
 
   upsertBuilder(builder);
@@ -782,7 +844,11 @@ ${initialPrompt}`;
   logger.blank();
   logger.success(`Builder ${builderId} spawned!`);
   logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
-  logger.kv('Terminal', `http://localhost:${port}`);
+  if (terminalId) {
+    logger.kv('Terminal', `ws://localhost:${config.dashboardPort}/ws/terminal/${terminalId}`);
+  } else {
+    logger.kv('Terminal', `http://localhost:${port}`);
+  }
 }
 
 /**
@@ -836,7 +902,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
 
-  const { port, pid, sessionName } = await startBuilderSession(
+  const { port, pid, sessionName, terminalId } = await startBuilderSession(
     config,
     builderId,
     worktreePath,
@@ -858,13 +924,14 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
     tmuxSession: sessionName,
     type: 'task',
     taskText,
+    terminalId,
   };
 
   upsertBuilder(builder);
 
   logger.blank();
   logger.success(`Builder ${builderId} spawned!`);
-  logger.kv('Terminal', `http://localhost:${port}`);
+  logger.kv('Terminal', terminalId ? `node-pty:${terminalId}` : `http://localhost:${port}`);
 }
 
 /**
@@ -910,7 +977,7 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
   const role = options.noRole ? null : loadProtocolRole(config, protocolName);
   const commands = getResolvedCommands();
 
-  const { port, pid, sessionName } = await startBuilderSession(
+  const { port, pid, sessionName, terminalId } = await startBuilderSession(
     config,
     builderId,
     worktreePath,
@@ -932,13 +999,14 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
     tmuxSession: sessionName,
     type: 'protocol',
     protocolName,
+    terminalId,
   };
 
   upsertBuilder(builder);
 
   logger.blank();
   logger.success(`Builder ${builderId} spawned!`);
-  logger.kv('Terminal', `http://localhost:${port}`);
+  logger.kv('Terminal', terminalId ? `node-pty:${terminalId}` : `http://localhost:${port}`);
 }
 
 /**
@@ -955,7 +1023,7 @@ async function spawnShell(options: SpawnOptions, config: Config): Promise<void> 
 
   const commands = getResolvedCommands();
 
-  const { port, pid, sessionName } = await startShellSession(
+  const { port, pid, sessionName, terminalId } = await startShellSession(
     config,
     shortId,
     commands.builder,
@@ -974,13 +1042,14 @@ async function spawnShell(options: SpawnOptions, config: Config): Promise<void> 
     branch: '',
     tmuxSession: sessionName,
     type: 'shell',
+    terminalId,
   };
 
   upsertBuilder(builder);
 
   logger.blank();
   logger.success(`Shell ${shellId} spawned!`);
-  logger.kv('Terminal', `http://localhost:${port}`);
+  logger.kv('Terminal', terminalId ? `node-pty:${terminalId}` : `http://localhost:${port}`);
 }
 
 /**
@@ -1057,43 +1126,70 @@ done
   await run('tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
   await run('tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"');
 
-  // Start ttyd connecting to the tmux session
-  logger.info('Starting worktree terminal...');
-  const customIndexPath = resolve(config.codevDir, 'templates', 'ttyd-index.html');
-  const hasCustomIndex = existsSync(customIndexPath);
-  if (hasCustomIndex) {
-    logger.info('Using custom terminal with file click support');
+  // node-pty backend: create PTY session via REST API
+  let worktreePid = 0;
+  let worktreeTerminalId: string | undefined;
+
+  if (config.terminalBackend === 'node-pty') {
+    logger.info('Using node-pty terminal backend for worktree');
+    try {
+      const dashboardPort = config.dashboardPort;
+      const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: '/bin/bash', args: [scriptPath], cwd: worktreePath, cols: 200, rows: 50 }),
+      });
+      if (response.ok) {
+        const result = await response.json() as { id: string };
+        worktreeTerminalId = result.id;
+        logger.info(`Worktree terminal session created: ${worktreeTerminalId}`);
+      }
+    } catch (error) {
+      logger.warn(`node-pty failed, falling back to ttyd: ${error}`);
+    }
   }
 
-  const ttydProcess = spawnTtyd({
-    port,
-    sessionName,
-    cwd: worktreePath,
-    customIndexPath: hasCustomIndex ? customIndexPath : undefined,
-  });
+  if (!worktreeTerminalId) {
+    // Start ttyd connecting to the tmux session
+    logger.info('Starting worktree terminal...');
+    const customIndexPath = resolve(config.codevDir, 'templates', 'ttyd-index.html');
+    const hasCustomIndex = existsSync(customIndexPath);
+    if (hasCustomIndex) {
+      logger.info('Using custom terminal with file click support');
+    }
 
-  if (!ttydProcess?.pid) {
-    fatal('Failed to start ttyd process for worktree');
+    const ttydProcess = spawnTtyd({
+      port,
+      sessionName,
+      cwd: worktreePath,
+      customIndexPath: hasCustomIndex ? customIndexPath : undefined,
+    });
+
+    if (!ttydProcess?.pid) {
+      fatal('Failed to start ttyd process for worktree');
+    }
+    worktreePid = ttydProcess.pid;
   }
 
   const builder: Builder = {
     id: builderId,
     name: 'Worktree session',
-    port,
-    pid: ttydProcess.pid,
+    port: worktreeTerminalId ? 0 : port,
+    pid: worktreePid,
     status: 'spawning',
     phase: 'interactive',
     worktree: worktreePath,
     branch: branchName,
     tmuxSession: sessionName,
     type: 'worktree',
+    terminalId: worktreeTerminalId,
   };
 
   upsertBuilder(builder);
 
   logger.blank();
   logger.success(`Worktree ${builderId} spawned!`);
-  logger.kv('Terminal', `http://localhost:${port}`);
+  logger.kv('Terminal', worktreeTerminalId ? `node-pty:${worktreeTerminalId}` : `http://localhost:${port}`);
 }
 
 /**
@@ -1268,7 +1364,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   const role = options.noRole ? null : loadRolePrompt(config, 'builder');
   const commands = getResolvedCommands();
 
-  const { port, pid, sessionName } = await startBuilderSession(
+  const { port, pid, sessionName, terminalId } = await startBuilderSession(
     config,
     builderId,
     worktreePath,
@@ -1290,6 +1386,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     tmuxSession: sessionName,
     type: 'bugfix',
     issueNumber,
+    terminalId,
   };
 
   upsertBuilder(builder);
@@ -1297,7 +1394,11 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   logger.blank();
   logger.success(`Bugfix builder for issue #${issueNumber} spawned!`);
   logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
-  logger.kv('Terminal', `http://localhost:${port}`);
+  if (terminalId) {
+    logger.kv('Terminal', `ws://localhost:${config.dashboardPort}/ws/terminal/${terminalId}`);
+  } else {
+    logger.kv('Terminal', `http://localhost:${port}`);
+  }
 }
 
 // =============================================================================
