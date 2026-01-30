@@ -147,10 +147,10 @@ function loadTerminalBackend(): 'ttyd' | 'node-pty' {
   if (fs.existsSync(configPath)) {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      return config?.terminal?.backend ?? 'ttyd';
+      return config?.terminal?.backend ?? 'node-pty';
     } catch { /* ignore */ }
   }
-  return 'ttyd';
+  return 'node-pty';
 }
 
 const terminalBackend = loadTerminalBackend();
@@ -161,10 +161,10 @@ function loadDashboardFrontend(): 'react' | 'legacy' {
   if (fs.existsSync(configPath)) {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      return config?.dashboard?.frontend ?? 'legacy';
+      return config?.dashboard?.frontend ?? 'react';
     } catch { /* ignore */ }
   }
-  return 'legacy';
+  return 'react';
 }
 
 const dashboardFrontend = loadDashboardFrontend();

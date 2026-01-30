@@ -70,7 +70,7 @@ export const CORE_DEPENDENCIES: Dependency[] = [
       macos: 'brew install ttyd',
       linux: 'Build from source: https://github.com/tsl0922/ttyd',
     },
-    required: true,
+    required: false, // Optional when using node-pty backend (default since 0085)
   },
   {
     name: 'git',
