@@ -119,11 +119,12 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 │                  └────────┬──────────┘                               │
 └───────────────────────────┼─────────────────────────────────────────┘
                             │ WebSocket /ws/terminal/<id>
-                            ▼
+              ┌─────────────┼─────────────┬─────────────┐
+              ▼             ▼             ▼             ▼
    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-   │  tmux    │  │  tmux    │  │  tmux    │  │  tmux    │
-   │ session  │  │ session  │  │ session  │  │ session  │
-   │(claude)  │  │(claude)  │  │(claude)  │  │ (bash)   │
+   │  tmux    │  │ node-pty │  │ node-pty │  │ node-pty │
+   │ session  │  │ (direct) │  │ (direct) │  │ (direct) │
+   │(claude)  │  │ builder  │  │ builder  │  │  shell   │
    └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┘
         │             │             │
         ▼             ▼             ▼
@@ -145,7 +146,7 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 1. User opens dashboard at `http://localhost:4200`
 2. React dashboard polls `/api/state` for current state (1-second interval)
 3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
-4. Terminal Manager spawns node-pty sessions that attach to tmux sessions
+4. Terminal Manager spawns node-pty sessions (direct PTY for builders/shells, tmux attach for architect)
 5. Builders work in isolated git worktrees under `.builders/`
 
 ### Port System
@@ -250,7 +251,7 @@ const baseEnv = {
 };
 ```
 
-**Ring Buffer**: Each session maintains a 1000-line ring buffer with monotonic sequence numbers for reconnection replay. Clients send `X-Session-Resume` header with their last sequence number to receive only missed data.
+**Ring Buffer**: Each session maintains a 1000-line ring buffer with monotonic sequence numbers for reconnection replay. On WebSocket connect, the server replays the full buffer. Non-browser clients can send an `X-Session-Resume` header with their last sequence number to receive only missed data (browsers cannot set custom WebSocket headers).
 
 **Disk Logging**: Terminal output is logged to `.agent-farm/logs/<session-id>.log` with 50MB rotation.
 
@@ -404,8 +405,10 @@ The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that prov
 | `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
 | `POST` | `/api/terminals` | Create PTY session (Spec 0085) |
 | `GET` | `/api/terminals` | List PTY sessions (Spec 0085) |
+| `GET` | `/api/terminals/:id` | Get PTY session metadata (pid, status, cols, rows) (Spec 0085) |
 | `DELETE` | `/api/terminals/:id` | Kill PTY session (Spec 0085) |
 | `POST` | `/api/terminals/:id/resize` | Resize PTY session (Spec 0085) |
+| `GET` | `/api/terminals/:id/output` | Get ring buffer output (?lines=N&offset=M) (Spec 0085) |
 | `WS` | `/ws/terminal/:id` | WebSocket terminal connection (Spec 0085) |
 
 #### Dashboard UI (React + Vite, Spec 0085)
@@ -427,7 +430,7 @@ packages/codev/dashboard/
 │   │   ├── useBuilderStatus.ts  # Builder status polling
 │   │   └── useMediaQuery.ts     # Responsive breakpoints
 │   ├── lib/
-│   │   ├── api.ts               # REST client + getTerminalWsUrl() helper
+│   │   ├── api.ts               # REST client + getTerminalWsPath() helper
 │   │   └── constants.ts         # Breakpoints, configuration
 │   └── main.tsx
 ├── dist/                         # Built assets (served by dashboard-server)
@@ -731,7 +734,7 @@ const CONFIG = {
 | `dashboard/src/components/TabBar.tsx` | Tab bar with close buttons |
 | `dashboard/src/components/StatusPanel.tsx` | Project status from projectlist.md |
 | `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state |
-| `dashboard/src/lib/api.ts` | REST client + getTerminalWsUrl() |
+| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath() |
 
 #### Templates
 
@@ -1659,8 +1662,8 @@ base+70-99: Reserved for future use
 - **JSON**: State management and configuration
 
 ### Optional Dependencies (Agent-Farm)
-- **tmux**: Session persistence for builder terminals (recommended)
-- **ttyd**: Web-based terminal interface (required for dashboard)
+- **tmux**: Session persistence for architect terminal (recommended)
+- **node-pty**: Native PTY sessions for dashboard terminals (compiled during install, may need `npm rebuild node-pty`)
 
 ## System-Wide Patterns
 
