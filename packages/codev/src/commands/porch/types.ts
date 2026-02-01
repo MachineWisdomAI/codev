@@ -131,6 +131,8 @@ export interface ProjectState {
   build_complete: boolean;                 // Has build finished this iteration?
   history: IterationRecord[];              // History of all iterations (for context)
   awaiting_input?: boolean;                 // Worker signaled it needs human input
+  awaiting_input_output?: string;           // Output file path when AWAITING_INPUT was set (for resume guard)
+  awaiting_input_hash?: string;            // SHA-256 hash of output at time of AWAITING_INPUT (for resume guard)
   context?: Record<string, string>;        // User-provided context (e.g., answers to questions)
   started_at: string;
   updated_at: string;

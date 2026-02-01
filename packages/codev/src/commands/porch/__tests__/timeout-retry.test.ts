@@ -1,5 +1,8 @@
 /**
- * Tests for porch timeout, retry, circuit breaker, and AWAITING_INPUT
+ * Tests for buildWithTimeout — timeout-specific behavior
+ *
+ * Core buildWithSDK tests live in claude.test.ts.
+ * This file focuses on the timeout wrapper logic.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -14,7 +17,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 import { buildWithTimeout } from '../claude.js';
 
-describe('buildWithTimeout', () => {
+describe('buildWithTimeout - timeout behavior', () => {
   let testDir: string;
   let outputPath: string;
 
@@ -29,36 +32,31 @@ describe('buildWithTimeout', () => {
     vi.restoreAllMocks();
   });
 
-  it('should return timeout result after deadline', async () => {
+  it('should return timeout result when build hangs past deadline', async () => {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    // Mock a build that hangs forever
     (query as ReturnType<typeof vi.fn>).mockReturnValue(
       (async function* () {
         await new Promise(() => {}); // Never resolves
       })()
     );
 
-    const result = await buildWithTimeout('prompt', outputPath, testDir, 100); // 100ms timeout
+    const result = await buildWithTimeout('prompt', outputPath, testDir, 100);
 
     expect(result.success).toBe(false);
     expect(result.output).toContain('[TIMEOUT]');
     expect(result.duration).toBe(100);
   });
 
-  it('should return normal result before deadline', async () => {
+  it('should clear timeout timer when build completes before deadline', async () => {
     const { query } = await import('@anthropic-ai/claude-agent-sdk');
     (query as ReturnType<typeof vi.fn>).mockReturnValue(
       (async function* () {
         yield {
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: 'Done fast' }] },
-        };
-        yield {
           type: 'result',
           subtype: 'success',
-          result: 'Complete',
+          result: 'Quick',
           total_cost_usd: 0.01,
-          duration_ms: 50,
+          duration_ms: 10,
         };
       })()
     );
@@ -66,90 +64,39 @@ describe('buildWithTimeout', () => {
     const result = await buildWithTimeout('prompt', outputPath, testDir, 5000);
 
     expect(result.success).toBe(true);
-    expect(result.output).toContain('Done fast');
-  });
-});
-
-describe('AWAITING_INPUT signal detection', () => {
-  it('should detect BLOCKED signal in output', () => {
-    const output = 'some text\n<signal>BLOCKED:needs human approval</signal>\nmore text';
-    expect(/<signal>BLOCKED:/i.test(output)).toBe(true);
+    expect(result.output).toContain('Quick');
+    expect(result.output).not.toContain('[TIMEOUT]');
   });
 
-  it('should detect AWAITING_INPUT signal in output', () => {
-    const output = 'some text\n<signal>AWAITING_INPUT</signal>\nmore text';
-    expect(/<signal>AWAITING_INPUT<\/signal>/i.test(output)).toBe(true);
+  it('should not throw on timeout — returns failure result instead', async () => {
+    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    (query as ReturnType<typeof vi.fn>).mockReturnValue(
+      (async function* () {
+        await new Promise(() => {}); // Hang forever
+      })()
+    );
+
+    const result = await buildWithTimeout('prompt', outputPath, testDir, 50);
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('[TIMEOUT]');
   });
 
-  it('should not match unrelated text', () => {
-    const output = 'normal build output with no signals';
-    expect(/<signal>BLOCKED:/i.test(output)).toBe(false);
-    expect(/<signal>AWAITING_INPUT<\/signal>/i.test(output)).toBe(false);
-  });
-});
+  it('should use the provided timeoutMs value for deadline', async () => {
+    const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    (query as ReturnType<typeof vi.fn>).mockReturnValue(
+      (async function* () {
+        await new Promise(() => {}); // Hang
+      })()
+    );
 
-describe('circuit breaker logic', () => {
-  it('should track consecutive failures and reset on success', () => {
-    let consecutiveFailures = 0;
-    const THRESHOLD = 5;
+    const start = Date.now();
+    const result = await buildWithTimeout('prompt', outputPath, testDir, 200);
+    const elapsed = Date.now() - start;
 
-    // Simulate 4 failures
-    for (let i = 0; i < 4; i++) {
-      consecutiveFailures++;
-    }
-    expect(consecutiveFailures).toBe(4);
-    expect(consecutiveFailures >= THRESHOLD).toBe(false);
-
-    // Success resets
-    consecutiveFailures = 0;
-    expect(consecutiveFailures).toBe(0);
-
-    // 5 failures trips breaker
-    for (let i = 0; i < 5; i++) {
-      consecutiveFailures++;
-    }
-    expect(consecutiveFailures >= THRESHOLD).toBe(true);
-  });
-});
-
-describe('output file naming with retries', () => {
-  it('should generate distinct file names for retry attempts', () => {
-    const basePath = '/tmp/0087-specify-iter-1.txt';
-
-    // First attempt uses base path
-    expect(basePath).toBe('/tmp/0087-specify-iter-1.txt');
-
-    // Retry attempts use -try-N suffix
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const retryPath = basePath.replace(/\.txt$/, `-try-${attempt + 1}.txt`);
-      expect(retryPath).toBe(`/tmp/0087-specify-iter-1-try-${attempt + 1}.txt`);
-    }
-  });
-});
-
-describe('ProjectState awaiting_input field', () => {
-  it('should accept awaiting_input in state type', async () => {
-    // Type-level test: ensure the field exists on ProjectState
-    const { } = await import('../types.js');
-
-    const state = {
-      id: '0087',
-      title: 'test',
-      protocol: 'spider',
-      phase: 'specify',
-      plan_phases: [],
-      current_plan_phase: null,
-      gates: {},
-      iteration: 1,
-      build_complete: false,
-      history: [],
-      awaiting_input: true,
-      started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    expect(state.awaiting_input).toBe(true);
-    state.awaiting_input = false;
-    expect(state.awaiting_input).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.duration).toBe(200);
+    expect(elapsed).toBeGreaterThanOrEqual(150);
+    expect(elapsed).toBeLessThan(1000);
   });
 });

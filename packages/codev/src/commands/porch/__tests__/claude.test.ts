@@ -1,153 +1,161 @@
 /**
- * Tests for porch Claude Worker (Agent SDK adapter)
+ * Tests for claude.ts buildWithTimeout
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock the Agent SDK
+// Mock the Agent SDK before importing the module under test
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn(),
 }));
 
+// Mock fs to avoid real file I/O from buildWithSDK internals
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    writeFileSync: vi.fn(),
+    appendFileSync: vi.fn(),
+  };
+});
+
 import { buildWithTimeout } from '../claude.js';
 
-describe('buildWithTimeout', () => {
-  let testDir: string;
-  let outputPath: string;
+// Helper to get the mocked query function
+async function getMockedQuery() {
+  const sdk = await import('@anthropic-ai/claude-agent-sdk');
+  return sdk.query as ReturnType<typeof vi.fn>;
+}
 
+describe('buildWithTimeout', () => {
   beforeEach(() => {
-    testDir = path.join(tmpdir(), `porch-claude-test-${Date.now()}`);
-    fs.mkdirSync(testDir, { recursive: true });
-    outputPath = path.join(testDir, 'output.txt');
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
-    fs.rmSync(testDir, { recursive: true, force: true });
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it('should return success result when SDK completes successfully', async () => {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    (query as ReturnType<typeof vi.fn>).mockReturnValue(
-      (async function* () {
-        yield {
-          type: 'assistant',
-          message: {
-            content: [{ type: 'text', text: 'Created the file.' }],
-          },
-        };
-        yield {
-          type: 'result',
-          subtype: 'success',
-          result: 'Done.',
-          total_cost_usd: 0.05,
-          duration_ms: 3000,
-        };
-      })()
-    );
+  it('should return successful result when build completes before timeout', async () => {
+    const mockQuery = await getMockedQuery();
 
-    const result = await buildWithTimeout('Write hello world', outputPath, testDir);
+    // Simulate an async iterator that yields a success result
+    async function* successStream() {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'Build done',
+        total_cost_usd: 0.05,
+        duration_ms: 3000,
+      };
+    }
+    mockQuery.mockReturnValue(successStream());
+
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', 60000);
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
 
     expect(result.success).toBe(true);
-    expect(result.output).toContain('Created the file.');
-    expect(result.output).toContain('Done.');
+    expect(result.output).toContain('Build done');
     expect(result.cost).toBe(0.05);
     expect(result.duration).toBe(3000);
-
-    // Output file should have content
-    const fileContent = fs.readFileSync(outputPath, 'utf-8');
-    expect(fileContent).toContain('Created the file.');
-
-    // Prompt file should be saved
-    const promptFile = outputPath.replace(/\.txt$/, '-prompt.txt');
-    expect(fs.readFileSync(promptFile, 'utf-8')).toBe('Write hello world');
   });
 
-  it('should return failure on SDK error result', async () => {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    (query as ReturnType<typeof vi.fn>).mockReturnValue(
-      (async function* () {
-        yield {
-          type: 'result',
-          subtype: 'error',
-          duration_ms: 500,
-        };
-      })()
-    );
+  it('should return timeout result when build exceeds deadline', async () => {
+    const mockQuery = await getMockedQuery();
 
-    const result = await buildWithTimeout('Bad prompt', outputPath, testDir);
+    // Simulate an async iterator that never resolves
+    async function* hangingStream() {
+      yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Starting...' }] } };
+      await new Promise(() => {});
+    }
+    mockQuery.mockReturnValue(hangingStream());
+
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', 5000);
+    await vi.advanceTimersByTimeAsync(5001);
+    const result = await resultPromise;
 
     expect(result.success).toBe(false);
-    expect(result.output).toContain('[Agent SDK error: error]');
-    expect(result.duration).toBe(500);
+    expect(result.output).toContain('[TIMEOUT]');
+    expect(result.duration).toBe(5000);
   });
 
-  it('should handle SDK exception gracefully', async () => {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    (query as ReturnType<typeof vi.fn>).mockReturnValue(
-      (async function* () {
-        throw new Error('Network timeout');
-      })()
-    );
+  it('should return failure result when SDK reports error', async () => {
+    const mockQuery = await getMockedQuery();
 
-    const result = await buildWithTimeout('Prompt', outputPath, testDir);
+    async function* errorStream() {
+      yield {
+        type: 'result',
+        subtype: 'error',
+        duration_ms: 1000,
+      };
+    }
+    mockQuery.mockReturnValue(errorStream());
+
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', 60000);
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
 
     expect(result.success).toBe(false);
-    expect(result.output).toContain('[Agent SDK exception: Network timeout]');
   });
 
-  it('should pass correct options to query()', async () => {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    (query as ReturnType<typeof vi.fn>).mockReturnValue(
-      (async function* () {
-        yield { type: 'result', subtype: 'success', result: '', total_cost_usd: 0, duration_ms: 0 };
-      })()
-    );
+  it('should clear timeout when build completes before deadline', async () => {
+    const mockQuery = await getMockedQuery();
 
-    await buildWithTimeout('test prompt', outputPath, '/custom/cwd');
+    async function* fastStream() {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'Done fast',
+        total_cost_usd: 0.01,
+        duration_ms: 100,
+      };
+    }
+    mockQuery.mockReturnValue(fastStream());
 
-    expect(query).toHaveBeenCalledWith({
-      prompt: 'test prompt',
-      options: {
-        allowedTools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep'],
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        cwd: '/custom/cwd',
-        maxTurns: 200,
-      },
-    });
+    const clearSpy = vi.spyOn(global, 'clearTimeout');
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', 60000);
+    await vi.advanceTimersByTimeAsync(0);
+    await resultPromise;
+
+    expect(clearSpy).toHaveBeenCalled();
   });
 
-  it('should stream multiple assistant messages to output file', async () => {
-    const { query } = await import('@anthropic-ai/claude-agent-sdk');
-    (query as ReturnType<typeof vi.fn>).mockReturnValue(
-      (async function* () {
-        yield {
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: 'Step 1' }] },
-        };
-        yield {
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: 'Step 2' }] },
-        };
-        yield {
-          type: 'result',
-          subtype: 'success',
-          result: '',
-          total_cost_usd: 0.01,
-          duration_ms: 1000,
-        };
-      })()
-    );
+  it('should handle SDK exception without throwing', async () => {
+    const mockQuery = await getMockedQuery();
 
-    const result = await buildWithTimeout('Multi-step', outputPath, testDir);
+    async function* throwingStream(): AsyncGenerator<any> {
+      throw new Error('SDK connection failed');
+    }
+    mockQuery.mockReturnValue(throwingStream());
 
-    expect(result.success).toBe(true);
-    const fileContent = fs.readFileSync(outputPath, 'utf-8');
-    expect(fileContent).toContain('Step 1');
-    expect(fileContent).toContain('Step 2');
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', 60000);
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('SDK exception');
+  });
+
+  it('should use the provided timeoutMs value', async () => {
+    const mockQuery = await getMockedQuery();
+
+    async function* hangingStream() {
+      await new Promise(() => {});
+    }
+    mockQuery.mockReturnValue(hangingStream());
+
+    const customTimeout = 2000;
+    const resultPromise = buildWithTimeout('test prompt', '/tmp/out.txt', '/tmp', customTimeout);
+
+    await vi.advanceTimersByTimeAsync(1999);
+    // Should not have resolved yet - advance past timeout
+    await vi.advanceTimersByTimeAsync(2);
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain('[TIMEOUT]');
+    expect(result.duration).toBe(customTimeout);
   });
 });

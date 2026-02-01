@@ -22,14 +22,6 @@ export interface BuildResult {
 }
 
 /**
- * Run a build phase using the Agent SDK.
- *
- * Porch calls this for each BUILD step. The Worker (Claude via Agent SDK)
- * receives a prompt, does work with full tools, and returns a result.
- *
- * Output is streamed to `outputPath` for debugging/monitoring.
- */
-/**
  * Run a build phase with a timeout.
  *
  * Wraps buildWithSDK with Promise.race against a timeout.
@@ -39,10 +31,11 @@ export async function buildWithTimeout(
   prompt: string,
   outputPath: string,
   cwd: string,
-  timeoutMs: number = 15 * 60 * 1000
+  timeoutMs: number
 ): Promise<BuildResult> {
+  let timer: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<BuildResult>((resolve) => {
-    setTimeout(() => {
+    timer = setTimeout(() => {
       resolve({
         success: false,
         output: '[TIMEOUT] Build exceeded deadline',
@@ -51,7 +44,9 @@ export async function buildWithTimeout(
     }, timeoutMs);
   });
 
-  return Promise.race([buildWithSDK(prompt, outputPath, cwd), timeoutPromise]);
+  const result = await Promise.race([buildWithSDK(prompt, outputPath, cwd), timeoutPromise]);
+  clearTimeout(timer!);
+  return result;
 }
 
 /**

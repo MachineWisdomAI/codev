@@ -14,7 +14,7 @@ import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
 import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig, getBuildConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
-import { buildWithTimeout, BUILD_TIMEOUT_MS } from './claude.js';
+import { buildWithTimeout } from './claude.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 import { globSync } from 'node:fs';
@@ -86,6 +86,12 @@ export interface RunOptions {
 /** Exit code when AWAITING_INPUT is detected in non-interactive mode */
 export const EXIT_AWAITING_INPUT = 3;
 
+// Build constants — all build-loop settings centralized here (spec §Configuration)
+const BUILD_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const BUILD_MAX_RETRIES = 3;
+const BUILD_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
+const CIRCUIT_BREAKER_THRESHOLD = 5;
+
 /**
  * Main run loop for porch.
  * Spawns Claude for each phase and monitors until protocol complete.
@@ -117,10 +123,24 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
   while (true) {
     state = readState(statusPath);
 
-    // AWAITING_INPUT resume guard
+    // AWAITING_INPUT resume guard — prevent infinite resume loops (spec §AWAITING_INPUT resume guard)
     if (state.awaiting_input) {
+      // If we have a previous output hash, check if the file has changed.
+      // If unchanged, the human hasn't resolved the blocker — halt.
+      if (state.awaiting_input_output && state.awaiting_input_hash && fs.existsSync(state.awaiting_input_output)) {
+        const crypto = await import('node:crypto');
+        const currentHash = crypto.createHash('sha256').update(fs.readFileSync(state.awaiting_input_output)).digest('hex');
+        if (currentHash === state.awaiting_input_hash) {
+          console.error(chalk.red('[PORCH] AWAITING_INPUT output unchanged since last run. Resolve the blocker before restarting.'));
+          console.error(chalk.dim(`  Output file: ${state.awaiting_input_output}`));
+          process.exit(EXIT_AWAITING_INPUT);
+        }
+      }
+
       console.log(chalk.yellow('[PORCH] Resuming from AWAITING_INPUT state'));
       state.awaiting_input = false;
+      delete state.awaiting_input_output;
+      delete state.awaiting_input_hash;
       writeState(statusPath, state);
       // Continue normally — will re-run the build phase
     }
@@ -238,12 +258,17 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
           // Run on_complete actions (commit + push)
           await runOnComplete(projectRoot, state, protocol, reviews);
 
-          // Request gate
+          // Request gate or advance plan phase
           if (gateName) {
             state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
+          } else if (isPhased(protocol, state.phase)) {
+            // No gate on a per_plan_phase type — advance plan phase directly
+            const { done } = await import('./index.js');
+            await done(projectRoot, state.id);
+            state = readState(statusPath); // Re-read after done() modifies state
           }
 
-          // Reset for next phase
+          // Reset for next iteration
           state.build_complete = false;
           state.iteration = 1;
           state.history = [];
@@ -475,9 +500,15 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
     }
 
     // AWAITING_INPUT detection
-    if (result.output && (/<signal>BLOCKED:/i.test(result.output) || /<signal>AWAITING_INPUT<\/signal>/i.test(result.output))) {
+    if (result.output && (/^<signal>BLOCKED:/im.test(result.output) || /^<signal>AWAITING_INPUT<\/signal>/im.test(result.output))) {
       console.error(chalk.yellow(`[PORCH] Worker needs human input — check output file: ${actualOutputPath}`));
       state.awaiting_input = true;
+      state.awaiting_input_output = actualOutputPath;
+      // Store hash of output for resume guard comparison
+      if (fs.existsSync(actualOutputPath)) {
+        const crypto = await import('node:crypto');
+        state.awaiting_input_hash = crypto.createHash('sha256').update(fs.readFileSync(actualOutputPath)).digest('hex');
+      }
       writeState(statusPath, state);
       process.exit(EXIT_AWAITING_INPUT);
     }
@@ -499,6 +530,17 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
         console.log(chalk.red('\nWorker failed after all retries.'));
         console.log(chalk.dim(`Check output: ${actualOutputPath}`));
         consecutiveFailures++;
+
+        // In single-phase or single-iteration mode, return control to the caller
+        if (singlePhase) {
+          outputSinglePhaseResult(state, 'failed');
+          return;
+        }
+        if (singleIteration) {
+          console.log(chalk.dim('\n[--single-iteration] Build failed. Exiting.'));
+          return;
+        }
+
         // Loop back to top where circuit breaker check will halt if threshold reached
         continue;
       }
@@ -585,11 +627,6 @@ function getConsultArtifactType(phaseId: string): string {
  * - Retry up to 3 times with exponential backoff
  * - If all retries fail, return CONSULT_ERROR (not REQUEST_CHANGES)
  */
-// Build retry constants (BUILD_TIMEOUT_MS imported from claude.ts)
-const BUILD_MAX_RETRIES = 3;
-const BUILD_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
-const CIRCUIT_BREAKER_THRESHOLD = 5;
-
 const CONSULT_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour
 const CONSULT_MAX_RETRIES = 3;
 const CONSULT_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
