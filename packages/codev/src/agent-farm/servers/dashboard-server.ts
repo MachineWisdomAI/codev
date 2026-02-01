@@ -33,12 +33,14 @@ import {
   addUtil,
   tryAddUtil,
   removeUtil,
+  updateUtil,
   getBuilder,
   getBuilders,
   removeBuilder,
   upsertBuilder,
   clearState,
   getArchitect,
+  setArchitect,
 } from '../state.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 
@@ -168,6 +170,74 @@ if (useReactDashboard) {
 }
 const terminalManager = new TerminalManager({ projectRoot });
 console.log('Terminal backend: node-pty');
+
+// Clear stale terminalIds on startup — TerminalManager starts empty, so any
+// persisted terminalId from a previous run is no longer valid.
+{
+  const arch = getArchitect();
+  if (arch?.terminalId) {
+    setArchitect({ ...arch, terminalId: undefined });
+  }
+  for (const builder of getBuilders()) {
+    if (builder.terminalId) {
+      upsertBuilder({ ...builder, terminalId: undefined });
+    }
+  }
+  for (const util of getUtils()) {
+    if (util.terminalId) {
+      updateUtil(util.id, { terminalId: undefined });
+    }
+  }
+}
+
+// Auto-create architect PTY session if architect exists with a tmux session
+async function initArchitectTerminal(): Promise<void> {
+  const architect = getArchitect();
+  if (!architect || !architect.tmuxSession || architect.terminalId) return;
+
+  try {
+    // Use tmux directly (not via bash -c) to avoid DA response chaff.
+    // bash -c creates a brief window where readline echoes DA responses as text.
+    const info = await terminalManager!.createSession({
+      command: 'tmux',
+      args: ['attach-session', '-t', architect.tmuxSession],
+      cwd: projectRoot,
+      cols: 200,
+      rows: 50,
+      label: 'architect',
+    });
+    if (info) {
+      setArchitect({ ...architect, terminalId: info.id });
+      console.log(`Architect terminal session created: ${info.id}`);
+    }
+  } catch (err) {
+    console.error('Failed to create architect terminal session:', (err as Error).message);
+  }
+}
+// Poll for architect state and create PTY session once available
+// start.ts writes architect to DB before spawning this server, but there can be a small delay
+(async function waitForArchitectAndInit() {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const arch = getArchitect();
+      if (!arch) continue;
+      if (arch.terminalId) return; // Already has terminal
+      if (!arch.tmuxSession) continue; // No tmux session yet
+      console.log(`initArchitectTerminal: attempt ${attempt + 1}, tmux=${arch.tmuxSession}`);
+      await initArchitectTerminal();
+      const updated = getArchitect();
+      if (updated?.terminalId) {
+        console.log(`initArchitectTerminal: success, terminalId=${updated.terminalId}`);
+        return;
+      }
+      console.log(`initArchitectTerminal: attempt ${attempt + 1} failed, terminalId still unset`);
+    } catch (err) {
+      console.error(`initArchitectTerminal: attempt ${attempt + 1} error:`, (err as Error).message);
+    }
+  }
+  console.warn('initArchitectTerminal: gave up after 30 attempts');
+})();
 // Log telemetry
 try {
   const metricsPath = path.join(projectRoot, '.agent-farm', 'metrics.log');
@@ -318,6 +388,9 @@ async function killProcessGracefully(pid: number, tmuxSession?: string): Promise
   if (tmuxSession) {
     killTmuxSession(tmuxSession);
   }
+
+  // Guard: PID 0 sends signal to entire process group — never do that
+  if (!pid || pid <= 0) return;
 
   try {
     // First try SIGTERM
@@ -1569,6 +1642,7 @@ const server = http.createServer(async (req, res) => {
         pid: 0,
         tmuxSession: sessionName,
         worktreePath: worktreePath,
+        terminalId,
       };
       addUtil(util);
 
@@ -1666,6 +1740,10 @@ const server = http.createServer(async (req, res) => {
         const tabUtils = getUtils();
         const util = tabUtils.find((u) => u.id === utilId);
         if (util) {
+          // Kill PTY session if present
+          if (util.terminalId && terminalManager) {
+            terminalManager.killSession(util.terminalId);
+          }
           await killProcessGracefully(util.pid, util.tmuxSession);
           // Note: worktrees are NOT cleaned up on tab close - they may contain useful context
           // Users can manually clean up with `git worktree list` and `git worktree remove`

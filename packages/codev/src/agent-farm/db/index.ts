@@ -150,6 +150,21 @@ function ensureLocalDatabase(): Database.Database {
     console.log('[info] Created new state.db at', dbPath);
   }
 
+  // Migration v2: Add terminal_id columns (node-pty rewrite)
+  const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
+  if (!v2) {
+    // Add terminal_id to tables that may already exist without it
+    const tables = ['architect', 'builders', 'utils'];
+    for (const table of tables) {
+      try {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN terminal_id TEXT`);
+      } catch {
+        // Column already exists (fresh install ran full schema)
+      }
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
+  }
+
   return db;
 }
 

@@ -29,8 +29,10 @@ export function Terminal({ wsPath }: TerminalProps) {
     // Create xterm.js instance
     const term = new XTerm({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: 13,
+      lineHeight: 1,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      customGlyphs: true,
       theme: {
         background: '#1a1a1a',
         foreground: '#e0e0e0',
@@ -48,13 +50,15 @@ export function Terminal({ wsPath }: TerminalProps) {
     // Open terminal in the container
     term.open(containerRef.current);
 
-    // Try WebGL renderer for performance, fall back silently
+    // Try WebGL renderer for performance, fall back to canvas
     try {
       const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
       term.loadAddon(webglAddon);
     } catch {
-      // Canvas renderer is fine
+      // Canvas renderer is fine as fallback
     }
 
     fitAddon.fit();
@@ -65,6 +69,29 @@ export function Terminal({ wsPath }: TerminalProps) {
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
+
+    // Filter DA (Device Attribute) response sequences that tmux echoes as visible
+    // text when attaching to an existing session. These can arrive fragmented across
+    // WebSocket frames, so we buffer initial data and do a single bulk filter.
+    let initialBuffer = '';
+    let initialPhase = true;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const filterDA = (text: string): string => {
+      // DA1: ESC[?...c  DA2: ESC[>...c  (with or without ESC prefix)
+      text = text.replace(/\x1b\[[\?>][\d;]*c/g, '');
+      text = text.replace(/\[[\?>][\d;]*c/g, '');
+      return text;
+    };
+
+    const flushInitialBuffer = () => {
+      initialPhase = false;
+      if (initialBuffer) {
+        const filtered = filterDA(initialBuffer);
+        if (filtered) term.write(filtered);
+        initialBuffer = '';
+      }
+    };
 
     ws.onopen = () => {
       // Send initial resize
@@ -80,7 +107,17 @@ export function Terminal({ wsPath }: TerminalProps) {
 
       if (prefix === FRAME_DATA) {
         const text = new TextDecoder().decode(payload);
-        term.write(text);
+
+        if (initialPhase) {
+          // Buffer initial data to catch fragmented DA responses
+          initialBuffer += text;
+          if (flushTimer) clearTimeout(flushTimer);
+          flushTimer = setTimeout(flushInitialBuffer, 300);
+        } else {
+          // After initial phase, still filter for safety but write immediately
+          const filtered = filterDA(text);
+          if (filtered) term.write(filtered);
+        }
       } else if (prefix === FRAME_CONTROL) {
         // Handle control messages (pong, error, etc.) if needed
       }
@@ -114,6 +151,7 @@ export function Terminal({ wsPath }: TerminalProps) {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      if (flushTimer) clearTimeout(flushTimer);
       resizeObserver.disconnect();
       ws.close();
       term.dispose();

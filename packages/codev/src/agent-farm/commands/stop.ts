@@ -2,10 +2,41 @@
  * Stop command - stops all agent farm processes
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { loadState, clearState } from '../state.js';
 import { logger } from '../utils/logger.js';
-import { killProcess, isProcessRunning, run } from '../utils/shell.js';
+import { killProcess, killProcessTree, isProcessRunning, run } from '../utils/shell.js';
 import { getConfig } from '../utils/config.js';
+
+const execFileAsync = promisify(execFile);
+
+/** Kill a tmux session by name. Uses execFile (no shell) to avoid injection.
+ *  If expectedPid is provided, verifies the session's PID matches before killing
+ *  to prevent cross-project kills when two projects share the same basename.
+ */
+async function killTmuxSession(sessionName: string, expectedPid?: number): Promise<void> {
+  if (expectedPid && expectedPid > 0) {
+    // Verify the session belongs to this project by checking its PID
+    try {
+      const { stdout } = await execFileAsync('tmux', [
+        'list-sessions', '-F', '#{session_name} #{session_pid}',
+      ]);
+      const line = stdout.trim().split('\n').find(l => l.startsWith(sessionName + ' '));
+      if (line) {
+        const sessionPid = parseInt(line.split(' ')[1], 10);
+        if (sessionPid !== expectedPid && !isNaN(sessionPid)) {
+          // PID mismatch — this session belongs to a different project
+          throw new Error(`Session ${sessionName} PID ${sessionPid} != expected ${expectedPid}`);
+        }
+      }
+    } catch (err) {
+      if ((err as Error).message?.includes('PID')) throw err;
+      // tmux command failed — fall through to kill attempt
+    }
+  }
+  await execFileAsync('tmux', ['kill-session', '-t', sessionName]);
+}
 
 /**
  * Find orphan agent-farm processes for this project that aren't in state
@@ -78,11 +109,23 @@ export async function stop(): Promise<void> {
   for (const util of state.utils) trackedPids.add(util.pid);
   for (const annotation of state.annotations) trackedPids.add(annotation.pid);
 
-  // Stop architect
+  // Stop architect — kill tmux session by name (safer than tree-kill)
   if (state.architect) {
     logger.info(`Stopping architect (PID: ${state.architect.pid})`);
     try {
-      if (await isProcessRunning(state.architect.pid)) {
+      // Kill tmux session by name — this cleanly terminates the session and its processes
+      if (state.architect.tmuxSession) {
+        try {
+          await killTmuxSession(state.architect.tmuxSession, state.architect.pid);
+          stopped++;
+        } catch {
+          // Session may already be gone, try PID fallback
+          if (await isProcessRunning(state.architect.pid)) {
+            await killProcess(state.architect.pid);
+            stopped++;
+          }
+        }
+      } else if (await isProcessRunning(state.architect.pid)) {
         await killProcess(state.architect.pid);
         stopped++;
       }
@@ -91,11 +134,21 @@ export async function stop(): Promise<void> {
     }
   }
 
-  // Stop all builders
+  // Stop all builders — prefer tmux kill-session over PID kill
   for (const builder of state.builders) {
     logger.info(`Stopping builder ${builder.id} (PID: ${builder.pid})`);
     try {
-      if (await isProcessRunning(builder.pid)) {
+      if (builder.tmuxSession) {
+        try {
+          await killTmuxSession(builder.tmuxSession, builder.pid);
+          stopped++;
+        } catch {
+          if (await isProcessRunning(builder.pid)) {
+            await killProcess(builder.pid);
+            stopped++;
+          }
+        }
+      } else if (await isProcessRunning(builder.pid)) {
         await killProcess(builder.pid);
         stopped++;
       }
@@ -104,11 +157,21 @@ export async function stop(): Promise<void> {
     }
   }
 
-  // Stop all utils
+  // Stop all utils — prefer tmux kill-session over PID kill
   for (const util of state.utils) {
     logger.info(`Stopping util ${util.id} (PID: ${util.pid})`);
     try {
-      if (await isProcessRunning(util.pid)) {
+      if (util.tmuxSession) {
+        try {
+          await killTmuxSession(util.tmuxSession, util.pid);
+          stopped++;
+        } catch {
+          if (await isProcessRunning(util.pid)) {
+            await killProcess(util.pid);
+            stopped++;
+          }
+        }
+      } else if (await isProcessRunning(util.pid)) {
         await killProcess(util.pid);
         stopped++;
       }
@@ -117,12 +180,12 @@ export async function stop(): Promise<void> {
     }
   }
 
-  // Stop all annotations
+  // Stop all annotations — use tree-kill since these are standalone node servers
   for (const annotation of state.annotations) {
     logger.info(`Stopping annotation ${annotation.id} (PID: ${annotation.pid})`);
     try {
       if (await isProcessRunning(annotation.pid)) {
-        await killProcess(annotation.pid);
+        await killProcessTree(annotation.pid);
         stopped++;
       }
     } catch (error) {
@@ -142,7 +205,7 @@ export async function stop(): Promise<void> {
       try {
         if (await isProcessRunning(pid)) {
           logger.info(`  Killing orphan PID ${pid}`);
-          await killProcess(pid);
+          await killProcessTree(pid);
           stopped++;
         }
       } catch (error) {

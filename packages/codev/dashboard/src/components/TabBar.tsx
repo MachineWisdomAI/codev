@@ -12,18 +12,8 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onRefresh }: TabBarProp
   const handleClose = async (e: React.MouseEvent, tab: Tab) => {
     e.stopPropagation();
     try {
-      // Determine the API ID for deletion
-      let deleteId: string;
-      if (tab.type === 'shell' && tab.utilId) {
-        deleteId = tab.utilId;
-      } else if (tab.type === 'file' && tab.annotationId) {
-        deleteId = tab.annotationId;
-      } else if (tab.type === 'builder' && tab.projectId) {
-        deleteId = tab.projectId;
-      } else {
-        return;
-      }
-      await deleteTab(deleteId);
+      // Server expects the full prefixed ID (shell-<id>, builder-<id>, file-<id>)
+      await deleteTab(tab.id);
       onRefresh();
     } catch (err) {
       console.error('Failed to close tab:', err);

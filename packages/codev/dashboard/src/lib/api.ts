@@ -36,6 +36,7 @@ export interface ArchitectState {
   port: number;
   pid: number;
   tmuxSession?: string;
+  terminalId?: string;
 }
 
 export interface DashboardState {
@@ -116,7 +117,8 @@ export async function stopAll(): Promise<void> {
 /** Get WebSocket path for a terminal tab's node-pty session. */
 export function getTerminalWsPath(tab: { type: string; terminalId?: string }): string | null {
   if (tab.terminalId) {
-    return `/ws/terminal/${tab.terminalId}`;
+    const base = getApiBase();
+    return `${base}ws/terminal/${tab.terminalId}`;
   }
   return null;
 }

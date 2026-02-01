@@ -58,14 +58,15 @@ export function setArchitect(architect: ArchitectState | null): void {
     db.prepare('DELETE FROM architect WHERE id = 1').run();
   } else {
     db.prepare(`
-      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session)
-      VALUES (1, @pid, @port, @cmd, @startedAt, @tmuxSession)
+      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session, terminal_id)
+      VALUES (1, @pid, @port, @cmd, @startedAt, @tmuxSession, @terminalId)
     `).run({
       pid: architect.pid,
       port: architect.port,
       cmd: architect.cmd,
       startedAt: architect.startedAt,
       tmuxSession: architect.tmuxSession ?? null,
+      terminalId: architect.terminalId ?? null,
     });
   }
 }
@@ -80,11 +81,11 @@ export function upsertBuilder(builder: Builder): void {
   db.prepare(`
     INSERT INTO builders (
       id, name, port, pid, status, phase, worktree, branch,
-      tmux_session, type, task_text, protocol_name, issue_number
+      tmux_session, type, task_text, protocol_name, issue_number, terminal_id
     )
     VALUES (
       @id, @name, @port, @pid, @status, @phase, @worktree, @branch,
-      @tmuxSession, @type, @taskText, @protocolName, @issueNumber
+      @tmuxSession, @type, @taskText, @protocolName, @issueNumber, @terminalId
     )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
@@ -98,7 +99,8 @@ export function upsertBuilder(builder: Builder): void {
       type = excluded.type,
       task_text = excluded.task_text,
       protocol_name = excluded.protocol_name,
-      issue_number = excluded.issue_number
+      issue_number = excluded.issue_number,
+      terminal_id = excluded.terminal_id
   `).run({
     id: builder.id,
     name: builder.name,
@@ -113,6 +115,7 @@ export function upsertBuilder(builder: Builder): void {
     taskText: builder.taskText ?? null,
     protocolName: builder.protocolName ?? null,
     issueNumber: builder.issueNumber ?? null,
+    terminalId: builder.terminalId ?? null,
   });
 }
 
@@ -160,14 +163,15 @@ export function addUtil(util: UtilTerminal): void {
   const db = getDb();
 
   db.prepare(`
-    INSERT INTO utils (id, name, port, pid, tmux_session)
-    VALUES (@id, @name, @port, @pid, @tmuxSession)
+    INSERT INTO utils (id, name, port, pid, tmux_session, terminal_id)
+    VALUES (@id, @name, @port, @pid, @tmuxSession, @terminalId)
   `).run({
     id: util.id,
     name: util.name,
     port: util.port,
     pid: util.pid,
     tmuxSession: util.tmuxSession ?? null,
+    terminalId: util.terminalId ?? null,
   });
 }
 
@@ -184,6 +188,28 @@ export function tryAddUtil(util: UtilTerminal): boolean {
       return false;
     }
     throw err;
+  }
+}
+
+/**
+ * Update a utility terminal
+ */
+export function updateUtil(id: string, updates: Partial<UtilTerminal>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: Record<string, unknown> = { id };
+
+  if ('terminalId' in updates) {
+    fields.push('terminal_id = @terminalId');
+    values.terminalId = updates.terminalId ?? null;
+  }
+  if ('name' in updates) {
+    fields.push('name = @name');
+    values.name = updates.name;
+  }
+
+  if (fields.length > 0) {
+    db.prepare(`UPDATE utils SET ${fields.join(', ')} WHERE id = @id`).run(values);
   }
 }
 

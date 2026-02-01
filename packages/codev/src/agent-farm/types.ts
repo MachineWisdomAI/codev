@@ -48,6 +48,7 @@ export interface ArchitectState {
   cmd: string;
   startedAt: string;
   tmuxSession?: string;
+  terminalId?: string;
 }
 
 export interface DashboardState {

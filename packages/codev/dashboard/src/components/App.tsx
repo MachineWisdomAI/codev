@@ -1,13 +1,12 @@
 import { useBuilderStatus } from '../hooks/useBuilderStatus.js';
 import { useTabs } from '../hooks/useTabs.js';
 import { useMediaQuery } from '../hooks/useMediaQuery.js';
-import { MOBILE_BREAKPOINT } from '../lib/constants.js';
+import { MOBILE_BREAKPOINT, getApiBase } from '../lib/constants.js';
 import { getTerminalWsPath } from '../lib/api.js';
 import { SplitPane } from './SplitPane.js';
 import { TabBar } from './TabBar.js';
 import { Terminal } from './Terminal.js';
 import { StatusPanel } from './StatusPanel.js';
-import { FileTree } from './FileTree.js';
 import { MobileLayout } from './MobileLayout.js';
 
 export function App() {
@@ -21,19 +20,34 @@ export function App() {
     return <Terminal wsPath={wsPath} />;
   };
 
+  const renderAnnotation = (tab: { annotationId?: string }) => {
+    if (!tab.annotationId || !state) return <div className="no-terminal">No file viewer</div>;
+    const ann = state.annotations.find(a => a.id === tab.annotationId);
+    if (!ann) return <div className="no-terminal">Annotation not found</div>;
+    const src = `${getApiBase()}annotation/${ann.id}/`;
+    return (
+      <iframe
+        src={src}
+        className="terminal-iframe"
+        style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#1a1a1a' }}
+        title={`File: ${ann.file}`}
+        allow="clipboard-read; clipboard-write"
+      />
+    );
+  };
+
   const renderContent = () => {
     if (!activeTab) return null;
 
     switch (activeTab.type) {
       case 'dashboard':
-        return <StatusPanel state={state} onRefresh={refresh} />;
-      case 'files':
-        return <FileTree onRefresh={refresh} />;
+        return <StatusPanel state={state} onRefresh={refresh} onSelectTab={selectTab} />;
       case 'architect':
       case 'builder':
       case 'shell':
-      case 'file':
         return renderTerminal(activeTab);
+      case 'file':
+        return renderAnnotation(activeTab);
       default:
         return <div>Unknown tab type</div>;
     }
@@ -74,7 +88,7 @@ export function App() {
           right={
             <div className="right-panel">
               <TabBar
-                tabs={tabs}
+                tabs={tabs.filter(t => t.type !== 'architect')}
                 activeTabId={activeTabId}
                 onSelectTab={selectTab}
                 onRefresh={refresh}

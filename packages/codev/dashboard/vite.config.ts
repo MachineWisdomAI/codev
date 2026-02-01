@@ -14,6 +14,7 @@ export default defineConfig({
       '/annotation': 'http://localhost:4200',
     },
   },
+  base: './',
   build: {
     outDir: 'dist',
     sourcemap: true,

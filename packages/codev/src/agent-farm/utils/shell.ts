@@ -153,15 +153,43 @@ export async function isProcessRunning(pid: number): Promise<boolean> {
 }
 
 /**
- * Kill a process tree
+ * Kill a single process with SIGTERM → wait → SIGKILL escalation.
+ * Does NOT walk the process tree — safe for tmux processes where
+ * tree-kill could kill siblings across projects.
  */
 export async function killProcess(pid: number): Promise<void> {
+  // Send SIGTERM
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ESRCH') return; // already gone
+    throw err;
+  }
+
+  // Wait up to 3s for process to exit, then escalate to SIGKILL
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (!(await isProcessRunning(pid))) return;
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ESRCH') return;
+    throw err;
+  }
+}
+
+/**
+ * Kill a process tree (all children). Use for non-tmux processes
+ * like annotation servers and dashboard servers where children must also die.
+ */
+export async function killProcessTree(pid: number): Promise<void> {
   const treeKill = (await import('tree-kill')).default;
 
   return new Promise((resolve, reject) => {
     treeKill(pid, 'SIGTERM', (err) => {
       if (err) {
-        // Try SIGKILL if SIGTERM fails
         treeKill(pid, 'SIGKILL', (err2) => {
           if (err2) reject(err2);
           else resolve();

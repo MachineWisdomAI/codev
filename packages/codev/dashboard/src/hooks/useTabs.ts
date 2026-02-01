@@ -6,6 +6,7 @@ export interface Tab {
   type: 'dashboard' | 'files' | 'architect' | 'builder' | 'shell' | 'file' | 'activity';
   label: string;
   closable: boolean;
+  terminalId?: string;
   projectId?: string;
   utilId?: string;
   annotationId?: string;
@@ -15,11 +16,10 @@ export interface Tab {
 function buildTabs(state: DashboardState | null): Tab[] {
   const tabs: Tab[] = [
     { id: 'dashboard', type: 'dashboard', label: 'Dashboard', closable: false },
-    { id: 'files', type: 'files', label: 'Files', closable: false },
   ];
 
   if (state?.architect) {
-    tabs.push({ id: 'architect', type: 'architect', label: 'Architect', closable: false });
+    tabs.push({ id: 'architect', type: 'architect', label: 'Architect', closable: false, terminalId: state.architect.terminalId });
   }
 
   for (const builder of state?.builders ?? []) {
@@ -29,16 +29,20 @@ function buildTabs(state: DashboardState | null): Tab[] {
       label: builder.name || `Builder ${builder.id}`,
       closable: true,
       projectId: builder.id,
+      terminalId: builder.terminalId,
     });
   }
 
   for (const util of state?.utils ?? []) {
+    // Skip stale utils with no running process and no terminal session
+    if (!util.terminalId && (!util.pid || util.pid === 0)) continue;
     tabs.push({
       id: `shell-${util.id}`,
       type: 'shell',
       label: util.name || `Shell ${util.id}`,
       closable: true,
       utilId: util.id,
+      terminalId: util.terminalId,
     });
   }
 
@@ -59,20 +63,30 @@ function buildTabs(state: DashboardState | null): Tab[] {
 
 export function useTabs(state: DashboardState | null) {
   const [activeTabId, setActiveTabId] = useState<string>('dashboard');
-  const knownTabIds = useRef<Set<string>>(new Set());
+  const knownTabIds = useRef<Set<string> | null>(null);
   const tabs = buildTabs(state);
 
-  // Auto-switch to new tabs
+  // Auto-switch to genuinely new tabs (created after page load).
+  // Wait for real state (non-null) before seeding known tabs — otherwise the
+  // empty first render seeds with just ['dashboard'], and the second render
+  // (with actual state) treats all existing tabs as "new" and auto-selects them.
   useEffect(() => {
     const currentIds = new Set(tabs.map(t => t.id));
+    if (knownTabIds.current === null) {
+      // Only seed once we have real tabs (more than just dashboard)
+      if (state !== null) {
+        knownTabIds.current = currentIds;
+      }
+      return;
+    }
     for (const tab of tabs) {
-      if (!knownTabIds.current.has(tab.id)) {
-        // New tab appeared — switch to it
+      if (!knownTabIds.current.has(tab.id) && tab.type !== 'architect') {
+        // Genuinely new tab appeared — switch to it
         setActiveTabId(tab.id);
       }
     }
     knownTabIds.current = currentIds;
-  }, [tabs.map(t => t.id).join(',')]);
+  }, [tabs.map(t => t.id).join(','), state !== null]);
 
   const selectTab = useCallback((id: string) => {
     setActiveTabId(id);

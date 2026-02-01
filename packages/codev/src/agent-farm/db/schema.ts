@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS architect (
   port INTEGER NOT NULL,
   cmd TEXT NOT NULL,
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
-  tmux_session TEXT
+  tmux_session TEXT,
+  terminal_id TEXT
 );
 
 -- Builder sessions
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS builders (
   task_text TEXT,
   protocol_name TEXT,
   issue_number INTEGER,
+  terminal_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -54,9 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_builders_port ON builders(port);
 CREATE TABLE IF NOT EXISTS utils (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  port INTEGER NOT NULL UNIQUE,
-  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
   tmux_session TEXT,
+  terminal_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
