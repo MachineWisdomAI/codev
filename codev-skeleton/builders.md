@@ -4,7 +4,7 @@ Track active builder agents here. Update manually or via `architect status`.
 
 ## Status Values
 
-- **spawning**: Worktree being created, ttyd starting
+- **spawning**: Worktree being created, terminal starting
 - **implementing**: Builder is working
 - **blocked**: Builder waiting for architect input
 - **pr-ready**: Builder has created a PR

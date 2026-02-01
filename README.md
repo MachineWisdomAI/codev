@@ -68,7 +68,6 @@ See [CLI Reference](codev/resources/commands/overview.md) for details.
 | Dependency | Install | Purpose |
 |------------|---------|---------|
 | tmux 3.0+ | `brew install tmux` | Terminal multiplexer |
-| ttyd 1.7+ | `brew install ttyd` | Web terminal |
 | gh | `brew install gh` | GitHub CLI |
 
 See [DEPENDENCIES.md](codev-skeleton/DEPENDENCIES.md) for complete details. 
@@ -330,7 +329,7 @@ Agent Farm is an optional companion tool for Codev that provides a web-based das
 
 **Current limitations:**
 - Currently optimized for **Claude Code** (uses `-p` flag, `--append-system-prompt`, etc.)
-- Requires **ttyd** and **tmux** for terminal embedding
+- Requires **tmux** for terminal multiplexing (node-pty handles terminal sessions)
 - macOS-focused (should work on Linux but less tested)
 
 ## Architect-Builder Pattern

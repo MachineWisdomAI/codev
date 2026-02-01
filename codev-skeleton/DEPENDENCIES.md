@@ -57,29 +57,6 @@ sudo apt install tmux
 tmux -V  # Should show tmux 3.x or higher
 ```
 
-### ttyd
-
-| Requirement | Value |
-|-------------|-------|
-| Minimum Version | 1.7.0 |
-| Purpose | Web-based terminal for dashboard access |
-
-**Installation:**
-
-```bash
-# macOS
-brew install ttyd
-
-# Ubuntu/Debian (build from source)
-sudo apt install build-essential cmake git libjson-c-dev libwebsockets-dev
-git clone https://github.com/tsl0922/ttyd.git
-cd ttyd && mkdir build && cd build
-cmake .. && make && sudo make install
-
-# Verify
-ttyd --version  # Should show 1.7.x or higher
-```
-
 ### git
 
 | Requirement | Value |
@@ -193,7 +170,6 @@ codex --version
 |------------|-----------------|-----------|
 | Node.js | 18.0.0 | Yes |
 | tmux | 3.0 | Yes |
-| ttyd | 1.7.0 | Yes |
 | git | 2.5.0 | Yes |
 | gh | latest | Yes |
 | Claude Code | latest | At least one AI CLI |
@@ -210,7 +186,7 @@ All dependencies are available via Homebrew:
 
 ```bash
 # Install all core dependencies at once
-brew install node tmux ttyd gh
+brew install node tmux gh
 
 # Git is included with Xcode command line tools
 xcode-select --install
@@ -218,15 +194,13 @@ xcode-select --install
 
 ### Ubuntu/Debian
 
-Most dependencies are available via apt, except ttyd which must be built from source:
+Most dependencies are available via apt:
 
 ```bash
 # Core dependencies
 sudo apt install nodejs npm tmux git
 
 # gh requires adding GitHub's apt repository (see above)
-
-# ttyd must be built from source (see above)
 ```
 
 ### Windows
@@ -267,7 +241,7 @@ sudo apt update
 sudo apt install tmux
 ```
 
-### ttyd connection issues
+### Terminal connection issues
 
 Ensure no firewall is blocking the ports (default: 4200-4299):
 

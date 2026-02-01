@@ -239,7 +239,7 @@ codev doctor
 ```
 
 This checks:
-- **Core dependencies**: Node.js, tmux, ttyd, git (with versions)
+- **Core dependencies**: Node.js, tmux, git (with versions)
 - **AI CLI dependencies**: Claude Code, Gemini CLI, Codex CLI (at least one required)
 
 If any required dependencies are missing, the doctor will show install instructions.
@@ -396,9 +396,8 @@ For projects with parallelizable components, Codev includes the Architect-Builde
 
 After installing `@cluesmith/codev` via npm, ensure these dependencies are installed:
 
-- **ttyd** (web-based terminal): `brew install ttyd` on macOS
 - **tmux** (terminal multiplexer): `brew install tmux` on macOS
-- **Node.js** 18+
+- **Node.js** 18+ (includes node-pty for terminal sessions)
 - **git** 2.5+ (with worktree support)
 
 Check with:
@@ -481,7 +480,7 @@ af ports cleanup
 
 1. **Architect** (you + primary AI) creates specs and plans
 2. **Builders** (autonomous AI agents) implement specs in isolated git worktrees
-3. Each builder runs in a **tmux session** with **web terminal** (ttyd) access
+3. Each builder runs in a **tmux session** with **web terminal** (node-pty) access
 4. **Review comments** are stored directly in files using `// REVIEW:` syntax
 5. Builders create PRs when complete; architect reviews and merges
 

@@ -133,7 +133,6 @@ af dash stop
 
 Stops all running agent-farm processes including:
 - tmux sessions
-- ttyd processes
 - Dashboard servers
 
 Does NOT clean up worktrees - use `af cleanup` for that.

@@ -376,9 +376,8 @@ The Architect-Builder pattern enables parallel AI-assisted development by separa
 
 ### Prerequisites
 
-- **ttyd**: `brew install ttyd` (web-based terminal)
 - **tmux**: `brew install tmux` (terminal multiplexer)
-- **Node.js 18+**: For agent-farm runtime
+- **Node.js 18+**: For agent-farm runtime (includes node-pty for terminal sessions)
 - **git 2.5+**: With worktree support
 
 ### CLI Commands
@@ -493,6 +492,21 @@ Comments are stored directly in files using language-appropriate syntax:
 - `codev/roles/` - Architect and builder role prompts
 
 See `codev/specs/0002-architect-builder.md` for full documentation.
+
+### Terminal Architecture (v2.0)
+
+As of v2.0 (Spec 0085), Agent Farm uses **node-pty + WebSocket multiplexing** instead of ttyd:
+
+- **One port per project**: The dashboard server (e.g., port 4200) serves both the React UI and all terminal WebSocket connections. There are no separate per-terminal ports.
+- **tmux is still required**: tmux provides session persistence (survives disconnects). node-pty attaches to tmux sessions, not the other way around. Lifecycle: tmux session → node-pty PTY → `/ws/terminal/<uuid>` → React dashboard tab.
+- **Terminal sessions**: `PtyManager` (`packages/codev/src/terminal/pty-manager.ts`) creates native PTY sessions via node-pty, each identified by a UUID. Sessions attach to tmux sessions (architect, builders, shells).
+- **WebSocket path**: Clients connect to `/ws/terminal/<uuid>` on the dashboard port. The `TerminalManager` handles the upgrade and routes to the correct PTY session.
+- **Tower proxy**: The tower (port 4100) is a multi-project reverse proxy. It routes `/project/<base64url-encoded-path>/*` to the project's dashboard port. All traffic (HTTP and WebSocket) goes to basePort — the tower does not need to know about terminal types.
+- **React dashboard**: The frontend (`packages/codev/dashboard/`) manages tabs (Architect, Builder 0..N, Shell) and connects to the appropriate WebSocket endpoint for each terminal.
+
+**Key distinction**: Tower (port 4100) ≠ Dashboard (port 4200+). `af tower` manages the tower. `af dash` manages dashboards. These are separate components.
+
+See `codev/resources/arch.md` for detailed architecture diagrams.
 
 ## Git Workflow
 
