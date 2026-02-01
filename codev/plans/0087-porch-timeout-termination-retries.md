@@ -9,6 +9,10 @@ validated: [gemini, codex, claude]
 
 Add timeout, retry, and circuit breaker logic to porch's build loop, mirroring the proven pattern already used by `runConsult`. Three files change: `claude.ts` (timeout wrapper), `run.ts` (retry loop + circuit breaker + AWAITING_INPUT), `types.ts` (state field).
 
+```json
+{"phases": [{"id": "phase_1", "title": "Build Timeout in claude.ts"}, {"id": "phase_2", "title": "Retry Loop + Circuit Breaker in run.ts"}, {"id": "phase_3", "title": "AWAITING_INPUT Detection"}, {"id": "phase_4", "title": "Tests"}]}
+```
+
 ## Phase 1: Build Timeout + Retry in claude.ts
 
 **Files:**
