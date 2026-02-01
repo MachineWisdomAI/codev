@@ -14,7 +14,7 @@ import chalk from 'chalk';
 import { readState, writeState, findStatusPath } from './state.js';
 import { loadProtocol, getPhaseConfig, isPhased, getPhaseGate, isBuildVerify, getVerifyConfig, getMaxIterations, getOnCompleteConfig, getBuildConfig } from './protocol.js';
 import { getCurrentPlanPhase } from './plan.js';
-import { buildWithTimeout } from './claude.js';
+import { buildWithTimeout, BUILD_TIMEOUT_MS } from './claude.js';
 import { buildPhasePrompt } from './prompts.js';
 import type { ProjectState, Protocol, ReviewResult, IterationRecord, Verdict } from './types.js';
 import { globSync } from 'node:fs';
@@ -319,25 +319,32 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
             console.log('');
           }
 
-          // Wait for user decision
-          const readline = await import('node:readline');
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-
-          console.log('Options:');
-          console.log("  'c' or 'continue' - Proceed to gate anyway (let human decide)");
-          console.log("  'r' or 'retry'    - Reset iteration counter and try again");
-          console.log("  'q' or 'quit'     - Exit porch");
-          console.log('');
-
-          const action = await new Promise<string>((resolve) => {
-            rl.question(chalk.cyan(`[${state.id}] > `), (input) => {
-              rl.close();
-              resolve(input.trim().toLowerCase());
+          // Auto-continue when PORCH_AUTO_APPROVE is set (e2e/non-interactive mode)
+          let action: string;
+          if (process.env.PORCH_AUTO_APPROVE === 'true') {
+            console.log(chalk.yellow('[E2E] Auto-continuing past max iterations'));
+            action = 'c';
+          } else {
+            // Wait for user decision
+            const readline = await import('node:readline');
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
             });
-          });
+
+            console.log('Options:');
+            console.log("  'c' or 'continue' - Proceed to gate anyway (let human decide)");
+            console.log("  'r' or 'retry'    - Reset iteration counter and try again");
+            console.log("  'q' or 'quit'     - Exit porch");
+            console.log('');
+
+            action = await new Promise<string>((resolve) => {
+              rl.question(chalk.cyan(`[${state.id}] > `), (input) => {
+                rl.close();
+                resolve(input.trim().toLowerCase());
+              });
+            });
+          }
 
           switch (action) {
             case 'c':
@@ -444,6 +451,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
 
     // Run the Worker via Agent SDK with retry
     console.log(chalk.dim('Starting Worker (Agent SDK)...'));
+    let actualOutputPath = outputPath;
     let result = await buildWithTimeout(prompt, outputPath, projectRoot, BUILD_TIMEOUT_MS);
 
     // Retry on failure (timeout or SDK error)
@@ -454,8 +462,8 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
         await sleep(delay);
 
         // Each retry attempt gets a distinct output file
-        const retryOutputPath = outputPath.replace(/\.txt$/, `-try-${attempt + 1}.txt`);
-        result = await buildWithTimeout(prompt, retryOutputPath, projectRoot, BUILD_TIMEOUT_MS);
+        actualOutputPath = outputPath.replace(/\.txt$/, `-try-${attempt + 1}.txt`);
+        result = await buildWithTimeout(prompt, actualOutputPath, projectRoot, BUILD_TIMEOUT_MS);
       }
     }
 
@@ -468,7 +476,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
 
     // AWAITING_INPUT detection
     if (result.output && (/<signal>BLOCKED:/i.test(result.output) || /<signal>AWAITING_INPUT<\/signal>/i.test(result.output))) {
-      console.error(chalk.yellow(`[PORCH] Worker needs human input — check output file: ${outputPath}`));
+      console.error(chalk.yellow(`[PORCH] Worker needs human input — check output file: ${actualOutputPath}`));
       state.awaiting_input = true;
       writeState(statusPath, state);
       process.exit(EXIT_AWAITING_INPUT);
@@ -480,18 +488,8 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
         console.log(chalk.dim('\nWorker finished. Moving to verification...'));
         // Update history to point at the actual successful attempt's output file
         const historyRecord = state.history.find(h => h.iteration === state.iteration);
-        if (historyRecord && result.output) {
-          // If a retry succeeded, the outputPath may differ from the original
-          // Find which file was actually written last
-          const lastOutputPath = historyRecord.build_output;
-          // Check if result came from a retry by scanning for retry files
-          for (let t = BUILD_MAX_RETRIES; t >= 1; t--) {
-            const tryPath = outputPath.replace(/\.txt$/, `-try-${t + 1}.txt`);
-            if (fs.existsSync(tryPath)) {
-              historyRecord.build_output = tryPath;
-              break;
-            }
-          }
+        if (historyRecord) {
+          historyRecord.build_output = actualOutputPath;
         }
         state.build_complete = true;
         consecutiveFailures = 0;
@@ -499,7 +497,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       } else {
         // All retries exhausted — increment circuit breaker, do NOT set build_complete
         console.log(chalk.red('\nWorker failed after all retries.'));
-        console.log(chalk.dim(`Check output: ${outputPath}`));
+        console.log(chalk.dim(`Check output: ${actualOutputPath}`));
         consecutiveFailures++;
         // Loop back to top where circuit breaker check will halt if threshold reached
         continue;
@@ -507,7 +505,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       // Continue loop - will hit build_complete check and run verify
     } else if (!result.success) {
       console.log(chalk.red('\nWorker failed.'));
-      console.log(chalk.dim(`Check output: ${outputPath}`));
+      console.log(chalk.dim(`Check output: ${actualOutputPath}`));
       if (singlePhase) {
         outputSinglePhaseResult(state, 'failed');
       }
@@ -587,8 +585,7 @@ function getConsultArtifactType(phaseId: string): string {
  * - Retry up to 3 times with exponential backoff
  * - If all retries fail, return CONSULT_ERROR (not REQUEST_CHANGES)
  */
-// Build timeout and retry constants (mirrors CONSULT_* pattern)
-const BUILD_TIMEOUT_MS = 15 * 60 * 1000;     // 15 minutes
+// Build retry constants (BUILD_TIMEOUT_MS imported from claude.ts)
 const BUILD_MAX_RETRIES = 3;
 const BUILD_RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
 const CIRCUIT_BREAKER_THRESHOLD = 5;
