@@ -235,7 +235,21 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
         console.log('');
         console.log(chalk.cyan(`[${state.id}] VERIFY - Iteration ${state.iteration}/${maxIterations}`));
 
+        const verifyStartMs = Date.now();
         const reviews = await runVerification(projectRoot, state, protocol);
+        const verifyDurationMs = Date.now() - verifyStartMs;
+
+        // Structured timing output for e2e test parsing
+        const verdictMap: Record<string, string> = {};
+        for (const r of reviews) { verdictMap[r.model] = r.verdict; }
+        console.log(`__PORCH_TIMING__${JSON.stringify({
+          event: 'verify',
+          phase: state.phase,
+          plan_phase: state.current_plan_phase || null,
+          iteration: state.iteration,
+          duration_ms: verifyDurationMs,
+          verdicts: verdictMap,
+        })}`);
 
         // Get the build output file from current iteration (stored when we track it)
         const currentBuildOutput = state.history.find(h => h.iteration === state.iteration)?.build_output || '';
@@ -476,6 +490,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
 
     // Run the Worker via Agent SDK with retry
     console.log(chalk.dim('Starting Worker (Agent SDK)...'));
+    const buildStartMs = Date.now();
     let actualOutputPath = outputPath;
     let result = await buildWithTimeout(prompt, outputPath, projectRoot, BUILD_TIMEOUT_MS);
 
@@ -492,12 +507,24 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       }
     }
 
+    const buildDurationMs = Date.now() - buildStartMs;
     if (result.cost) {
       console.log(chalk.dim(`  Cost: $${result.cost.toFixed(4)}`));
     }
     if (result.duration) {
       console.log(chalk.dim(`  Duration: ${(result.duration / 1000).toFixed(1)}s`));
     }
+
+    // Structured timing output for e2e test parsing
+    console.log(`__PORCH_TIMING__${JSON.stringify({
+      event: 'build',
+      phase: state.phase,
+      plan_phase: state.current_plan_phase || null,
+      iteration: state.iteration,
+      duration_ms: buildDurationMs,
+      cost: result.cost || null,
+      success: result.success,
+    })}`);
 
     // AWAITING_INPUT detection
     if (result.output && (/^<signal>BLOCKED:/im.test(result.output) || /^<signal>AWAITING_INPUT<\/signal>/im.test(result.output))) {
