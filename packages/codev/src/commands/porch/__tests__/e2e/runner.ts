@@ -8,6 +8,17 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import type { TestContext } from './helpers/setup.js';
 
+export interface PorchTimingEvent {
+  event: 'build' | 'verify';
+  phase: string;
+  plan_phase: string | null;
+  iteration: number;
+  duration_ms: number;
+  cost?: number | null;
+  success?: boolean;
+  verdicts?: Record<string, string>;
+}
+
 export interface RunResult {
   exitCode: number | null;
   stdout: string;
@@ -15,6 +26,24 @@ export interface RunResult {
   hitGate: string | null;
   completed: boolean;
   timedOut: boolean;
+  durationMs: number;
+  timings: PorchTimingEvent[];
+}
+
+/**
+ * Parse __PORCH_TIMING__ lines from porch stdout.
+ */
+export function parseTimings(stdout: string): PorchTimingEvent[] {
+  const timings: PorchTimingEvent[] = [];
+  for (const line of stdout.split('\n')) {
+    const match = line.match(/__PORCH_TIMING__({.*})/);
+    if (match) {
+      try {
+        timings.push(JSON.parse(match[1]));
+      } catch { /* ignore parse errors */ }
+    }
+  }
+  return timings;
 }
 
 /**
@@ -34,6 +63,7 @@ export async function runPorchUntilGate(
     let hitGate: string | null = null;
     let completed = false;
     let timedOut = false;
+    const startMs = Date.now();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -84,6 +114,8 @@ export async function runPorchUntilGate(
         hitGate,
         completed,
         timedOut,
+        durationMs: Date.now() - startMs,
+        timings: parseTimings(stdout),
       });
     });
 
@@ -96,6 +128,8 @@ export async function runPorchUntilGate(
         hitGate: null,
         completed: false,
         timedOut: false,
+        durationMs: Date.now() - startMs,
+        timings: [],
       });
     });
   });
@@ -125,6 +159,7 @@ export async function runPorchWithAutoApprove(
     let stderr = '';
     let completed = false;
     let timedOut = false;
+    const startMs = Date.now();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -165,6 +200,8 @@ export async function runPorchWithAutoApprove(
         hitGate: null,
         completed,
         timedOut,
+        durationMs: Date.now() - startMs,
+        timings: parseTimings(stdout),
       });
     });
 
@@ -177,6 +214,8 @@ export async function runPorchWithAutoApprove(
         hitGate: null,
         completed: false,
         timedOut: false,
+        durationMs: Date.now() - startMs,
+        timings: [],
       });
     });
   });
@@ -212,6 +251,7 @@ export async function runPorchSinglePhase(
     let hitGate: string | null = null;
     let timedOut = false;
     let singlePhaseResult: SinglePhaseResult | null = null;
+    const startMs = Date.now();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -260,6 +300,8 @@ export async function runPorchSinglePhase(
         hitGate,
         completed: false,
         timedOut,
+        durationMs: Date.now() - startMs,
+        timings: parseTimings(stdout),
         singlePhaseResult,
       });
     });
@@ -273,6 +315,8 @@ export async function runPorchSinglePhase(
         hitGate: null,
         completed: false,
         timedOut: false,
+        durationMs: Date.now() - startMs,
+        timings: [],
         singlePhaseResult: null,
       });
     });
@@ -291,6 +335,7 @@ export async function runPorchOnce(
     let stderr = '';
     let hitGate: string | null = null;
     let timedOut = false;
+    const startMs = Date.now();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -331,6 +376,8 @@ export async function runPorchOnce(
         hitGate,
         completed: false,
         timedOut,
+        durationMs: Date.now() - startMs,
+        timings: parseTimings(stdout),
       });
     });
 
@@ -343,6 +390,8 @@ export async function runPorchOnce(
         hitGate: null,
         completed: false,
         timedOut: false,
+        durationMs: Date.now() - startMs,
+        timings: [],
       });
     });
   });

@@ -235,7 +235,21 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
         console.log('');
         console.log(chalk.cyan(`[${state.id}] VERIFY - Iteration ${state.iteration}/${maxIterations}`));
 
+        const verifyStartMs = Date.now();
         const reviews = await runVerification(projectRoot, state, protocol);
+        const verifyDurationMs = Date.now() - verifyStartMs;
+
+        // Structured timing output for e2e test parsing
+        const verdictMap: Record<string, string> = {};
+        for (const r of reviews) { verdictMap[r.model] = r.verdict; }
+        console.log(`__PORCH_TIMING__${JSON.stringify({
+          event: 'verify',
+          phase: state.phase,
+          plan_phase: state.current_plan_phase || null,
+          iteration: state.iteration,
+          duration_ms: verifyDurationMs,
+          verdicts: verdictMap,
+        })}`);
 
         // Get the build output file from current iteration (stored when we track it)
         const currentBuildOutput = state.history.find(h => h.iteration === state.iteration)?.build_output || '';
@@ -476,6 +490,7 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
 
     // Run the Worker via Agent SDK with retry
     console.log(chalk.dim('Starting Worker (Agent SDK)...'));
+    const buildStartMs = Date.now();
     let actualOutputPath = outputPath;
     let result = await buildWithTimeout(prompt, outputPath, projectRoot, BUILD_TIMEOUT_MS);
 
@@ -492,12 +507,24 @@ export async function run(projectRoot: string, projectId: string, options: RunOp
       }
     }
 
+    const buildDurationMs = Date.now() - buildStartMs;
     if (result.cost) {
       console.log(chalk.dim(`  Cost: $${result.cost.toFixed(4)}`));
     }
     if (result.duration) {
       console.log(chalk.dim(`  Duration: ${(result.duration / 1000).toFixed(1)}s`));
     }
+
+    // Structured timing output for e2e test parsing
+    console.log(`__PORCH_TIMING__${JSON.stringify({
+      event: 'build',
+      phase: state.phase,
+      plan_phase: state.current_plan_phase || null,
+      iteration: state.iteration,
+      duration_ms: buildDurationMs,
+      cost: result.cost || null,
+      success: result.success,
+    })}`);
 
     // AWAITING_INPUT detection
     if (result.output && (/^<signal>BLOCKED:/im.test(result.output) || /^<signal>AWAITING_INPUT<\/signal>/im.test(result.output))) {
@@ -671,9 +698,26 @@ async function runConsultOnce(
   const artifactType = getConsultArtifactType(state.phase);
 
   return new Promise((resolve) => {
+    // Load .env from projectRoot so API keys (e.g. GEMINI_API_KEY) propagate
+    // to consultation subprocesses regardless of CWD
+    const env = { ...process.env };
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const eq = trimmed.indexOf('=');
+          if (eq > 0) {
+            env[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
+          }
+        }
+      }
+    }
+
     const args = ['--model', model, '--type', reviewType, artifactType, state.id];
     const proc = spawn('consult', args, {
       cwd: projectRoot,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -746,41 +790,29 @@ async function runConsultOnce(
  * Safety: If no explicit verdict found (empty output, crash, malformed),
  * defaults to REQUEST_CHANGES to prevent proceeding with unverified code.
  */
-function parseVerdict(output: string): Verdict {
+export function parseVerdict(output: string): Verdict {
   // Empty or very short output = something went wrong
   if (!output || output.trim().length < 50) {
     return 'REQUEST_CHANGES';
   }
 
-  // Look for actual verdict line (not template text like "[APPROVE | REQUEST_CHANGES | COMMENT]")
-  // Match lines like "VERDICT: APPROVE" or "**VERDICT: APPROVE**"
+  // Scan lines LAST→FIRST so the actual verdict (at the end) takes priority
+  // over template text echoed by codex CLI at the start of output.
+  // Skip template lines containing "[" (e.g., "VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]")
   const lines = output.split('\n');
-  for (const line of lines) {
-    // Strip markdown formatting (**, *, __, _) and trim
-    const stripped = line.trim().replace(/^[\*_]+|[\*_]+$/g, '').trim().toUpperCase();
-    // Match "VERDICT: <value>" but NOT "VERDICT: [APPROVE | ...]"
+  for (let i = lines.length - 1; i >= 0; i--) {
+    // Strip markdown formatting (**, *, __, _, `) and trim
+    const stripped = lines[i].trim().replace(/^[\*_`-]+|[\*_`-]+$/g, '').trim().toUpperCase();
+    // Match "VERDICT: <value>" but NOT template "VERDICT: [APPROVE | ...]"
     if (stripped.startsWith('VERDICT:') && !stripped.includes('[')) {
-      if (stripped.includes('REQUEST_CHANGES')) {
-        return 'REQUEST_CHANGES';
-      }
-      if (stripped.includes('APPROVE')) {
-        return 'APPROVE';
-      }
-      if (stripped.includes('COMMENT')) {
-        return 'COMMENT';
-      }
+      const value = stripped.substring('VERDICT:'.length).trim();
+      if (value.startsWith('REQUEST_CHANGES')) return 'REQUEST_CHANGES';
+      if (value.startsWith('APPROVE')) return 'APPROVE';
+      if (value.startsWith('COMMENT')) return 'COMMENT';
     }
   }
 
-  // Fallback: look anywhere in output (legacy behavior)
-  const upperOutput = output.toUpperCase();
-  if (upperOutput.includes('REQUEST_CHANGES')) {
-    return 'REQUEST_CHANGES';
-  }
-  if (upperOutput.includes('APPROVE')) {
-    return 'APPROVE';
-  }
-  // No explicit verdict = default to REQUEST_CHANGES for safety
+  // No valid VERDICT: line found — default to REQUEST_CHANGES for safety
   return 'REQUEST_CHANGES';
 }
 
