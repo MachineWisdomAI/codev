@@ -13,6 +13,38 @@ import * as yaml from 'js-yaml';
 
 const exec = promisify(execCallback);
 
+/**
+ * Load .env from the monorepo root into process.env.
+ * This ensures API keys (GEMINI_API_KEY, etc.) propagate to subprocesses
+ * spawned by porch during e2e tests.
+ */
+function loadEnvFromProjectRoot(): void {
+  let dir = process.cwd();
+  while (dir !== path.dirname(dir)) {
+    const envFile = path.join(dir, '.env');
+    if (fs.existsSync(envFile)) {
+      for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const eq = trimmed.indexOf('=');
+          if (eq > 0) {
+            const key = trimmed.substring(0, eq);
+            // Don't override existing env vars
+            if (!process.env[key]) {
+              process.env[key] = trimmed.substring(eq + 1);
+            }
+          }
+        }
+      }
+      return;
+    }
+    dir = path.dirname(dir);
+  }
+}
+
+// Load on import so all e2e tests get API keys
+loadEnvFromProjectRoot();
+
 export interface TestContext {
   /** Temporary directory containing the test repo */
   tempDir: string;

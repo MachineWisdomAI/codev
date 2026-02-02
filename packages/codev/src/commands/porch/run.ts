@@ -698,9 +698,26 @@ async function runConsultOnce(
   const artifactType = getConsultArtifactType(state.phase);
 
   return new Promise((resolve) => {
+    // Load .env from projectRoot so API keys (e.g. GEMINI_API_KEY) propagate
+    // to consultation subprocesses regardless of CWD
+    const env = { ...process.env };
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          const eq = trimmed.indexOf('=');
+          if (eq > 0) {
+            env[trimmed.substring(0, eq)] = trimmed.substring(eq + 1);
+          }
+        }
+      }
+    }
+
     const args = ['--model', model, '--type', reviewType, artifactType, state.id];
     const proc = spawn('consult', args, {
       cwd: projectRoot,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

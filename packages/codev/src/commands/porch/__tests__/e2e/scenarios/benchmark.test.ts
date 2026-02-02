@@ -26,6 +26,9 @@ import {
   type PorchTimingEvent,
 } from '../runner.js';
 
+/** Persistent output directory for benchmark results (survives cleanup) */
+const RESULTS_DIR = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'test-results', 'benchmark');
+
 /** Pre-approved spec for the benchmark (trivial: add a version constant) */
 const BENCHMARK_SPEC = `---
 approved: ${new Date().toISOString().split('T')[0]}
@@ -257,6 +260,7 @@ describe('Porch Benchmark: Strict vs Soft Mode', () => {
   let softCtx: TestContext;
 
   beforeAll(async () => {
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
     // Create both projects in parallel
     [strictCtx, softCtx] = await Promise.all([
       setupBenchmarkProject('9990', 'benchmark-strict'),
@@ -287,7 +291,7 @@ describe('Porch Benchmark: Strict vs Soft Mode', () => {
 
     // Write results to file for later comparison
     fs.writeFileSync(
-      path.join(strictCtx.tempDir, 'benchmark-result.json'),
+      path.join(RESULTS_DIR, 'strict-result.json'),
       JSON.stringify(benchmarkResult, null, 2)
     );
 
@@ -302,7 +306,7 @@ describe('Porch Benchmark: Strict vs Soft Mode', () => {
 
     // Write results to file
     fs.writeFileSync(
-      path.join(softCtx.tempDir, 'benchmark-result.json'),
+      path.join(RESULTS_DIR, 'soft-result.json'),
       JSON.stringify(result, null, 2)
     );
 
@@ -313,10 +317,10 @@ describe('Porch Benchmark: Strict vs Soft Mode', () => {
   it('comparison summary', () => {
     // Read both results
     const strictResult: BenchmarkResult = JSON.parse(
-      fs.readFileSync(path.join(strictCtx.tempDir, 'benchmark-result.json'), 'utf-8')
+      fs.readFileSync(path.join(RESULTS_DIR, 'strict-result.json'), 'utf-8')
     );
     const softResult: BenchmarkResult = JSON.parse(
-      fs.readFileSync(path.join(softCtx.tempDir, 'benchmark-result.json'), 'utf-8')
+      fs.readFileSync(path.join(RESULTS_DIR, 'soft-result.json'), 'utf-8')
     );
 
     console.log('\n' + '='.repeat(60));
