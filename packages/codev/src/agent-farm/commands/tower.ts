@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import net from 'node:net';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
-import { spawnDetached } from '../utils/shell.js';
+import { spawn } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 
@@ -181,16 +181,21 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
   logToFile(`Starting tower server on port ${port}`);
   logToFile(`Command: ${command} ${args.join(' ')}`);
 
-  // Start tower server - explicitly pass env to ensure CODEV_WEB_KEY is inherited
-  const serverProcess = spawnDetached(command, args, {
+  // Start tower server fully detached - stdio: 'ignore' ensures parent can exit
+  const serverProcess = spawn(command, args, {
     cwd: process.cwd(),
     env: process.env,
+    detached: true,
+    stdio: 'ignore', // Must be 'ignore' for true daemonization
   });
 
   if (!serverProcess.pid) {
     logToFile('Failed to spawn tower server process');
     fatal('Failed to start tower server');
   }
+
+  // Detach from parent process
+  serverProcess.unref();
 
   logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
 
