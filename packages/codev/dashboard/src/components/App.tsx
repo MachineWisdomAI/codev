@@ -15,6 +15,15 @@ export function App() {
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
+  // Set document title with project name
+  useEffect(() => {
+    if (state?.projectName) {
+      document.title = `🏗️ ${state.projectName} Agent Farm`;
+    } else {
+      document.title = '🏗️ Agent Farm';
+    }
+  }, [state?.projectName]);
+
   // Check for fullscreen mode from URL
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {

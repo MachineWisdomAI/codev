@@ -44,6 +44,7 @@ export interface DashboardState {
   builders: Builder[];
   utils: UtilTerminal[];
   annotations: Annotation[];
+  projectName?: string;
 }
 
 export interface FileEntry {

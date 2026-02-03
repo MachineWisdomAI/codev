@@ -1387,8 +1387,13 @@ const server = http.createServer(async (req, res) => {
     // API: Get state
     if (req.method === 'GET' && url.pathname === '/api/state') {
       const state = loadStateWithCleanup();
+      // Include project name for tab title
+      const stateWithProject = {
+        ...state,
+        projectName: getProjectName(projectRoot),
+      };
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(state));
+      res.end(JSON.stringify(stateWithProject));
       return;
     }
 
