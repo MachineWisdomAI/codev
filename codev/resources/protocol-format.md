@@ -2,6 +2,8 @@
 
 This document describes the format for defining protocols in Codev. Protocols define the workflow for development tasks (SPIDER, TICK, BUGFIX, etc.).
 
+**JSON Schema**: `codev-skeleton/protocols/protocol-schema.json` — use `"$schema": "../../protocol-schema.json"` in your protocol.json for IDE validation.
+
 ## Directory Structure
 
 Each protocol lives in its own directory:
@@ -260,7 +262,7 @@ For protocols with plan phases, porch adds plan phase context (id, title, conten
 
 ## Complete Example
 
-See `skeleton/protocols/spider/protocol.json` for a complete SPIDER protocol definition.
+See `codev-skeleton/protocols/spider/protocol.json` for a complete SPIDER protocol definition.
 
 ## Creating a New Protocol
 
@@ -271,3 +273,10 @@ See `skeleton/protocols/spider/protocol.json` for a complete SPIDER protocol def
 5. Create `protocol.md` with human-readable guide
 
 Porch will automatically discover and use the new protocol when referenced by name.
+
+## See Also
+
+- `codev-skeleton/protocols/protocol-schema.json` - JSON Schema for validation
+- `codev-skeleton/protocols/spider/protocol.json` - SPIDER protocol (full example)
+- `codev/protocols/spider/protocol.md` - SPIDER human-readable guide
+- `codev/protocols/` - All available protocols
