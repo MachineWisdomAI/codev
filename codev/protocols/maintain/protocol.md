@@ -2,7 +2,7 @@
 
 ## Overview
 
-MAINTAIN is a periodic maintenance protocol for keeping codebases healthy. Unlike SPIDER/TICK (which have sequential phases), MAINTAIN is a **task list** where tasks can run in parallel and some require human review.
+MAINTAIN is a periodic maintenance protocol for keeping codebases healthy. It runs as a **strict porch protocol** with sequential phases and 3-way consultation (Gemini, Codex, Claude) at each phase.
 
 **Core Principle**: Regular maintenance prevents technical debt accumulation.
 
@@ -22,19 +22,25 @@ Any builder can update these files during development, but MAINTAIN ensures they
 
 ## Execution Model
 
-MAINTAIN is executed by a Builder, spawned by the Architect:
+MAINTAIN is orchestrated by porch with 4 sequential phases:
 
 ```
-Architect: "Time for maintenance"
-    ↓
 af spawn --protocol maintain
     ↓
-Builder works through task list
-    ↓
+1. AUDIT: Scan for dead code, unused deps, stale docs
+    ↓ (3-way review)
+2. CLEAN: Remove identified cruft
+    ↓ (3-way review + build/test checks)
+3. SYNC: Update documentation
+    ↓ (3-way review)
+4. VERIFY: Final validation + PR
+    ↓ (3-way review)
 PR with maintenance changes
     ↓
-Architect reviews → Builder merges
+Architect reviews → Merge
 ```
+
+Each phase goes through build-verify cycles with 3-way consultation before proceeding.
 
 ## Prerequisites
 
