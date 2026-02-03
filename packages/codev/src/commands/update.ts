@@ -59,6 +59,17 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     console.log(chalk.red('  - (removed)'), 'codev/bin/ (deprecated bash scripts)');
   }
 
+  // Migrate codev/config.json to af-config.json (v2.0 change)
+  const legacyConfigPath = path.join(codevDir, 'config.json');
+  const newConfigPath = path.join(targetDir, 'af-config.json');
+  if (fs.existsSync(legacyConfigPath) && !fs.existsSync(newConfigPath)) {
+    if (!dryRun) {
+      fs.copyFileSync(legacyConfigPath, newConfigPath);
+      fs.unlinkSync(legacyConfigPath);
+    }
+    console.log(chalk.blue('  ~ (migrated)'), 'codev/config.json → af-config.json');
+  }
+
   const templatesDir = getTemplatesDir();
   const templateFiles = getTemplateFiles(templatesDir);
   const currentHashes = loadHashStore(targetDir);
