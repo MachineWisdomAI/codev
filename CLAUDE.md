@@ -855,6 +855,8 @@ Porch uses signals embedded in Claude output to drive state transitions:
 - `packages/codev/src/commands/porch/` - Porch implementation
 - `packages/codev/bin/porch.js` - Standalone binary
 - `codev-skeleton/protocols/` - Protocol JSON definitions
+- `codev-skeleton/protocols/protocol-schema.json` - JSON Schema for protocol.json
+- `codev/resources/protocol-format.md` - Protocol definition format reference
 - `codev/projects/` - Project state files
 
 ## Important Notes
