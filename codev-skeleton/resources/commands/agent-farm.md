@@ -477,7 +477,7 @@ af db stats [options]
 
 ## Configuration
 
-Customize commands via `codev/config.json`:
+Customize commands via `af-config.json` at the project root:
 
 ```json
 {
@@ -504,7 +504,7 @@ af spawn -p 0042 --builder-cmd "claude --model haiku"
 |------|-------------|
 | `.agent-farm/state.json` | Project runtime state |
 | `~/.agent-farm/ports.json` | Global port registry |
-| `codev/config.json` | Project configuration |
+| `af-config.json` | Agent Farm configuration (project root) |
 
 ---
 

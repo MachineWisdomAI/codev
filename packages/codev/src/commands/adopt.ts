@@ -98,6 +98,12 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
     }
   }
 
+  // Ask about permission mode
+  let skipPermissions = false;
+  if (!yes) {
+    skipPermissions = await confirm('Use --dangerously-skip-permissions for architect and builder?', false);
+  }
+
   // Create minimal codev structure using shared scaffold utilities
   let fileCount = 0;
   let skippedCount = 0;
@@ -175,6 +181,21 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   for (const file of rootResult.conflicts) {
     console.log(chalk.yellow('  !'), file, chalk.dim('(conflict - .codev-new created)'));
     skippedCount++;
+  }
+
+  // Create af-config.json if it doesn't exist
+  const afConfigPath = path.join(targetDir, 'af-config.json');
+  if (!fs.existsSync(afConfigPath)) {
+    const afConfig: Record<string, unknown> = {
+      shell: {
+        architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
+        builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
+        shell: 'bash',
+      },
+    };
+    fs.writeFileSync(afConfigPath, JSON.stringify(afConfig, null, 2) + '\n');
+    console.log(chalk.green('  +'), 'af-config.json');
+    fileCount++;
   }
 
   // Update or create .gitignore

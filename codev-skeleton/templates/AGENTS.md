@@ -60,7 +60,7 @@ For complete reference, see `codev/resources/commands/`:
 
 ## Configuration
 
-Customize Agent Farm behavior in `codev/config.json`:
+Agent Farm is configured via `af-config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI flags: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
 
 ```json
 {

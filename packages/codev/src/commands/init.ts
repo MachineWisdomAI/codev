@@ -59,9 +59,11 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
 
   // Get configuration (interactive or defaults)
   let initGit = true;
+  let skipPermissions = false;
 
   if (!yes) {
     initGit = await confirm('Initialize git repository?', true);
+    skipPermissions = await confirm('Use --dangerously-skip-permissions for architect and builder?', false);
   }
 
   // Create directory
@@ -144,6 +146,21 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   // Create .gitignore
   createGitignore(targetDir);
   console.log(chalk.green('  +'), '.gitignore');
+  fileCount++;
+
+  // Create af-config.json
+  const afConfig: Record<string, unknown> = {
+    shell: {
+      architect: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
+      builder: skipPermissions ? 'claude --dangerously-skip-permissions' : 'claude',
+      shell: 'bash',
+    },
+  };
+  fs.writeFileSync(
+    path.join(targetDir, 'af-config.json'),
+    JSON.stringify(afConfig, null, 2) + '\n'
+  );
+  console.log(chalk.green('  +'), 'af-config.json');
   fileCount++;
 
   // Initialize git if requested

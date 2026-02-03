@@ -446,18 +446,7 @@ The dashboard and all terminals work identically to local development. Press Ctr
 
 ### Configuration
 
-Customize commands via `codev/config.json`:
-```json
-{
-  "shell": {
-    "architect": "claude --model opus",
-    "builder": "claude --model sonnet",
-    "shell": "bash"
-  }
-}
-```
-
-Override via CLI: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`
+Agent Farm is configured via `af-config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
 
 ### Review Comments
 
@@ -481,13 +470,13 @@ Comments are stored directly in files using language-appropriate syntax:
 - **Multi-project support**: Each project gets its own port block (4200-4299, etc.)
 - **Safe cleanup**: Refuses to delete worktrees with uncommitted changes
 - **Orphan detection**: Cleans up stale tmux sessions on startup
-- **Configurable commands**: Customize via `config.json` or CLI flags
+- **Configurable commands**: Customize via `af-config.json` or CLI flags
 
 ### Key Files
 
 - `.agent-farm/state.db` - Runtime state (SQLite: builders, ports, processes)
 - `~/.agent-farm/global.db` - Global port registry (SQLite)
-- `codev/config.json` - Project configuration
+- `af-config.json` - Agent Farm configuration (project root)
 - `codev/templates/` - Dashboard and annotation templates
 - `codev/roles/` - Architect and builder role prompts
 

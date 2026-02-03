@@ -146,12 +146,17 @@ const terminalBackend = 'node-pty' as const;
 
 // Load dashboard frontend preference from config (Spec 0085)
 function loadDashboardFrontend(): 'react' | 'legacy' {
-  const configPath = path.resolve(projectRoot, 'codev', 'config.json');
-  if (fs.existsSync(configPath)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      return config?.dashboard?.frontend ?? 'react';
-    } catch { /* ignore */ }
+  // Try af-config.json at project root first, then legacy codev/config.json
+  for (const configPath of [
+    path.resolve(projectRoot, 'af-config.json'),
+    path.resolve(projectRoot, 'codev', 'config.json'),
+  ]) {
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        return config?.dashboard?.frontend ?? 'react';
+      } catch { /* ignore */ }
+    }
   }
   return 'react';
 }

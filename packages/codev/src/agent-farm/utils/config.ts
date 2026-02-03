@@ -145,20 +145,32 @@ function getRolesDir(projectRoot: string, userConfig: UserConfig | null): string
 }
 
 /**
- * Load user config.json from project root
+ * Load af-config.json from project root (or legacy codev/config.json)
  */
 function loadUserConfig(projectRoot: string): UserConfig | null {
-  const configPath = resolve(projectRoot, 'codev', 'config.json');
-  if (!existsSync(configPath)) {
-    return null;
+  // Primary location: af-config.json at project root
+  const newConfigPath = resolve(projectRoot, 'af-config.json');
+  if (existsSync(newConfigPath)) {
+    try {
+      const content = readFileSync(newConfigPath, 'utf-8');
+      return JSON.parse(content) as UserConfig;
+    } catch (error) {
+      throw new Error(`Failed to parse af-config.json: ${error}`);
+    }
   }
 
-  try {
-    const content = readFileSync(configPath, 'utf-8');
-    return JSON.parse(content) as UserConfig;
-  } catch (error) {
-    throw new Error(`Failed to parse config.json: ${error}`);
+  // Legacy fallback: codev/config.json
+  const legacyConfigPath = resolve(projectRoot, 'codev', 'config.json');
+  if (existsSync(legacyConfigPath)) {
+    try {
+      const content = readFileSync(legacyConfigPath, 'utf-8');
+      return JSON.parse(content) as UserConfig;
+    } catch (error) {
+      throw new Error(`Failed to parse codev/config.json: ${error}`);
+    }
   }
+
+  return null;
 }
 
 /**

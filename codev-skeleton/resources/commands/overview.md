@@ -87,17 +87,7 @@ All codev commands support:
 
 ## Configuration
 
-Customize agent-farm commands via `codev/config.json`:
-
-```json
-{
-  "shell": {
-    "architect": "claude --model opus",
-    "builder": "claude --model sonnet",
-    "shell": "bash"
-  }
-}
-```
+Agent Farm is configured via `af-config.json` at the project root. Created during `codev init` or `codev adopt`. Override via CLI flags: `--architect-cmd`, `--builder-cmd`, `--shell-cmd`.
 
 ## Related Documentation
 
