@@ -7,7 +7,7 @@
 
 import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
-import { towerStart, towerStop } from './commands/tower.js';
+import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
 import { version } from '../version.js';
@@ -394,12 +394,16 @@ export async function runAgentFarm(args: string[]): Promise<void> {
 
   towerCmd
     .command('start')
-    .description('Start the tower dashboard')
+    .description('Start the tower dashboard (daemonizes by default)')
     .option('-p, --port <port>', 'Port to run on (default: 4100)')
+    .option('--wait', 'Wait for server to start before returning')
+    .option('--no-browser', 'Don\'t open browser automatically')
     .action(async (options) => {
       try {
         await towerStart({
           port: options.port ? parseInt(options.port, 10) : undefined,
+          wait: options.wait,
+          noBrowser: options.browser === false,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
@@ -415,6 +419,23 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       try {
         await towerStop({
           port: options.port ? parseInt(options.port, 10) : undefined,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  towerCmd
+    .command('log')
+    .description('View tower logs')
+    .option('-f, --follow', 'Follow log output (tail -f)')
+    .option('-n, --lines <lines>', 'Number of lines to show (default: 50)')
+    .action(async (options) => {
+      try {
+        await towerLog({
+          follow: options.follow,
+          lines: options.lines ? parseInt(options.lines, 10) : undefined,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

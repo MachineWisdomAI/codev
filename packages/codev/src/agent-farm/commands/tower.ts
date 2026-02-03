@@ -25,6 +25,8 @@ const STARTUP_CHECK_INTERVAL_MS = 200;
 
 export interface TowerStartOptions {
   port?: number;
+  wait?: boolean; // Wait for server to start before returning
+  noBrowser?: boolean; // Don't open browser
 }
 
 export interface TowerStopOptions {
@@ -194,26 +196,36 @@ export async function towerStart(options: TowerStartOptions = {}): Promise<void>
 
   logToFile(`Spawned tower server with PID ${serverProcess.pid}`);
 
-  // Wait for server to actually start responding
-  logger.info('Waiting for server to start...');
-  const started = await waitForServer(port);
-
-  if (!started) {
-    logToFile(`Tower server failed to respond within ${STARTUP_TIMEOUT_MS}ms`);
-    logger.error(`Tower server failed to start within ${STARTUP_TIMEOUT_MS / 1000}s`);
-    logger.error(`Check logs at: ${LOG_FILE}`);
-    process.exit(1);
-  }
-
   const dashboardUrl = `http://localhost:${port}`;
 
-  logToFile(`Tower server started successfully at ${dashboardUrl}`);
-  logger.blank();
-  logger.success('Tower started!');
-  logger.kv('Dashboard', dashboardUrl);
+  if (options.wait) {
+    // Wait for server to actually start responding
+    logger.info('Waiting for server to start...');
+    const started = await waitForServer(port);
 
-  // Open in browser
-  await openBrowser(dashboardUrl);
+    if (!started) {
+      logToFile(`Tower server failed to respond within ${STARTUP_TIMEOUT_MS}ms`);
+      logger.error(`Tower server failed to start within ${STARTUP_TIMEOUT_MS / 1000}s`);
+      logger.error(`Check logs at: ${LOG_FILE}`);
+      process.exit(1);
+    }
+
+    logToFile(`Tower server started successfully at ${dashboardUrl}`);
+    logger.blank();
+    logger.success('Tower started!');
+    logger.kv('Dashboard', dashboardUrl);
+  } else {
+    // Daemonize: return immediately without waiting
+    logger.blank();
+    logger.success('Tower starting in background...');
+    logger.kv('Dashboard', dashboardUrl);
+    logger.kv('Logs', `af tower log`);
+  }
+
+  // Open in browser unless disabled
+  if (!options.noBrowser) {
+    await openBrowser(dashboardUrl);
+  }
 }
 
 /**
@@ -243,6 +255,42 @@ export async function towerStop(options: TowerStopOptions = {}): Promise<void> {
 
   if (stopped > 0) {
     logger.success(`Tower stopped (${stopped} process${stopped > 1 ? 'es' : ''}: PIDs ${pids.join(', ')})`);
+  }
+}
+
+export interface TowerLogOptions {
+  follow?: boolean; // Tail the log file
+  lines?: number; // Number of lines to show
+}
+
+/**
+ * View or tail the tower log file
+ */
+export async function towerLog(options: TowerLogOptions = {}): Promise<void> {
+  const { existsSync, readFileSync } = await import('node:fs');
+  const { spawn } = await import('node:child_process');
+
+  if (!existsSync(LOG_FILE)) {
+    logger.info('No tower logs found. Start the tower with: af tower start');
+    return;
+  }
+
+  if (options.follow) {
+    // Tail -f the log file
+    logger.info(`Following ${LOG_FILE} (Ctrl+C to stop)`);
+    const tail = spawn('tail', ['-f', LOG_FILE], { stdio: 'inherit' });
+    tail.on('error', (err) => {
+      logger.error(`Failed to tail log: ${err.message}`);
+    });
+    // Keep process running
+    await new Promise(() => {});
+  } else {
+    // Show last N lines (default 50)
+    const lines = options.lines || 50;
+    const content = readFileSync(LOG_FILE, 'utf-8');
+    const allLines = content.trim().split('\n');
+    const lastLines = allLines.slice(-lines);
+    console.log(lastLines.join('\n'));
   }
 }
 
