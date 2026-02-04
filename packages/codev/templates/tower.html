@@ -6,7 +6,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#252525">
-  <title>🗼 Agent Farm Tower</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗼</text></svg>">
+  <title>Agent Farm Tower</title>
   <style>
     * {
       box-sizing: border-box;
@@ -1125,20 +1126,20 @@
       const statusText = instance.running ? 'Running' : 'Stopped';
       const hasGate = instance.gateStatus?.hasGate;
 
-      // Render terminals list - always show Dashboard first, then individual terminals
+      // Render terminals list - always show Overview first, then individual terminals
       const terminals = instance.terminals || [];
       let terminalsHtml = '';
 
       if (instance.running) {
-        // Always show Dashboard link first (opens normal dashboard view)
+        // Always show Overview link first (opens split view with Architect + Status panel)
         terminalsHtml = `
           <div class="port-item">
             <div class="port-info">
               <span class="port-status active"></span>
-              <span class="port-type">Dashboard</span>
+              <span class="port-type">Overview</span>
             </div>
             <div class="port-actions">
-              <a href="${escapeHtml(instance.proxyUrl)}" target="_blank">Open</a>
+              <a href="${escapeHtml(instance.proxyUrl)}">Open</a>
             </div>
           </div>
         `;
@@ -1152,11 +1153,24 @@
                 <span class="port-type">${escapeHtml(terminal.label)}</span>
               </div>
               <div class="port-actions">
-                <a href="${escapeHtml(terminal.url)}&fullscreen=1" target="_blank">Open</a>
+                <a href="${escapeHtml(terminal.url)}&fullscreen=1">Open</a>
               </div>
             </div>
           `).join('');
         }
+
+        // Add "New Shell" button for this instance
+        terminalsHtml += `
+          <div class="port-item" style="border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px;">
+            <div class="port-info">
+              <span class="port-status" style="background: var(--accent);"></span>
+              <span class="port-type">New Shell</span>
+            </div>
+            <div class="port-actions">
+              <button class="btn btn-small" onclick="createShell('${escapeHtml(instance.projectPath)}')">+ Create</button>
+            </div>
+          </div>
+        `;
       }
 
       const lastUsed = instance.lastUsed
@@ -1460,6 +1474,34 @@
         setTimeout(refresh, 2000);
       } catch (err) {
         showToast('Failed to launch: ' + err.message, 'error');
+      }
+    }
+
+    // Create a new shell for a running instance (via tower proxy)
+    async function createShell(projectPath) {
+      try {
+        // Use tower proxy to route to the project's dashboard API
+        const encodedPath = toBase64URL(projectPath);
+        const response = await authFetch(`/project/${encodedPath}/api/tabs/shell`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || 'Failed to create shell');
+        }
+
+        const result = await response.json();
+
+        if (result.success === false) {
+          throw new Error(result.error || 'Failed to create shell');
+        }
+
+        showToast(`Shell created: ${result.name || 'shell'}`, 'success');
+        setTimeout(refresh, 1000);
+      } catch (err) {
+        showToast('Failed to create shell: ' + err.message, 'error');
       }
     }
 

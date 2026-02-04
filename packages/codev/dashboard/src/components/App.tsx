@@ -15,12 +15,12 @@ export function App() {
   const { tabs, activeTab, activeTabId, selectTab } = useTabs(state);
   const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
-  // Set document title with project name
+  // Set document title with project name (no emoji - favicon provides the icon)
   useEffect(() => {
     if (state?.projectName) {
-      document.title = `🏗️ ${state.projectName} Agent Farm`;
+      document.title = `${state.projectName} Agent Farm`;
     } else {
-      document.title = '🏗️ Agent Farm';
+      document.title = 'Agent Farm';
     }
   }, [state?.projectName]);
 

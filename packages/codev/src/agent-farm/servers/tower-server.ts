@@ -360,7 +360,7 @@ async function getTerminalsForProject(
         status?: string;
         currentGate?: string;
       }>;
-      utils?: Array<{ id: string; label?: string; terminalId?: string }>;
+      utils?: Array<{ id: string; name?: string; terminalId?: string }>;
       annotations?: Array<{ id: string; file?: string }>;
     };
 
@@ -397,7 +397,7 @@ async function getTerminalsForProject(
         terminals.push({
           type: 'shell',
           id: util.id,
-          label: util.label || `Shell ${util.id}`,
+          label: util.name || `Shell ${util.id}`,
           url: `${proxyUrl}?tab=shell-${util.id}`,
           active: true,
         });
