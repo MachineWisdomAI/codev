@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-// af is shorthand for codev agent-farm
-// Inject 'agent-farm' as first argument
+// af - Agent Farm CLI (standalone command)
+// Routes to agent-farm command handler
 import { run } from '../dist/cli.js';
 
 const args = process.argv.slice(2);

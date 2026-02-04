@@ -1,5 +1,5 @@
 /**
- * Tests for codev consult command
+ * Tests for consult CLI command
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';

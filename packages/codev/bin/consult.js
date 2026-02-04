@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// consult is shorthand for codev consult
+// consult - AI consultation CLI (standalone command)
 import { run } from '../dist/cli.js';
 
 const args = process.argv.slice(2);
