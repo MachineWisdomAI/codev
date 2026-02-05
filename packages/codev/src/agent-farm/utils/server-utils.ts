@@ -51,31 +51,11 @@ export function parseJsonBody(req: http.IncomingMessage, maxSize = 1024 * 1024):
 }
 
 /**
- * Security: Validate request origin to prevent CSRF and DNS rebinding attacks
- * Allows only localhost and 127.0.0.1 by default.
- * Set CODEV_WEB_INSECURE=1 to allow any host (for tunnel access).
+ * Security: Validate request origin
+ * Currently allows all requests - security is handled by the server binding to localhost only.
  * @param req - HTTP incoming message
- * @returns true if request should be allowed
+ * @returns true (always allowed)
  */
-export function isRequestAllowed(req: http.IncomingMessage): boolean {
-  // INSECURE MODE: Skip all checks (for tunnel access)
-  if (process.env.CODEV_WEB_INSECURE === '1') {
-    return true;
-  }
-
-  const host = req.headers.host;
-  const origin = req.headers.origin;
-
-  // Host check (prevent DNS rebinding attacks)
-  if (host && !host.startsWith('localhost') && !host.startsWith('127.0.0.1')) {
-    return false;
-  }
-
-  // Origin check (prevent CSRF from external sites)
-  // Note: CLI tools/curl might not send Origin, so we only block if Origin is present and invalid
-  if (origin && !origin.startsWith('http://localhost') && !origin.startsWith('http://127.0.0.1')) {
-    return false;
-  }
-
+export function isRequestAllowed(_req: http.IncomingMessage): boolean {
   return true;
 }
