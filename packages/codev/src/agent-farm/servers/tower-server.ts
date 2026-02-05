@@ -835,7 +835,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       }
 
       db.prepare(
-        'INSERT INTO port_allocations (project_path, project_name, base_port, created_at) VALUES (?, ?, ?, datetime("now"))'
+        "INSERT INTO port_allocations (project_path, project_name, base_port, created_at) VALUES (?, ?, ?, datetime('now'))"
       ).run(resolvedPath, path.basename(projectPath), nextPort);
 
       allocation = { base_port: nextPort };

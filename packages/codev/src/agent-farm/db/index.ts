@@ -245,7 +245,7 @@ function ensureGlobalDatabase(): Database.Database {
       // Column already exists
     }
     try {
-      db.exec('ALTER TABLE port_allocations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime("now"))');
+      db.exec("ALTER TABLE port_allocations ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
     } catch {
       // Column already exists
     }
