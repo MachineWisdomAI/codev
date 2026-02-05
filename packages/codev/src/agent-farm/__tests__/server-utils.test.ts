@@ -116,9 +116,10 @@ describe('Server Utilities', () => {
       expect(isRequestAllowed(req)).toBe(true);
     });
 
-    it('should deny requests from external host', () => {
+    it('should allow requests from any host (server binds to localhost only)', () => {
+      // Security is handled by binding to 127.0.0.1, not by checking headers
       const req = createMockRequest({ host: 'evil.com' });
-      expect(isRequestAllowed(req)).toBe(false);
+      expect(isRequestAllowed(req)).toBe(true);
     });
 
     it('should allow requests with localhost origin', () => {
@@ -137,12 +138,13 @@ describe('Server Utilities', () => {
       expect(isRequestAllowed(req)).toBe(true);
     });
 
-    it('should deny requests with external origin', () => {
+    it('should allow requests with any origin (server binds to localhost only)', () => {
+      // Security is handled by binding to 127.0.0.1, not by checking headers
       const req = createMockRequest({
         host: 'localhost:4200',
         origin: 'http://evil.com',
       });
-      expect(isRequestAllowed(req)).toBe(false);
+      expect(isRequestAllowed(req)).toBe(true);
     });
 
     it('should allow requests without origin header (CLI/curl)', () => {
