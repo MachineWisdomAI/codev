@@ -107,4 +107,20 @@ CREATE TABLE IF NOT EXISTS port_allocations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_port_allocations_base_port ON port_allocations(base_port);
+
+-- Terminal sessions (Spec 0090 TICK-001)
+-- Tracks all terminal sessions across all projects for persistence and reconciliation
+CREATE TABLE IF NOT EXISTS terminal_sessions (
+  id TEXT PRIMARY KEY,                    -- terminal UUID from PtyManager
+  project_path TEXT NOT NULL,             -- project this terminal belongs to
+  type TEXT NOT NULL                      -- 'architect', 'builder', 'shell'
+    CHECK(type IN ('architect', 'builder', 'shell')),
+  role_id TEXT,                           -- builder ID or shell ID (null for architect)
+  pid INTEGER,                            -- process ID of the terminal
+  tmux_session TEXT,                      -- tmux session name if tmux-backed
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
 `;

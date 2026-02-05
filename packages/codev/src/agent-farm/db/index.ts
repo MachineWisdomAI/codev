@@ -252,6 +252,27 @@ function ensureGlobalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (2)').run();
   }
 
+  // Migration v3: Add terminal_sessions table (Spec 0090 TICK-001)
+  const v3 = db.prepare('SELECT version FROM _migrations WHERE version = 3').get();
+  if (!v3) {
+    // Create terminal_sessions table if it doesn't exist
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS terminal_sessions (
+        id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
+        role_id TEXT,
+        pid INTEGER,
+        tmux_session TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+      CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (3)').run();
+    console.log('[info] Created terminal_sessions table (Spec 0090 TICK-001)');
+  }
+
   return db;
 }
 

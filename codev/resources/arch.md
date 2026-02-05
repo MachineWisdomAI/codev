@@ -27,7 +27,10 @@ For debugging common issues, start here:
 
 | Issue | Entry Point | What to Check |
 |-------|-------------|---------------|
-| **"Dashboard won't start"** | `packages/codev/src/agent-farm/commands/start.ts` | Port conflicts, node-pty/tmux availability |
+| **"Tower won't start"** | `packages/codev/src/agent-farm/servers/tower-server.ts` | Port 4100 conflict, node-pty availability |
+| **"Project won't activate"** | `tower-server.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
+| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected |
+| **"Project shows inactive"** | `tower-server.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
 | **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, tmux session, role injection |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
@@ -37,17 +40,23 @@ For debugging common issues, start here:
 
 **Common debugging commands:**
 ```bash
-# Check Agent Farm state
-sqlite3 -header -column .agent-farm/state.db "SELECT * FROM builders"
-
 # Check port allocations
 sqlite3 -header -column ~/.agent-farm/global.db "SELECT * FROM port_allocations"
+
+# Check if Tower is running
+curl -s http://localhost:4100/health | jq
+
+# List all projects and their status
+curl -s http://localhost:4100/api/projects | jq
+
+# Check terminal sessions on Tower
+curl -s http://localhost:4100/api/terminals | jq
 
 # Verify tmux sessions
 tmux list-sessions
 
-# Check if dashboard server is running
-pgrep -f dashboard-server
+# Check Tower logs (if started with --log-file)
+tail -f ~/.agent-farm/tower.log
 ```
 
 ## Glossary
@@ -375,41 +384,133 @@ When cleaning up a builder (`af cleanup -p 0003`):
 6. **Update state**: Remove builder from database
 7. **Prune worktrees**: `git worktree prune`
 
-### Dashboard Server
+### Tower Single Daemon Architecture (Spec 0090)
 
-The dashboard server (`servers/dashboard-server.ts`) is an HTTP server that provides the web UI and REST API.
+As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** architecture. The Tower server manages all projects directly - there are no separate dashboard-server processes per project.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Tower Server (port 4100)                             │
+│          HTTP server + WebSocket multiplexer + Terminal Manager              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────┐    ┌─────────────────────┐                         │
+│  │   Project A         │    │   Project B         │                         │
+│  │   /project/enc(A)/  │    │   /project/enc(B)/  │                         │
+│  │                     │    │                     │                         │
+│  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
+│  │  │ Architect     │  │    │  │ Architect     │  │                         │
+│  │  │ (node-pty)    │  │    │  │ (node-pty)    │  │                         │
+│  │  └───────────────┘  │    │  └───────────────┘  │                         │
+│  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
+│  │  │ Shells        │  │    │  │ Builders      │  │                         │
+│  │  │ (node-pty)    │  │    │  │ (node-pty)    │  │                         │
+│  │  └───────────────┘  │    │  └───────────────┘  │                         │
+│  └─────────────────────┘    └─────────────────────┘                         │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    projectTerminals Map (in-memory)                  │    │
+│  │  Key: projectPath → { architect?: terminalId,                        │    │
+│  │                       builders: Map<builderId, terminalId>,          │    │
+│  │                       shells: Map<shellId, terminalId> }             │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    TerminalManager (node-pty sessions)               │    │
+│  │  - Spawns PTY sessions via node-pty                                  │    │
+│  │  - Maintains ring buffer (1000 lines) per session                    │    │
+│  │  - Handles WebSocket broadcast to connected clients                  │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                    WebSocket /project/<enc>/ws/terminal/<id>
+                                    │
+              ┌─────────────────────┴─────────────────────┐
+              │                                           │
+              ▼                                           ▼
+   ┌──────────────────┐                       ┌──────────────────┐
+   │  React Dashboard │                       │  React Dashboard │
+   │  (Project A)     │                       │  (Project B)     │
+   │  xterm.js tabs   │                       │  xterm.js tabs   │
+   └──────────────────┘                       └──────────────────┘
+```
+
+#### Key Architectural Invariants
+
+**These MUST remain true - violating them will break the system:**
+
+1. **Single PTY per terminal**: Each architect/builder/shell has exactly one node-pty session in TerminalManager
+2. **projectTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which project
+3. **SQLite (global.db) tracks port allocations only**: Port assignments persist across restarts, but terminal state does not
+4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/project/<encoded>/` routes
+5. **WebSocket paths include project context**: Format is `/project/<base64url>/ws/terminal/<id>`
+
+#### State Split Problem & Reconciliation
+
+**WARNING**: The system has a known state split between:
+- **SQLite (global.db)**: Persistent port allocations
+- **In-memory (projectTerminals)**: Runtime terminal state
+
+On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy:
+- Projects show "inactive" until explicitly activated
+- Activation creates new terminals (doesn't restore old ones)
+- tmux sessions may be orphaned after crashes (handled by orphan cleanup)
 
 #### Server Architecture
 
 - **Framework**: Native Node.js `http` module (no Express)
-- **Port**: Base port (e.g., 4200)
-- **Security**: Host/Origin validation, path traversal prevention
-- **State**: Direct SQLite access via state functions
+- **Port**: 4100 (Tower default)
+- **Security**: Localhost binding only (see Security Model section)
+- **State**: In-memory `projectTerminals` Map + SQLite for port allocations
 
-#### API Endpoints
+#### Tower API Endpoints (Spec 0090)
+
+**Tower-level APIs (port 4100):**
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/` | Serve dashboard HTML |
-| `GET` | `/api/state` | Get current state (polled every 1s) |
-| `POST` | `/api/tabs/file` | Open file annotation viewer |
-| `POST` | `/api/tabs/builder` | Create worktree builder |
-| `POST` | `/api/tabs/shell` | Create shell terminal |
-| `DELETE` | `/api/tabs/{id}` | Close a tab |
-| `POST` | `/api/stop` | Stop all processes |
-| `GET` | `/open-file?path=...&line=...` | Handle terminal file clicks |
-| `GET` | `/file?path=...` | Read file contents |
-| `GET` | `/api/projectlist-exists` | Check for projectlist.md |
-| `GET` | `/api/files` | Get file tree for file browser (v1.5.0+) |
-| `GET` | `/api/activity-summary` | Get daily activity summary (v1.5.0+) |
-| `GET` | `/api/hot-reload` | Get file modification times for hot reload (v1.5.0+) |
-| `POST` | `/api/terminals` | Create PTY session (Spec 0085) |
-| `GET` | `/api/terminals` | List PTY sessions (Spec 0085) |
-| `GET` | `/api/terminals/:id` | Get PTY session metadata (pid, status, cols, rows) (Spec 0085) |
-| `DELETE` | `/api/terminals/:id` | Kill PTY session (Spec 0085) |
-| `POST` | `/api/terminals/:id/resize` | Resize PTY session (Spec 0085) |
-| `GET` | `/api/terminals/:id/output` | Get ring buffer output (?lines=N&offset=M) (Spec 0085) |
-| `WS` | `/ws/terminal/:id` | WebSocket terminal connection (Spec 0085) |
+| `GET` | `/` | Serve Tower dashboard HTML |
+| `GET` | `/health` | Health check (uptime, memory, active projects) |
+| `GET` | `/api/projects` | List all projects with status |
+| `GET` | `/api/projects/:enc/status` | Get project status (terminals, gates) |
+| `POST` | `/api/projects/:enc/activate` | Activate project (creates architect terminal) |
+| `POST` | `/api/projects/:enc/deactivate` | Deactivate project (kills all terminals) |
+| `GET` | `/api/status` | Legacy: Get all instances (backward compat) |
+| `POST` | `/api/launch` | Legacy: Launch instance (backward compat) |
+| `POST` | `/api/stop` | Stop instance by projectPath or basePort |
+| `GET` | `/api/browse?path=` | Directory autocomplete for project selection |
+| `POST` | `/api/create` | Create new project (codev init + activate) |
+| `GET` | `/api/events` | SSE stream for push notifications |
+| `POST` | `/api/notify` | Broadcast notification to SSE clients |
+| `GET` | `/api/tunnel/status` | Get cloudflared tunnel status |
+| `POST` | `/api/tunnel/start` | Start cloudflared tunnel |
+| `POST` | `/api/tunnel/stop` | Stop cloudflared tunnel |
+
+**Project-scoped APIs (via Tower proxy):**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/project/:enc/` | Serve React dashboard for project |
+| `GET` | `/project/:enc/api/state` | Get project state (architect, builders, shells) |
+| `POST` | `/project/:enc/api/tabs/shell` | Create shell terminal for project |
+| `DELETE` | `/project/:enc/api/tabs/:id` | Close a tab |
+| `POST` | `/project/:enc/api/stop` | Stop all terminals for project |
+| `WS` | `/project/:enc/ws/terminal/:id` | WebSocket terminal connection |
+
+**Note**: `:enc` is the project path encoded as Base64URL (RFC 4648). Example: `/Users/me/project` → `L1VzZXJzL21lL3Byb2plY3Q`
+
+**Terminal API (global):**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/terminals` | Create PTY session |
+| `GET` | `/api/terminals` | List all PTY sessions |
+| `GET` | `/api/terminals/:id` | Get PTY session metadata |
+| `DELETE` | `/api/terminals/:id` | Kill PTY session |
+| `POST` | `/api/terminals/:id/resize` | Resize PTY session |
+| `GET` | `/api/terminals/:id/output` | Get ring buffer output |
+| `WS` | `/ws/terminal/:id` | WebSocket terminal connection |
 
 #### Dashboard UI (React + Vite, Spec 0085)
 
@@ -701,9 +802,10 @@ const CONFIG = {
 
 | File | Purpose |
 |------|---------|
-| `servers/dashboard-server.ts` | Main dashboard HTTP server |
+| `servers/tower-server.ts` | **Tower Single Daemon** - manages all projects, terminals, and dashboards (Spec 0090) |
 | `servers/open-server.ts` | File annotation viewer server |
-| `servers/tower-server.ts` | Multi-project overview server |
+
+**Note**: As of Spec 0090 Phase 4, `dashboard-server.ts` has been removed. Tower manages everything directly.
 
 #### Utilities
 
@@ -2030,9 +2132,56 @@ See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
 - Tab bar status indicators (Spec 0019)
 - Terminal file click (Spec 0009)
 
+## Integration Testing Requirements
+
+**CRITICAL**: Integration tests MUST pass before any Tower/Agent Farm release.
+
+### Required Test Scenarios
+
+Based on consultation with external models, these scenarios MUST be tested:
+
+1. **Multi-Dashboard Survival Test**
+   - Activate project A
+   - Activate project B
+   - Verify both projects remain active (project A not killed)
+
+2. **Project View Test**
+   - Navigate to Tower UI
+   - Verify project list loads
+   - Verify project status (active/inactive) is correct
+
+3. **Terminal Connectivity Test**
+   - Activate a project
+   - Connect to architect terminal via WebSocket
+   - Verify terminal receives output
+
+4. **State Persistence Test**
+   - Activate project
+   - Restart Tower
+   - Verify project shows as inactive (expected - terminals are ephemeral)
+   - Re-activate project
+   - Verify terminals work
+
+### Running Integration Tests
+
+```bash
+# Run Tower E2E tests (Playwright)
+npm run test:e2e -- --grep "tower"
+
+# Run with headed browser for debugging
+npm run test:e2e -- --grep "tower" --headed
+```
+
+### Test Infrastructure Files
+
+| File | Purpose |
+|------|---------|
+| `packages/codev/src/agent-farm/__tests__/tower-api.test.ts` | Tower API unit tests |
+| `packages/codev/src/agent-farm/__tests__/e2e/tower.spec.ts` | Tower E2E tests (Playwright) |
+
 ---
 
-**Last Updated**: 2026-01-27
-**Version**: v2.0.0-rc.25 (Pre-release)
-**Changes**: Unified `af spawn` command with strict/soft modes. Strict (porch-driven) is now default for `--project`. Use `--soft` to opt out.
+**Last Updated**: 2026-02-05
+**Version**: v2.0.0-rc.54 (Pre-release)
+**Changes**: Updated to reflect Tower Single Daemon architecture (Spec 0090 Phase 4). Removed dashboard-server.ts references. Added integration testing requirements.
 **Next Review**: After v2.0.0 release

@@ -138,6 +138,202 @@ function getTerminalManager(): TerminalManager {
   return terminalManager;
 }
 
+// ============================================================================
+// TICK-001: Terminal Session Persistence and Reconciliation (Spec 0090)
+// ============================================================================
+
+interface DbTerminalSession {
+  id: string;
+  project_path: string;
+  type: 'architect' | 'builder' | 'shell';
+  role_id: string | null;
+  pid: number | null;
+  tmux_session: string | null;
+  created_at: string;
+}
+
+/**
+ * Normalize a project path to its canonical form for consistent SQLite storage.
+ * Uses realpath to resolve symlinks and relative paths.
+ */
+function normalizeProjectPath(projectPath: string): string {
+  try {
+    return fs.realpathSync(projectPath);
+  } catch {
+    // Path doesn't exist yet, normalize without realpath
+    return path.resolve(projectPath);
+  }
+}
+
+/**
+ * Save a terminal session to SQLite.
+ * Guards against race conditions by checking if project is still active.
+ */
+function saveTerminalSession(
+  terminalId: string,
+  projectPath: string,
+  type: 'architect' | 'builder' | 'shell',
+  roleId: string | null,
+  pid: number | null,
+  tmuxSession: string | null
+): void {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+
+    // Race condition guard: only save if project is still in the active registry
+    // This prevents zombie rows when stop races with session creation
+    if (!projectTerminals.has(normalizedPath) && !projectTerminals.has(projectPath)) {
+      log('INFO', `Skipping session save - project no longer active: ${projectPath}`);
+      return;
+    }
+
+    const db = getGlobalDb();
+    db.prepare(`
+      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, tmuxSession);
+  } catch (err) {
+    log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete a terminal session from SQLite
+ */
+function deleteTerminalSession(terminalId: string): void {
+  try {
+    const db = getGlobalDb();
+    db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(terminalId);
+  } catch (err) {
+    log('WARN', `Failed to delete terminal session: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete all terminal sessions for a project from SQLite.
+ * Normalizes path to ensure consistent cleanup regardless of how path was provided.
+ */
+function deleteProjectTerminalSessions(projectPath: string): void {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    const db = getGlobalDb();
+
+    // Delete both normalized and raw path to handle any inconsistencies
+    db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(normalizedPath);
+    if (normalizedPath !== projectPath) {
+      db.prepare('DELETE FROM terminal_sessions WHERE project_path = ?').run(projectPath);
+    }
+  } catch (err) {
+    log('WARN', `Failed to delete project terminal sessions: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Check if a tmux session exists
+ */
+function tmuxSessionExists(sessionName: string): boolean {
+  try {
+    execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if a process is running
+ */
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kill a tmux session by name
+ */
+function killTmuxSession(sessionName: string): void {
+  try {
+    execSync(`tmux kill-session -t "${sessionName}" 2>/dev/null`, { stdio: 'ignore' });
+    log('INFO', `Killed orphaned tmux session: ${sessionName}`);
+  } catch {
+    // Session may have already died
+  }
+}
+
+/**
+ * Reconcile terminal sessions from SQLite against reality on startup.
+ *
+ * DESTRUCTIVE: Since we can't re-attach to PTY sessions after restart,
+ * any surviving tmux sessions are orphaned and must be killed.
+ * This ensures clean state and prevents zombie terminals.
+ */
+async function reconcileTerminalSessions(): Promise<void> {
+  const db = getGlobalDb();
+  let sessions: DbTerminalSession[];
+
+  try {
+    sessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
+  } catch (err) {
+    log('WARN', `Failed to read terminal sessions for reconciliation: ${(err as Error).message}`);
+    return;
+  }
+
+  if (sessions.length === 0) {
+    log('INFO', 'No terminal sessions to reconcile');
+    return;
+  }
+
+  log('INFO', `Reconciling ${sessions.length} terminal sessions from previous run...`);
+
+  let killed = 0;
+  let cleaned = 0;
+
+  for (const session of sessions) {
+    // Check if tmux session exists (can survive Tower restart)
+    if (session.tmux_session && tmuxSessionExists(session.tmux_session)) {
+      // DESTRUCTIVE: Kill the orphaned tmux session since we can't re-attach
+      // Without the PTY object, we have no way to control this session
+      log('INFO', `Found orphaned tmux session: ${session.tmux_session} (${session.type} for ${path.basename(session.project_path)})`);
+      killTmuxSession(session.tmux_session);
+      killed++;
+    }
+    // Check if process still running (kill if we can)
+    else if (session.pid && processExists(session.pid)) {
+      log('INFO', `Found orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
+      try {
+        process.kill(session.pid, 'SIGTERM');
+        killed++;
+      } catch {
+        // Process may not be killable (different user, etc)
+      }
+    }
+
+    // Always clean up the DB row - we start fresh after restart
+    db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+    cleaned++;
+  }
+
+  log('INFO', `Reconciliation complete: ${killed} orphaned processes killed, ${cleaned} DB rows cleaned`);
+}
+
+/**
+ * Get terminal sessions from SQLite for a project.
+ * Normalizes path for consistent lookup.
+ */
+function getTerminalSessionsForProject(projectPath: string): DbTerminalSession[] {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    const db = getGlobalDb();
+    return db.prepare('SELECT * FROM terminal_sessions WHERE project_path = ?').all(normalizedPath) as DbTerminalSession[];
+  } catch {
+    return [];
+  }
+}
+
 // Import PtySession type for WebSocket handling
 import type { PtySession } from '../../terminal/pty-session.js';
 
@@ -877,6 +1073,10 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         });
 
         entry.architect = session.id;
+
+        // TICK-001: Save to SQLite for persistence
+        saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, null);
+
         log('INFO', `Created architect terminal for project: ${projectPath}`);
       } catch (err) {
         log('WARN', `Failed to create architect terminal: ${(err as Error).message}`);
@@ -955,6 +1155,12 @@ async function stopInstance(projectPath: string): Promise<{ success: boolean; er
     // Clear project from registry
     projectTerminals.delete(resolvedPath);
     projectTerminals.delete(projectPath);
+
+    // TICK-001: Delete all terminal sessions from SQLite
+    deleteProjectTerminalSessions(resolvedPath);
+    if (resolvedPath !== projectPath) {
+      deleteProjectTerminalSessions(projectPath);
+    }
   }
 
   if (stopped.length === 0) {
@@ -1251,6 +1457,10 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
           return;
         }
+
+        // TICK-001: Delete from SQLite
+        deleteTerminalSession(terminalId);
+
         res.writeHead(204);
         res.end();
         return;
@@ -1689,6 +1899,9 @@ const server = http.createServer(async (req, res) => {
             const entry = getProjectTerminalsEntry(projectPath);
             entry.shells.set(shellId, session.id);
 
+            // TICK-001: Save to SQLite for persistence
+            saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid, null);
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               id: shellId,
@@ -1733,6 +1946,10 @@ const server = http.createServer(async (req, res) => {
 
           if (terminalId) {
             manager.killSession(terminalId);
+
+            // TICK-001: Delete from SQLite
+            deleteTerminalSession(terminalId);
+
             res.writeHead(204);
             res.end();
           } else {
@@ -1760,6 +1977,9 @@ const server = http.createServer(async (req, res) => {
 
           // Clear registry
           projectTerminals.delete(projectPath);
+
+          // TICK-001: Delete all terminal sessions from SQLite
+          deleteProjectTerminalSessions(projectPath);
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
@@ -1804,8 +2024,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 // SECURITY: Bind to localhost only to prevent network exposure
-server.listen(port, '127.0.0.1', () => {
+server.listen(port, '127.0.0.1', async () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
+
+  // TICK-001: Reconcile terminal sessions from previous run
+  await reconcileTerminalSessions();
 });
 
 // Initialize terminal WebSocket server (Phase 2 - Spec 0090)

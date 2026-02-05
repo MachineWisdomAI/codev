@@ -140,6 +140,33 @@ const { chromium } = require('playwright');
 
 **When to use headed mode**: Only for debugging when you need to see what's happening visually. Add `{ headless: false }` temporarily.
 
+### 🚨 Tower/Agent Farm Regression Prevention
+
+**CRITICAL PRINCIPLE**: Never claim a fix works without actually testing it.
+
+The Tower Single Daemon architecture (Spec 0090) has state management complexity that unit tests don't catch. Before claiming any Tower/Agent Farm change works:
+
+1. **Build and install**: `npm run build && npm pack && npm install -g ./cluesmith-codev-*.tgz`
+2. **Restart Tower**: Kill existing tower (`pkill -f tower-server`), start fresh (`af tower`)
+3. **Test the actual scenario**: Use Playwright or manual testing to verify the specific bug/feature
+4. **Verify multi-project scenarios**: If touching project management, test with 2+ projects
+
+**Known Regression Patterns** (things that break repeatedly):
+
+| Pattern | Root Cause | How to Test |
+|---------|------------|-------------|
+| Second dashboard kills first | WebSocket cleanup on disconnect | Activate 2 projects, verify both stay active |
+| Project shows inactive | projectTerminals Map not updated | Check `curl localhost:4100/api/projects` |
+| Terminal shows blinking cursor only | Command parsing (string vs args) | Verify terminal shows actual output |
+| File view broken | React route handling | Navigate to `/project/enc/` paths |
+
+**State Split Awareness**:
+The Tower has TWO sources of truth that can diverge:
+- **SQLite (global.db)**: Persistent port allocations
+- **In-memory (projectTerminals)**: Runtime terminal state
+
+Changes to either must consider the other. See `codev/resources/arch.md` → "State Split Problem" for details.
+
 ## Quick Start
 
 > **New to Codev?** See the [Cheatsheet](codev/resources/cheatsheet.md) for philosophies, concepts, and tool reference.

@@ -377,6 +377,109 @@ The spec reuses the existing `codev-web-key` authentication pattern with two add
 
 2. **Rate limiting** - 10 activations/minute per client to prevent abuse. This is a security safeguard, not authentication.
 
+## TICK-001: Terminal Session Persistence and Reconciliation
+
+**Amendment Date**: 2026-02-05
+**Consulted**: Gemini 3 Pro, GPT-5.2 Codex
+
+### Problem
+
+Phase 4 implementation has a state split:
+- **SQLite (global.db)**: Port allocations persist across restarts
+- **In-memory (projectTerminals Map)**: Terminal state lost on restart
+
+This causes:
+- Projects showing "inactive" after Tower restart (terminals gone but port allocation remains)
+- State divergence during runtime
+- Confusion about which projects are actually running
+
+### Solution: SQLite as Single Source of Truth + Reconciliation
+
+**Add `terminal_sessions` table to global.db:**
+
+```sql
+CREATE TABLE IF NOT EXISTS terminal_sessions (
+  id TEXT PRIMARY KEY,           -- terminal UUID
+  project_path TEXT NOT NULL,    -- project this belongs to
+  type TEXT NOT NULL,            -- 'architect', 'builder', 'shell'
+  role_id TEXT,                  -- builder ID or shell ID (null for architect)
+  pid INTEGER,                   -- process ID
+  tmux_session TEXT,             -- tmux session name if tmux-backed
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(project_path) REFERENCES port_allocations(project_path)
+);
+```
+
+**Startup Reconciliation Logic:**
+
+```typescript
+async function reconcileTerminalSessions(): Promise<void> {
+  const sessions = db.prepare('SELECT * FROM terminal_sessions').all();
+
+  for (const session of sessions) {
+    let alive = false;
+
+    // Check if tmux session exists
+    if (session.tmux_session) {
+      try {
+        execSync(`tmux has-session -t "${session.tmux_session}" 2>/dev/null`);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+    // Check if process still running (for non-tmux)
+    else if (session.pid) {
+      try {
+        process.kill(session.pid, 0);  // Signal 0 = check existence
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+
+    if (alive) {
+      // Re-attach: create PTY session and populate projectTerminals Map
+      await reattachTerminal(session);
+    } else {
+      // Clean up dead session
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
+    }
+  }
+}
+```
+
+**Runtime Behavior:**
+
+1. **On terminal create**: INSERT into terminal_sessions, then spawn PTY
+2. **On terminal kill**: DELETE from terminal_sessions, then kill PTY
+3. **On Tower startup**: Run reconciliation before accepting connections
+4. **Periodic reconciliation** (optional): Every 60s, verify sessions match reality
+
+### Changes to tower-server.ts
+
+1. Add `terminal_sessions` table to schema
+2. Add migration for existing installations
+3. Modify `launchInstance()` to INSERT sessions
+4. Modify terminal cleanup to DELETE sessions
+5. Add `reconcileTerminalSessions()` called on startup
+6. Change `getInstances()` to query SQLite instead of in-memory Map for terminal count
+
+### Benefits
+
+1. **Single source of truth** - SQLite is authoritative, Map is cache
+2. **Survive restarts** - tmux-backed sessions (architect) can be re-attached
+3. **Debuggable** - `sqlite3 ~/.agent-farm/global.db "SELECT * FROM terminal_sessions"`
+4. **No phantom state** - Dead sessions cleaned up on reconciliation
+
+### Non-Goals
+
+- Persisting node-pty sessions (they die with process - expected)
+- Full event sourcing (overkill for this use case)
+- Distributed consistency (single-node tool)
+
+---
+
 ## Out of Scope
 
 - Cloud-hosted tower (separate spec)
