@@ -863,9 +863,14 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       }
 
       try {
+        // Parse command string to separate command and args
+        const cmdParts = architectCmd.split(/\s+/);
+        const cmd = cmdParts[0];
+        const cmdArgs = cmdParts.slice(1);
+
         const session = await manager.createSession({
-          command: architectCmd,
-          args: [],
+          command: cmd,
+          args: cmdArgs,
           cwd: projectPath,
           label: 'Architect',
           env: process.env as Record<string, string>,
