@@ -43,6 +43,11 @@
         "commit"
       ],
       "checks": {
+        "regression_test": {
+          "description": "A regression test MUST be added unless explicitly justified. No fix without a test.",
+          "required": true,
+          "skip_requires_justification": true
+        },
         "build": {
           "command": "npm run build",
           "on_fail": "retry",

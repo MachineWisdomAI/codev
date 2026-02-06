@@ -28,7 +28,9 @@ Apply the minimum change needed to resolve the bug:
 
 ### 2. Add a Regression Test
 
-**A regression test is required.** Write a test that:
+**A regression test is MANDATORY.** Every bugfix MUST include a test unless you provide explicit justification for why a test is impossible (e.g., pure CSS-only change with no testable behavior). If you skip the test, you MUST explain why in your commit message and PR description.
+
+Write a test that:
 - Fails without the fix (demonstrates the bug)
 - Passes with the fix (demonstrates the fix works)
 - Covers the specific scenario from the issue
@@ -70,6 +72,6 @@ If you encounter a blocker:
 ## Important Notes
 
 1. **Minimal changes only** — Fix the bug, nothing else
-2. **Tests are mandatory** — No fix without a regression test
+2. **Regression test is MANDATORY** — No fix without a test. If truly untestable, justify in writing.
 3. **Build AND tests must pass** — Don't signal complete until both pass
 4. **Stay under 300 LOC** — If the fix grows beyond this, signal `TOO_COMPLEX`
