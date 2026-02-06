@@ -97,8 +97,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     wsRef.current = ws;
 
     // Filter DA (Device Attribute) response sequences that tmux echoes as visible
-    // text when attaching to an existing session. These can arrive fragmented across
-    // WebSocket frames, so we buffer initial data and do a single bulk filter.
+    // text when attaching to an existing session. Buffer the first 500ms of data
+    // to catch fragmented DA sequences, then flush and switch to direct writes.
+    // Uses a fixed deadline (not reset per frame) so active terminals don't starve.
     let initialBuffer = '';
     let initialPhase = true;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -112,6 +113,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
 
     const flushInitialBuffer = () => {
       initialPhase = false;
+      flushTimer = null;
       if (initialBuffer) {
         const filtered = filterDA(initialBuffer);
         if (filtered) term.write(filtered);
@@ -135,10 +137,12 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         const text = new TextDecoder().decode(payload);
 
         if (initialPhase) {
-          // Buffer initial data to catch fragmented DA responses
+          // Buffer initial data to catch fragmented DA responses.
+          // Set flush timer on FIRST message only (fixed 500ms deadline).
           initialBuffer += text;
-          if (flushTimer) clearTimeout(flushTimer);
-          flushTimer = setTimeout(flushInitialBuffer, 300);
+          if (!flushTimer) {
+            flushTimer = setTimeout(flushInitialBuffer, 500);
+          }
         } else {
           // After initial phase, still filter for safety but write immediately
           const filtered = filterDA(text);

@@ -546,16 +546,26 @@ async function createWorktree(config: Config, branchName: string, worktreePath: 
  * The Tower server must be running (port 4100).
  */
 async function createPtySession(
-  _config: Config,
+  config: Config,
   command: string,
   args: string[],
   cwd: string,
-): Promise<{ terminalId: string }> {
+  registration?: { projectPath: string; type: 'builder' | 'shell'; roleId: string; tmuxSession?: string },
+): Promise<{ terminalId: string; tmuxSession: string | null }> {
   const towerPort = 4100;
+  const body: Record<string, unknown> = { command, args, cwd, cols: 200, rows: 50 };
+  if (registration) {
+    body.projectPath = registration.projectPath;
+    body.type = registration.type;
+    body.roleId = registration.roleId;
+    if (registration.tmuxSession) {
+      body.tmuxSession = registration.tmuxSession;
+    }
+  }
   const response = await fetch(`http://localhost:${towerPort}/api/terminals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command, args, cwd, cols: 200, rows: 50 }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -563,8 +573,8 @@ async function createPtySession(
     throw new Error(`Failed to create PTY session: ${response.status} ${text}`);
   }
 
-  const result = await response.json() as { id: string };
-  return { terminalId: result.id };
+  const result = await response.json() as { id: string; tmuxSession?: string | null };
+  return { terminalId: result.id, tmuxSession: result.tmuxSession ?? null };
 }
 
 /**
@@ -623,16 +633,18 @@ done
   writeFileSync(scriptPath, scriptContent);
   chmodSync(scriptPath, '755');
 
-  // Create PTY session via REST API (node-pty backend)
+  // Create PTY session via REST API (node-pty backend, tmux for persistence)
   logger.info('Creating PTY terminal session...');
-  const { terminalId } = await createPtySession(
+  const { terminalId, tmuxSession: actualTmux } = await createPtySession(
     config,
     '/bin/bash',
     [scriptPath],
     worktreePath,
+    { projectPath: config.projectRoot, type: 'builder', roleId: builderId, tmuxSession: sessionName },
   );
-  logger.info(`Terminal session created: ${terminalId}`);
-  return { port: 0, pid: 0, sessionName, terminalId };
+  logger.info(`Terminal session created: ${terminalId}${actualTmux ? ` (tmux: ${actualTmux})` : ''}`);
+  // Use the actual tmux session name from Tower (null if tmux was unavailable/failed)
+  return { port: 0, pid: 0, sessionName: actualTmux || sessionName, terminalId };
 }
 
 /**
@@ -644,18 +656,20 @@ async function startShellSession(
   baseCmd: string,
 ): Promise<{ port: number; pid: number; sessionName: string; terminalId?: string }> {
   const port = await findFreePort(config);
-  const sessionName = `shell-${shellId}`;
+  const tmuxName = `shell-${getProjectName(config)}-${shellId}`;
+  const sessionName = tmuxName;
 
-  // Create PTY session via REST API (node-pty backend)
+  // Create PTY session via REST API (node-pty backend, tmux for persistence)
   logger.info('Creating PTY terminal session for shell...');
-  const { terminalId } = await createPtySession(
+  const { terminalId, tmuxSession: actualTmux } = await createPtySession(
     config,
     '/bin/bash',
     ['-c', baseCmd],
     config.projectRoot,
+    { projectPath: config.projectRoot, type: 'shell', roleId: shellId, tmuxSession: tmuxName },
   );
-  logger.info(`Shell terminal session created: ${terminalId}`);
-  return { port: 0, pid: 0, sessionName, terminalId };
+  logger.info(`Shell terminal session created: ${terminalId}${actualTmux ? ` (tmux: ${actualTmux})` : ''}`);
+  return { port: 0, pid: 0, sessionName: actualTmux || sessionName, terminalId };
 }
 
 // =============================================================================
@@ -1029,15 +1043,16 @@ done
 
   writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
 
-  // Create PTY session via REST API (node-pty backend)
+  // Create PTY session via REST API (node-pty backend, tmux for persistence)
   logger.info('Creating PTY terminal session for worktree...');
-  const { terminalId: worktreeTerminalId } = await createPtySession(
+  const { terminalId: worktreeTerminalId, tmuxSession: actualTmux } = await createPtySession(
     config,
     '/bin/bash',
     [scriptPath],
     worktreePath,
+    { projectPath: config.projectRoot, type: 'builder', roleId: builderId, tmuxSession: sessionName },
   );
-  logger.info(`Worktree terminal session created: ${worktreeTerminalId}`);
+  logger.info(`Worktree terminal session created: ${worktreeTerminalId}${actualTmux ? ` (tmux: ${actualTmux})` : ''}`);
 
   const builder: Builder = {
     id: builderId,
@@ -1048,7 +1063,7 @@ done
     phase: 'interactive',
     worktree: worktreePath,
     branch: branchName,
-    tmuxSession: sessionName,
+    tmuxSession: actualTmux || sessionName,
     type: 'worktree',
     terminalId: worktreeTerminalId,
   };
