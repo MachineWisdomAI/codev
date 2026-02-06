@@ -542,17 +542,17 @@ async function createWorktree(config: Config, branchName: string, worktreePath: 
 }
 
 /**
- * Create a terminal session via the node-pty terminal manager REST API.
- * The dashboard server must be running with node-pty backend enabled.
+ * Create a terminal session via the Tower REST API.
+ * The Tower server must be running (port 4100).
  */
 async function createPtySession(
-  config: Config,
+  _config: Config,
   command: string,
   args: string[],
   cwd: string,
 ): Promise<{ terminalId: string }> {
-  const dashboardPort = config.dashboardPort;
-  const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
+  const towerPort = 4100;
+  const response = await fetch(`http://localhost:${towerPort}/api/terminals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, args, cwd, cols: 200, rows: 50 }),
