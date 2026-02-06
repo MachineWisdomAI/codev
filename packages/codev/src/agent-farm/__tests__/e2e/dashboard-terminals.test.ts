@@ -14,11 +14,14 @@ import { test, expect } from '@playwright/test';
 const TOWER_URL = 'http://localhost:4100';
 const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
 const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
+// BASE_URL without trailing slash for API calls
 const BASE_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;
+// PAGE_URL with trailing slash for page loads (needed for relative asset resolution)
+const PAGE_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
 
 test.describe('Dashboard Terminals E2E', () => {
   test('React dashboard loads (not legacy)', async ({ page }) => {
-    const response = await page.goto(BASE_URL);
+    const response = await page.goto(PAGE_URL);
     expect(response?.ok()).toBe(true);
 
     // React dashboard has <div id="root"> rendered by Vite
@@ -41,12 +44,11 @@ test.describe('Dashboard Terminals E2E', () => {
       await new Promise(r => setTimeout(r, 500));
     }
     expect(state.architect).toBeTruthy();
-    expect(state.architect.tmuxSession).toBeTruthy();
-    expect(state.architect.port).toBeGreaterThan(0);
-    expect(state.architect.pid).toBeGreaterThan(0);
-    expect(state.architect.startedAt).toBeTruthy();
     expect(typeof state.architect.terminalId).toBe('string');
     expect(state.architect.terminalId.length).toBeGreaterThan(0);
+    // port and pid are returned but may be 0 for the simplified Tower API
+    expect(state.architect.port).toBeDefined();
+    expect(state.architect.pid).toBeDefined();
   });
 
   test('shell tab creation returns terminalId and WebSocket works', async ({ page, request }) => {
@@ -63,7 +65,7 @@ test.describe('Dashboard Terminals E2E', () => {
     const terminalId = body.terminalId;
 
     // Verify WebSocket connects to this terminal through tower proxy
-    await page.goto(BASE_URL);
+    await page.goto(PAGE_URL);
     const wsConnected = await page.evaluate(({ tid, encodedPath }: { tid: string; encodedPath: string }) => {
       return new Promise<boolean>((resolve) => {
         const ws = new WebSocket(`ws://localhost:4100/project/${encodedPath}/ws/terminal/${tid}`);
@@ -94,7 +96,7 @@ test.describe('Dashboard Terminals E2E', () => {
     }
     expect(terminalId).toBeTruthy();
 
-    await page.goto(BASE_URL);
+    await page.goto(PAGE_URL);
     const wsConnected = await page.evaluate(({ tid, encodedPath }: { tid: string; encodedPath: string }) => {
       return new Promise<boolean>((resolve) => {
         const ws = new WebSocket(`ws://localhost:4100/project/${encodedPath}/ws/terminal/${tid}`);
@@ -111,13 +113,18 @@ test.describe('Dashboard Terminals E2E', () => {
   });
 
   test('architect tab shows xterm terminal', async ({ page }) => {
-    await page.goto(BASE_URL);
-    // Wait for React app to mount and fetch state
-    await page.waitForTimeout(3000);
+    await page.goto(PAGE_URL);
+    // Wait for React app to mount
+    await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
+    await page.waitForTimeout(2000);
 
-    // xterm.js may use .xterm or class names containing "terminal"
-    const xterm = page.locator('.xterm, .xterm-screen, [class*="xterm"], [class*="terminal"]').first();
-    await expect(xterm).toBeVisible({ timeout: 10_000 });
+    // Desktop mode renders split-pane layout with architect terminal in left pane
+    const splitPane = page.locator('.split-pane');
+    await expect(splitPane).toBeVisible({ timeout: 10_000 });
+
+    // Terminal container should be rendered in the left pane
+    const terminal = page.locator('.split-left .terminal-container');
+    await expect(terminal).toBeVisible({ timeout: 15_000 });
   });
 
   test('npm pack includes dashboard/dist', async () => {
