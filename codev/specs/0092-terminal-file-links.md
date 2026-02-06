@@ -1,3 +1,8 @@
+---
+approved: 2026-02-05
+validated: [claude]
+---
+
 # Spec 0092: Terminal File Links and File Browser
 
 ## Summary
