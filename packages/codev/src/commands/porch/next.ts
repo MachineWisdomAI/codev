@@ -11,7 +11,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { globSync } from 'node:fs';
+import { globSync } from 'glob';
 import { readState, writeState, findStatusPath, getProjectDir } from './state.js';
 import {
   loadProtocol,
@@ -553,7 +553,7 @@ function getConsultArtifactType(phaseId: string): string {
     case 'specify': return 'spec';
     case 'plan': return 'plan';
     case 'implement': return 'impl';
-    case 'review': return 'spec';
+    case 'review': return 'review';
     default: return 'spec';
   }
 }

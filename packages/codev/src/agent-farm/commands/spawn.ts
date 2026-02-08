@@ -128,7 +128,7 @@ function buildPromptFromTemplate(
 function buildFallbackPrompt(protocolName: string, context: TemplateContext): string {
   const modeInstructions = context.mode === 'strict'
     ? `## Mode: STRICT
-Porch orchestrates your work. Run: \`porch run ${context.project_id || ''}\``
+Porch orchestrates your work. Run: \`porch next ${context.project_id || ''}\` to get your next tasks.`
     : `## Mode: SOFT
 You follow the protocol yourself. The architect monitors your work and verifies compliance.`;
 
