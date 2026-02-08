@@ -81,19 +81,20 @@ describe('Database Schema', () => {
       }).toThrow();
     });
 
-    it('should enforce unique port constraint on builders', () => {
+    it('should allow multiple builders with same port (port=0 for PTY-backed)', () => {
       db.prepare(`
         INSERT INTO builders (id, name, port, pid, status, phase, worktree, branch, type)
-        VALUES ('B001', 'test1', 4210, 1234, 'implementing', 'init', '/tmp', 'test1', 'spec')
+        VALUES ('B001', 'test1', 0, 0, 'implementing', 'init', '/tmp', 'test1', 'task')
       `).run();
 
-      // Same port should fail
-      expect(() => {
-        db.prepare(`
-          INSERT INTO builders (id, name, port, pid, status, phase, worktree, branch, type)
-          VALUES ('B002', 'test2', 4210, 5678, 'implementing', 'init', '/tmp', 'test2', 'spec')
-        `).run();
-      }).toThrow();
+      // Same port (0) should succeed — PTY-backed builders all use port=0
+      db.prepare(`
+        INSERT INTO builders (id, name, port, pid, status, phase, worktree, branch, type)
+        VALUES ('B002', 'test2', 0, 0, 'implementing', 'init', '/tmp', 'test2', 'bugfix')
+      `).run();
+
+      const count = db.prepare('SELECT COUNT(*) as count FROM builders').get() as { count: number };
+      expect(count.count).toBe(2);
     });
 
     it('should create indexes', () => {
