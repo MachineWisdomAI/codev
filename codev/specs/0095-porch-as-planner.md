@@ -114,16 +114,39 @@ Tasks emitted:
   4. [GATE] Request human approval of plan (porch gate 0094)
 ```
 
-**Invocation 3** (plan approved with 2 phases):
+**Invocation 3** (plan approved with 2 phases — emits Phase 1 only):
 ```
 Tasks emitted:
   1. Implement Phase 1: Update CSS mobile block
-  2. Implement Phase 2: Add .new-shell-row class in JS
-  3. Run build check (npm run build)
-  4. Run test check (npm test)
-  5. Run 3-way review on implementation
-  6. If reviewers flag issues: fix and re-consult (up to N iterations)
-  7. [GATE] Request human approval
+  2. Run build check (npm run build)
+  3. Run test check (npm test)
+  4. Run 3-way review on Phase 1
+  5. Call `porch next 0094` to get next step
+```
+
+**Invocation 4** (Phase 1 reviews all APPROVE — advances to Phase 2):
+```
+Tasks emitted:
+  1. Implement Phase 2: Add .new-shell-row class in JS
+  2. Run build check (npm run build)
+  3. Run test check (npm test)
+  4. Run 3-way review on Phase 2
+  5. Call `porch next 0094` to get next step
+```
+
+**Invocation 4a** (if Phase 1 reviews had REQUEST_CHANGES — stays on Phase 1):
+```
+Tasks emitted:
+  1. Fix issues from Phase 1 review (feedback injected in description)
+  2. Run build check
+  3. Run test check
+  4. Run 3-way re-review on Phase 1
+  5. Call `porch next 0094` to get next step
+```
+
+**Invocation 5** (all phases complete, all reviews pass):
+```
+{ "status": "gate_pending", "gate": "impl-approval", "phase": "implement" }
 ```
 
 ### What Porch Still Does
@@ -177,7 +200,6 @@ Tasks emitted:
 - Consultation still runs via `consult` CLI (no change to that tool)
 
 ### Business Constraints
-- Backward compatible: `porch run` should still work for users not using Claude Code
 - The `porch approve` gate workflow must remain human-only
 
 ## Assumptions
@@ -283,26 +305,22 @@ Phase prompts (100+ lines with variable substitution and history injection) are 
 - Plan phase context (for per_plan_phase protocols)
 - File paths to relevant artifacts (spec, plan, review files)
 
-### `porch run` Coexistence
+### `porch run` Removal
 
-`porch run` (orchestrator mode) and `porch next` (planner mode) share:
-- State machine logic (phase transitions, gate checks, artifact detection)
-- State persistence (status.yaml read/write via state.ts)
-- Prompt generation (prompts.ts)
-- Protocol loading (protocol.ts)
+`porch run` (the orchestrator loop) is removed along with `claude.ts` (Agent SDK spawning). The following modules are preserved and reused by `porch next`:
+- `state.ts` — status.yaml read/write
+- `prompts.ts` — phase prompt generation with variable substitution
+- `protocol.ts` — protocol.json loading and phase queries
+- `plan.ts` — plan phase extraction
 
-They differ only in execution:
-- `porch run`: spawns Claude via Agent SDK, manages the while loop
-- `porch next`: emits JSON, returns immediately
-
-No flags or migration needed. Users choose by calling the appropriate command.
+The `run.ts` file is deleted. The `porch run` CLI subcommand is removed from `index.ts`. The `@anthropic-ai/claude-agent-sdk` dependency can be dropped from `package.json` once no other code uses it.
 
 ## Resolved Questions
 
 ### Critical
 - [x] **Does status.yaml stay?** Yes — tasks are session-scoped, need persistent state.
 - [x] **How does Claude signal task completion back to porch?** Filesystem-as-truth. Porch infers completion from artifacts on disk when `porch next` is called. No explicit "done" signal needed. If the review files exist, the consultation step is done. If the spec file has been updated since the last iteration, the build step is done. This makes the system robust to crashes — `porch next` is idempotent.
-- [x] **Should `porch run` be kept?** Yes, kept as-is. `porch run` remains the orchestrator mode for non-Claude-Code environments. `porch next` is the new planner mode. They share the same state machine logic but differ in execution model. No migration needed — they coexist.
+- [x] **Should `porch run` be kept?** No. `porch run` (the orchestrator loop + Agent SDK spawning) is removed. `porch next` replaces it entirely. The orchestrator code (`run.ts`, `claude.ts`) can be deleted. State machine logic, prompts, and protocol loading are preserved — only the execution model changes.
 
 ### Important
 - [x] **How are iteration failures communicated?** Porch reads review files directly on next `porch next` call. If reviews contain REQUEST_CHANGES verdicts, porch emits "fix and re-consult" tasks with the feedback content injected into the task description. No explicit failure signal from Claude is needed.
@@ -337,7 +355,7 @@ For each protocol (SPIR, MAINTAIN, TICK), maintain golden JSON files of expected
 
 ### Integration Tests (run via `npm run test:e2e`)
 1. **Full loop**: Set up a test project, call `porch next` repeatedly, simulate artifact creation between calls, verify state advances correctly through all phases
-2. **Regression**: `porch run` and `porch next` produce equivalent state transitions for the same protocol
+2. **Build-verify per phase**: Plan with 3 phases → verify each phase gets its own build-verify cycle with iteration tracking
 
 ### Non-Functional Tests
 1. `porch next` completes in <2s on a project with 10+ iterations of history
@@ -346,11 +364,11 @@ For each protocol (SPIR, MAINTAIN, TICK), maintain golden JSON files of expected
 ## Dependencies
 - **Claude Code task API**: TaskCreate, TaskUpdate, TaskList
 - **Existing porch modules**: state.ts, protocol.ts, plan.ts, prompts.ts (reused)
-- **Removed dependency**: claude.ts (Agent SDK spawning) — no longer needed for task mode
+- **Deleted**: claude.ts (Agent SDK spawning), run.ts (orchestrator loop) — replaced by `porch next`
 
 ## References
 - `codev/resources/protocol-format.md` — Protocol to Task Conversion algorithm (already documented)
-- `packages/codev/src/commands/porch/run.ts` — Current execution loop
+- `packages/codev/src/commands/porch/run.ts` — Current execution loop (to be deleted)
 - `packages/codev/src/commands/porch/state.ts` — State management
 - `packages/codev/src/commands/porch/types.ts` — State schema
 
@@ -360,7 +378,7 @@ For each protocol (SPIR, MAINTAIN, TICK), maintain golden JSON files of expected
 |------|------------|--------|-------------------|
 | Task descriptions not detailed enough for Claude to execute | Medium | High | Include full prompt content in task descriptions, test with real protocols |
 | Session dies mid-iteration, tasks lost | Medium | Low | status.yaml tracks iteration + history; `porch next` regenerates tasks |
-| Backward compatibility break for `porch run` users | Low | Medium | Keep `porch run` as legacy mode initially |
+| `porch run` removal breaks scripts | Low | Low | No known external users; `porch run` was only used by builders spawned via `af spawn` |
 | Gate approval timing — user approves in one session, builder in another | Low | Medium | status.yaml gates persist; `porch next` checks gate status on each call |
 
 ## Notes
@@ -381,8 +399,13 @@ The Protocol to Task Conversion algorithm documented in `protocol-format.md` pro
 1. **Defined formal output schema** (`PorchNextResponse`, `PorchTask`) with all response types (tasks, gate_pending, complete, error)
 2. **Resolved completion signaling**: Filesystem-as-truth — porch infers completion from artifacts on disk, no explicit "done" signal needed
 3. **Fixed `blockedBy`**: Replaced invalid index-based dependency with `sequential` boolean flag. Claude Code's TaskUpdate uses `addBlockedBy` with task IDs, not creation-time indices
-4. **Clarified `porch run` coexistence**: Both modes share state machine logic, differ only in execution model. No migration needed
+4. **Decided to remove `porch run`**: Orchestrator mode deleted entirely, `porch next` is the only execution model
 5. **Specified task description content**: Full phase prompts with variable substitution embedded in description field, reusing existing `buildPhasePrompt()`
 6. **Defined state mutation rules**: `porch next` is read-modify-write, idempotent when no artifacts change
-7. **Added automated test strategy**: Unit tests, golden tests, integration tests, regression test against `porch run`
+7. **Added automated test strategy**: Unit tests, golden tests, integration tests
 8. **Resolved all open questions**: Per-plan-phase (one at a time), AWAITING_INPUT (removed in task mode), iteration failures (read review files directly)
+
+### Amendment 2 (2026-02-08): Architect review feedback
+
+1. **Fixed build-verify loop**: Each plan phase gets its own build→verify cycle. Porch emits tasks for one phase at a time. If reviews return REQUEST_CHANGES, porch re-emits fix tasks for the same phase. Only advances to the next phase when all reviewers APPROVE.
+2. **Removed `porch run` entirely**: No backward compat needed — orchestrator mode (`run.ts`, `claude.ts`) deleted. `porch next` is the sole execution model. Agent SDK dependency can be dropped.
