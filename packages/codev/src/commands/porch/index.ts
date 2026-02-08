@@ -25,6 +25,7 @@ import {
   getPhaseChecks,
   getPhaseGate,
   isPhased,
+  isBuildVerify,
   getPhaseCompletionChecks,
 } from './protocol.js';
 import {
@@ -237,6 +238,16 @@ export async function done(projectRoot: string, projectId: string): Promise<void
     console.log(chalk.yellow(`GATE REQUIRED: ${gate}`));
     console.log(`\n  Run: porch gate ${state.id}`);
     console.log('  Wait for human approval before advancing.');
+    return;
+  }
+
+  // For build_verify phases: mark build as complete for verification
+  if (isBuildVerify(protocol, state.phase) && !state.build_complete) {
+    state.build_complete = true;
+    writeState(statusPath, state);
+    console.log('');
+    console.log(chalk.green('BUILD COMPLETE. Ready for verification.'));
+    console.log(`\n  Run: porch next ${state.id} (to get verification tasks)`);
     return;
   }
 
@@ -605,21 +616,17 @@ export async function cli(args: string[]): Promise<void> {
 
   try {
     switch (command) {
+      case 'next': {
+        const { next: porchNext } = await import('./next.js');
+        const result = await porchNext(projectRoot, getProjectId(rest[0]));
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+
       case 'run':
-        const { run } = await import('./run.js');
-        // Parse options for run command
-        const runOptions: { singleIteration?: boolean; singlePhase?: boolean } = {};
-        let runProjectId: string | undefined;
-        for (let i = 0; i < rest.length; i++) {
-          if (rest[i] === '--single-iteration' || rest[i] === '-1') {
-            runOptions.singleIteration = true;
-          } else if (rest[i] === '--single-phase') {
-            runOptions.singlePhase = true;
-          } else if (!rest[i].startsWith('--')) {
-            runProjectId = rest[i];
-          }
-        }
-        await run(projectRoot, getProjectId(runProjectId), runOptions);
+        console.error("Error: 'porch run' has been removed. Use 'porch next <id>' instead.");
+        console.error("See: porch --help");
+        process.exit(1);
         break;
 
       case 'status':
@@ -655,17 +662,13 @@ export async function cli(args: string[]): Promise<void> {
         console.log('porch - Protocol Orchestrator');
         console.log('');
         console.log('Commands:');
-        console.log('  run [id] [options]       Run the protocol (auto-detects if one project)');
+        console.log('  next [id]                Emit next tasks as JSON (planner mode)');
         console.log('  status [id]              Show current state and instructions');
         console.log('  check [id]               Run checks for current phase');
-        console.log('  done [id]                Advance to next phase (if checks pass)');
+        console.log('  done [id]                Signal build complete (validates checks, advances)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');
-        console.log('');
-        console.log('Run options:');
-        console.log('  --single-iteration, -1   Run one build-verify cycle then exit');
-        console.log('  --single-phase           Run one phase then exit (for Builder/Enforcer pattern)');
         console.log('');
         console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');
