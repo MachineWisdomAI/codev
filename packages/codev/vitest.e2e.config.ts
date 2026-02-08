@@ -1,15 +1,25 @@
 /**
  * Vitest configuration for E2E tests.
  *
- * E2E tests run real AI interactions and are expensive (~$4/run).
+ * Includes:
+ *   - Porch e2e: Real AI interactions (~$4/run, ~40 min)
+ *   - Tower integration: Spawns real server processes (~60s)
+ *
  * Run with: npm run test:e2e
+ * Prerequisites: npm run build (creates skeleton/ and dist/)
  */
 
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/commands/porch/__tests__/e2e/**/*.test.ts'],
+    include: [
+      'src/commands/porch/__tests__/e2e/**/*.test.ts',
+      'src/agent-farm/__tests__/tower-baseline.test.ts',
+      'src/agent-farm/__tests__/tower-api.test.ts',
+      'src/agent-farm/__tests__/tower-terminals.test.ts',
+      'src/agent-farm/__tests__/cli-tower-mode.test.ts',
+    ],
     testTimeout: 1200000, // 20 minutes per test
     hookTimeout: 300000,  // 5 minutes for setup/teardown
     pool: 'forks',        // Isolate tests
