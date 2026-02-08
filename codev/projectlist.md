@@ -404,7 +404,7 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0068"
     title: "Codev 2.0 - Cloud Tower + Deterministic Core"
     summary: "Major platform rewrite: cloud-hosted tower, mobile access, deterministic SPIR enforcement"
-    status: conceived
+    status: integrated
     priority: high
     release: v2.0.0
     files:
@@ -420,7 +420,7 @@ Projects currently in development (conceived through committed), sorted by prior
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
+      integrated_at: "2026-02-08"
     notes: "Meta-spec for Codev 2.0. Three pillars: (1) Terminal/Dashboard rewrite, (2) Cloud Tower with mobile PWA, (3) Deterministic SPIR enforcement. Supersedes 0066/0067."
 
   - id: "0067"
