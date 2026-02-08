@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { parseFilePath, looksLikeFilePath } from '../lib/filePaths.js';
@@ -54,15 +55,25 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     // Open terminal in the container
     term.open(containerRef.current);
 
-    // Try WebGL renderer for performance, fall back to canvas
+    // Try WebGL renderer for performance, fall back to canvas on failure
+    // or context loss (common Chrome/macOS GPU bug with Metal backend)
+    const loadCanvasFallback = () => {
+      try {
+        term.loadAddon(new CanvasAddon());
+      } catch {
+        // Default renderer will be used
+      }
+    };
+
     try {
       const webglAddon = new WebglAddon();
       webglAddon.onContextLoss(() => {
         webglAddon.dispose();
+        loadCanvasFallback();
       });
       term.loadAddon(webglAddon);
     } catch {
-      // Canvas renderer is fine as fallback
+      loadCanvasFallback();
     }
 
     // Spec 0092: Add web links addon for clickable file paths
