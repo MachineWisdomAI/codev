@@ -26,8 +26,10 @@
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
     "test:e2e:watch": "vitest --config vitest.e2e.config.ts",
+    "test:e2e:playwright": "npx playwright test",
+    "test:e2e:bats": "npm run build && npm pack && E2E_TARBALL=$(ls cluesmith-codev-*.tgz | tail -1) ../../tests/lib/bats-core/bin/bats ../../tests/e2e/",
     "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(require.resolve('node-pty'),'..','..','prebuilds',process.platform+'-'+process.arch,'spawn-helper'),0o755)}catch{}\"",
     "prepublishOnly": "npm run build"
   },

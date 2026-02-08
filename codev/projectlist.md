@@ -1035,9 +1035,53 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: null
     notes: "Phase 4 complete. Tower is single daemon, dashboard-server.ts deleted. 641 tests pass. 3-way consultation: 2 APPROVE, 1 COMMENT."
 
+  - id: "0094"
+    title: "Tower Mobile Compaction"
+    summary: "Compact the tower overview page for mobile: inline buttons, hide paths, remove Share button, reduce vertical spacing"
+    status: conceived
+    priority: high
+    release: v2.1.0
+    files:
+      spec: codev/specs/0094-tower-mobile-compaction.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [ui, ux, mobile, tower]
+    timestamps:
+      conceived_at: "2026-02-08T03:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Based on real mobile screenshot showing excessive vertical spacing. Single file change (tower.html)."
+
+  - id: "0095"
+    title: "Porch as Planner (Task Integration)"
+    summary: "Invert porch execution model: porch generates Claude Code tasks instead of spawning Claude. Claude Code becomes the executor, porch becomes a stateless planner called between task batches."
+    status: conceived
+    priority: high
+    release: v2.1.0
+    files:
+      spec: codev/specs/0095-porch-as-planner.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [porch, architecture, claude-code, tasks]
+    timestamps:
+      conceived_at: "2026-02-08T03:30:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Architectural redesign. Porch currently spawns Claude via Agent SDK and manages build-verify loop. Proposal: porch emits task definitions, Claude Code executes. status.yaml remains for cross-session persistence."
+
 ## Next Available Number
 
-**0094** - Reserve this number for your next project
+**0096** - Reserve this number for your next project
 
 ---
 
