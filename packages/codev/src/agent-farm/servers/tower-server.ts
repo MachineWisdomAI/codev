@@ -1326,19 +1326,6 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
 }
 
 /**
- * Get PID of process listening on a port
- */
-function getProcessOnPort(targetPort: number): number | null {
-  try {
-    const result = execSync(`lsof -ti :${targetPort} 2>/dev/null`, { encoding: 'utf-8' });
-    const pid = parseInt(result.trim().split('\n')[0], 10);
-    return isNaN(pid) ? null : pid;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Stop an agent-farm instance by killing all its terminals
  * Phase 4 (Spec 0090): Tower manages terminals directly
  */
