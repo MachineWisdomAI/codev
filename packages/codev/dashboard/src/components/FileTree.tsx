@@ -148,13 +148,14 @@ export function FileTree({ onRefresh }: FileTreeProps) {
     }
   }, [loaded, loadFiles, loadGitStatus, loadRecentFiles]);
 
-  // Refresh git status periodically
+  // Refresh file tree and git status periodically
   useEffect(() => {
     const interval = setInterval(() => {
+      loadFiles();
       loadGitStatus();
-    }, 30000); // Every 30 seconds
+    }, 5000); // Every 5 seconds
     return () => clearInterval(interval);
-  }, [loadGitStatus]);
+  }, [loadFiles, loadGitStatus]);
 
   const toggleDir = (path: string) => {
     setExpanded(prev => {

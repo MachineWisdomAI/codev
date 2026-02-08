@@ -1290,6 +1290,28 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         // TICK-001: Save to SQLite for persistence (with tmux session name)
         saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
 
+        // Auto-restart architect on exit (restored from pre-Phase 4 dashboard-server.ts)
+        const ptySession = manager.getSession(session.id);
+        if (ptySession) {
+          const startedAt = Date.now();
+          ptySession.on('exit', () => {
+            entry.architect = undefined;
+            // Only restart if the architect ran for at least 5s (prevents crash loops)
+            const uptime = Date.now() - startedAt;
+            if (uptime < 5000) {
+              log('INFO', `Architect exited after ${uptime}ms for ${projectPath}, not restarting (too short)`);
+              return;
+            }
+            log('INFO', `Architect exited for ${projectPath}, restarting in 2s...`);
+            deleteTerminalSession(session.id);
+            setTimeout(() => {
+              launchInstance(projectPath).catch((err) => {
+                log('WARN', `Failed to restart architect: ${(err as Error).message}`);
+              });
+            }, 2000);
+          });
+        }
+
         log('INFO', `Created architect terminal for project: ${projectPath}`);
       } catch (err) {
         log('WARN', `Failed to create architect terminal: ${(err as Error).message}`);
