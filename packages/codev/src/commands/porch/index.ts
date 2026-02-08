@@ -612,23 +612,11 @@ export async function cli(args: string[]): Promise<void> {
         break;
       }
 
-      case 'run': {
-        const { run } = await import('./run.js');
-        // Parse options for run command
-        const runOptions: { singleIteration?: boolean; singlePhase?: boolean } = {};
-        let runProjectId: string | undefined;
-        for (let i = 0; i < rest.length; i++) {
-          if (rest[i] === '--single-iteration' || rest[i] === '-1') {
-            runOptions.singleIteration = true;
-          } else if (rest[i] === '--single-phase') {
-            runOptions.singlePhase = true;
-          } else if (!rest[i].startsWith('--')) {
-            runProjectId = rest[i];
-          }
-        }
-        await run(projectRoot, getProjectId(runProjectId), runOptions);
+      case 'run':
+        console.error("Error: 'porch run' has been removed. Use 'porch next <id>' instead.");
+        console.error("See: porch --help");
+        process.exit(1);
         break;
-      }
 
       case 'status':
         await status(projectRoot, getProjectId(rest[0]));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseVerdict } from '../run';
+import { parseVerdict } from '../verdict';
 
 describe('parseVerdict', () => {
   it('returns REQUEST_CHANGES for empty output', () => {
