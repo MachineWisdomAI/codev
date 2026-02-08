@@ -88,8 +88,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     }
 
     fitAddon.fit();
-    // Re-fit after a short delay to catch CSS layout settling
-    const refitTimer = setTimeout(() => fitAddon.fit(), 100);
+    // Re-fit after delays to catch CSS layout settling and late paints
+    const refitTimer1 = setTimeout(() => fitAddon.fit(), 100);
+    const refitTimer2 = setTimeout(() => fitAddon.fit(), 300);
 
     // Build WebSocket URL from the relative path
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -182,10 +183,18 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(containerRef.current);
 
+    // Re-fit when browser tab becomes visible again
+    const handleVisibility = () => {
+      if (!document.hidden) fitAddon.fit();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
-      clearTimeout(refitTimer);
+      clearTimeout(refitTimer1);
+      clearTimeout(refitTimer2);
       if (flushTimer) clearTimeout(flushTimer);
       resizeObserver.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();
       term.dispose();
       xtermRef.current = null;
