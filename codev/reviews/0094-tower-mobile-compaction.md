@@ -60,7 +60,9 @@ CSS-only compaction of the Tower overview page for mobile viewports (<=600px). A
 ## Testing Summary
 
 - **Build**: Passes successfully
-- **Tower baseline tests**: Excluded from vitest config (integration tests requiring live server) - not affected by CSS changes
+- **Playwright E2E**: 16/16 pass (10 new + 6 existing, no regressions)
+  - Mobile (412x915): share hidden, path hidden, row layouts, touch targets >=36px, recent items compacted
+  - Desktop (1280x800): share not CSS-hidden, path visible, default layout
 - **Manual verification needed**: Chrome DevTools mobile emulator (Pixel 7, 412px), and ideally real Android device
 
 ## Lessons Learned
@@ -84,13 +86,22 @@ CSS-only compaction of the Tower overview page for mobile viewports (<=600px). A
 
 ## 3-Way Consultation Results
 
+### Round 1: Post-Implementation
 All three models approved with no code changes required.
 
 | Model | Verdict | Confidence | Notes |
 |-------|---------|------------|-------|
 | Gemini | APPROVE | HIGH | Clean CSS, `!important` acceptable for single-file template |
 | Codex | APPROVE | MEDIUM | Recommends manual test pass before merge |
-| Claude | APPROVE | HIGH | Noted `min-height` delegation to `pointer: coarse` is correct; `flex-wrap` handles narrow viewports gracefully |
+| Claude | APPROVE | HIGH | Noted `min-height` delegation to `pointer: coarse` is correct |
+
+### Round 2: Post-Defend (after Playwright tests added)
+
+| Model | Verdict | Confidence | Issues Raised | Resolution |
+|-------|---------|------------|---------------|------------|
+| Gemini | APPROVE | HIGH | CSS comment nit (false positive) | No change needed |
+| Codex | REQUEST_CHANGES | HIGH | Desktop share-button test flaky when no tunnel | Fixed: test now isolates CSS from inline JS |
+| Claude | APPROVE | HIGH | Missing Recent Projects test coverage | Fixed: added 2 tests for recent-path and recent-item layout |
 
 ## Conclusion
 
