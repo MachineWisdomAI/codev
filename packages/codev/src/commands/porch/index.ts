@@ -605,7 +605,14 @@ export async function cli(args: string[]): Promise<void> {
 
   try {
     switch (command) {
-      case 'run':
+      case 'next': {
+        const { next: porchNext } = await import('./next.js');
+        const result = await porchNext(projectRoot, getProjectId(rest[0]));
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+
+      case 'run': {
         const { run } = await import('./run.js');
         // Parse options for run command
         const runOptions: { singleIteration?: boolean; singlePhase?: boolean } = {};
@@ -621,6 +628,7 @@ export async function cli(args: string[]): Promise<void> {
         }
         await run(projectRoot, getProjectId(runProjectId), runOptions);
         break;
+      }
 
       case 'status':
         await status(projectRoot, getProjectId(rest[0]));
@@ -655,10 +663,11 @@ export async function cli(args: string[]): Promise<void> {
         console.log('porch - Protocol Orchestrator');
         console.log('');
         console.log('Commands:');
-        console.log('  run [id] [options]       Run the protocol (auto-detects if one project)');
+        console.log('  next [id]                Emit next tasks as JSON (planner mode)');
+        console.log('  run [id] [options]       Run the protocol (orchestrator mode, legacy)');
         console.log('  status [id]              Show current state and instructions');
         console.log('  check [id]               Run checks for current phase');
-        console.log('  done [id]                Advance to next phase (if checks pass)');
+        console.log('  done [id]                Signal build complete (validates checks, advances)');
         console.log('  gate [id]                Request human approval');
         console.log('  approve <id> <gate> --a-human-explicitly-approved-this');
         console.log('  init <protocol> <id> <name>  Initialize a new project');

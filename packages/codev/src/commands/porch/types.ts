@@ -139,6 +139,44 @@ export interface ProjectState {
 }
 
 // ============================================================================
+// Porch Next Response Types (output of `porch next`)
+// ============================================================================
+
+/**
+ * Response from `porch next <id>`.
+ * Tells the builder what to do next.
+ */
+export interface PorchNextResponse {
+  status: 'tasks' | 'gate_pending' | 'complete' | 'error';
+  phase: string;
+  iteration: number;
+  plan_phase?: string;
+
+  /** Present when status === 'tasks' or 'gate_pending' (gate tasks are actionable) */
+  tasks?: PorchTask[];
+
+  /** Present when status === 'gate_pending' */
+  gate?: string;
+
+  /** Present when status === 'error' */
+  error?: string;
+
+  /** Present when status === 'complete' */
+  summary?: string;
+}
+
+/**
+ * A task for the builder to execute.
+ * Claude Code creates these via TaskCreate.
+ */
+export interface PorchTask {
+  subject: string;            // Imperative title (e.g., "Run 3-way consultation on spec")
+  activeForm: string;         // Present continuous (e.g., "Running spec consultation")
+  description: string;        // Full instructions for Claude to execute
+  sequential?: boolean;       // If true, must complete before next task starts (default: false)
+}
+
+// ============================================================================
 // Check Results
 // ============================================================================
 
