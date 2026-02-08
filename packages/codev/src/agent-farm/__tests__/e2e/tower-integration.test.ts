@@ -173,6 +173,29 @@ test.describe('Tower Mobile Compaction (Spec 0094)', () => {
     expect(styles.flexWrap).toBe('wrap');
   });
 
+  test('recent projects path is hidden on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    const recentPath = page.locator('.recent-path');
+    if (await recentPath.count() > 0) {
+      await expect(recentPath.first()).toBeHidden();
+    }
+  });
+
+  test('recent items use row layout on mobile', async ({ page }) => {
+    await page.goto(TOWER_URL);
+    await page.waitForTimeout(1000);
+
+    const recentItem = page.locator('.recent-item');
+    if (await recentItem.count() > 0) {
+      const flexDirection = await recentItem.first().evaluate(
+        el => window.getComputedStyle(el).flexDirection
+      );
+      expect(flexDirection).toBe('row');
+    }
+  });
+
   test('all buttons meet minimum touch target size', async ({ page }) => {
     await page.goto(TOWER_URL);
     const instance = page.locator('.instance');
@@ -193,18 +216,23 @@ test.describe('Tower Mobile Compaction (Spec 0094)', () => {
 test.describe('Tower Desktop Unchanged (Spec 0094)', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test('share button is visible on desktop', async ({ page }) => {
+  test('share button is not force-hidden by CSS on desktop', async ({ page }) => {
     await page.goto(TOWER_URL);
     await page.waitForTimeout(1000);
 
-    // Share button should be visible on desktop (it starts hidden via inline style,
-    // then JS shows it when tunnel is available — check it's not force-hidden by CSS)
+    // The share button starts hidden via inline style="display: none;" and JS
+    // shows it when a tunnel is available. On mobile, CSS adds display:none !important.
+    // On desktop, CSS should NOT force-hide it — verify no CSS rule hides it.
     const shareBtn = page.locator('#share-btn');
-    const display = await shareBtn.evaluate(
-      el => window.getComputedStyle(el).display
-    );
-    // On desktop the CSS does NOT set display:none; inline JS controls visibility
-    expect(display).not.toBe('none');
+    const hasCSSHidden = await shareBtn.evaluate(el => {
+      // Temporarily remove inline display style to isolate CSS rules
+      const inlineDisplay = el.style.display;
+      el.style.display = '';
+      const cssDisplay = window.getComputedStyle(el).display;
+      el.style.display = inlineDisplay; // restore
+      return cssDisplay === 'none';
+    });
+    expect(hasCSSHidden).toBe(false);
   });
 
   test('project path row is visible on desktop', async ({ page }) => {
