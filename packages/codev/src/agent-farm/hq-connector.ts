@@ -424,25 +424,6 @@ export function initHQConnector(root: string): void {
 }
 
 /**
- * Stop HQ connector
- */
-export function stopHQConnector(): void {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
-  cleanup();
-
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
-
-  logger.info('[HQ] Disconnected from CODEV_HQ');
-}
-
-/**
  * Check if HQ connector is enabled
  */
 export function isHQEnabled(): boolean {

@@ -272,6 +272,71 @@ See `codev-skeleton/protocols/spir/protocol.json` for a complete SPIR protocol d
 
 Porch will automatically discover and use the new protocol when referenced by name.
 
+## Protocol to Task Conversion
+
+Protocols can be converted into Claude Code tasks (via `TaskCreate`) for execution tracking. This flattens the protocol's phase graph into a linear task chain with inline build-verify loops.
+
+### Conversion Algorithm
+
+**Input**: A `protocol.json` file and its associated `prompts/*.md` files.
+
+**Steps**:
+
+1. **Read `protocol.json`** — extract the `phases` array and follow the `next` chain to determine ordering.
+
+2. **For each phase** (in order), read its prompt file at `prompts/<phase.build.prompt>`.
+
+3. **Create one task per phase** with:
+   - **subject**: `{phase.name}: {short description from protocol.json}`
+   - **activeForm**: Present-continuous form (e.g., "Auditing codebase")
+   - **description**: Merge the prompt's numbered steps with the verify loop:
+     ```
+     1-N. [Steps from the prompt file — the "build" work]
+     N+1. Run 3-way consultation ({verify.models joined}) — focus: {verify.type}
+     N+2. If reviewers flag issues: fix, re-commit, re-consult (up to {max_iterations} iterations)
+     N+3. If max iterations reached without approval: escalate to user
+
+     Do NOT mark complete until consultation passes or user overrides.
+     ```
+   - If the phase has `checks`, include the commands as verification steps (e.g., "run `npm run build` after each change")
+   - If the phase has a `gate`, note that human approval is required before the task can be marked complete
+
+4. **Wire dependencies** using `TaskUpdate.addBlockedBy`: each task is blocked by the previous task in the `next` chain.
+
+### Design Decisions
+
+- **Consultation is inline, not a separate task.** The build-verify loop is one atomic unit — do the work, consult, iterate, all within a single task. This avoids cyclic dependencies which the task system doesn't support.
+- **`max_iterations` controls the retry budget.** The task stays `in_progress` while iterating through the build-verify loop. Only mark complete when reviewers approve or max iterations hit (then escalate).
+- **Human gates** translate to "Do NOT mark complete without user approval" in the task description.
+- **`checks`** (build/test commands) become inline verification steps within the task, not separate tasks.
+
+### Example
+
+Given this phase from `maintain/protocol.json`:
+```json
+{
+  "id": "audit",
+  "name": "Audit",
+  "type": "build_verify",
+  "build": { "prompt": "audit.md" },
+  "verify": { "type": "impl-review", "models": ["gemini", "codex", "claude"], "parallel": true },
+  "max_iterations": 3,
+  "next": "clean"
+}
+```
+
+Produces this task:
+```
+Subject: Audit: Scan for dead code, unused deps, stale docs
+Description:
+  1. [Steps from audit.md prompt...]
+  7. Run 3-way consultation (Gemini, Codex, Claude) — focus: impl-review
+  8. If reviewers flag issues: fix, re-commit, re-consult (up to 3 iterations)
+  9. If max iterations reached: escalate to user
+
+  Do NOT mark complete until consultation passes or user overrides.
+```
+
 ## See Also
 
 - `codev-skeleton/protocols/protocol-schema.json` - JSON Schema for validation

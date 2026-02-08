@@ -13,15 +13,21 @@ worktrees/
 # npm package tarballs
 *.tgz
 
-# Cleanup protocol artifacts
+# Cleanup/maintain protocol artifacts
 # .trash/ contains soft-deleted files (bulk data, not versioned)
 codev/cleanup/.trash/
+codev/maintain/.trash/
 # Note: audit-*.md reports ARE versioned for collaboration and review
 
-# packages/codev build artifacts
+# Build artifacts
+node_modules/
 packages/codev/dist/
-packages/codev/node_modules/
 packages/codev/skeleton/
+*.tsbuildinfo
+test-results/
+
+# Dashboard sub-package
+packages/codev/dashboard/package-lock.json
 
 # Checklister runtime state (per-project JSON files)
 codev/checklists/*.json
@@ -29,3 +35,7 @@ codev/checklists/*.json
 # Porch execution logs (not project state - that's versioned)
 codev/executions/
 codev-skeleton/executions/
+
+# Porch project iteration transcripts (bulk logs, not authored artifacts)
+# status.yaml IS versioned; .txt iteration logs are not
+codev/projects/*/*.txt
