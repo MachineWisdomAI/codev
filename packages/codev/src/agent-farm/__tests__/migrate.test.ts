@@ -188,9 +188,9 @@ describe('Migration', () => {
             type: 'spec',
           },
           {
-            id: 'B002',
-            name: 'invalid-builder',
-            port: 4210, // Same port - will cause unique constraint violation
+            id: 'B001',  // Same ID - will cause PRIMARY KEY constraint violation
+            name: 'duplicate-builder',
+            port: 4211,
             pid: 5678,
             status: 'implementing',
             phase: 'init',
