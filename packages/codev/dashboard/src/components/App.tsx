@@ -101,14 +101,16 @@ export function App() {
       <>
         {persistentTabs.map(tab => {
           const wsPath = getTerminalWsPath(tab);
-          if (!wsPath) return null;
           return (
             <div
               key={tab.id}
               className="terminal-tab-pane"
               style={{ display: activeTabId === tab.id ? undefined : 'none' }}
             >
-              <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />
+              {wsPath
+                ? <Terminal wsPath={wsPath} onFileOpen={handleFileOpen} />
+                : <div className="no-terminal">No terminal session</div>
+              }
             </div>
           );
         })}
