@@ -1061,7 +1061,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0095"
     title: "Porch as Planner (Task Integration)"
     summary: "Invert porch execution model: porch generates Claude Code tasks instead of spawning Claude. Claude Code becomes the executor, porch becomes a stateless planner called between task batches."
-    status: specified
+    status: integrated
     priority: high
     release: v2.1.0
     files:
@@ -1077,7 +1077,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       implementing_at: null
       implemented_at: null
       committed_at: null
-      integrated_at: null
+      integrated_at: "2026-02-09"
     notes: "Architectural redesign. Porch currently spawns Claude via Agent SDK and manages build-verify loop. Proposal: porch emits task definitions, Claude Code executes. status.yaml remains for cross-session persistence."
 ```
 
