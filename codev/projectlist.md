@@ -1081,9 +1081,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
     notes: "Architectural redesign. Porch currently spawns Claude via Agent SDK and manages build-verify loop. Proposal: porch emits task definitions, Claude Code executes. status.yaml remains for cross-session persistence."
 ```
 
+  - id: "0097"
+    title: "Cloud Tower Client (Tunnel & Registration)"
+    summary: "Replace cloudflared with built-in tunnel client that connects to codevos.ai for remote tower access"
+    status: conceived
+    priority: high
+    release: v2.1.0
+    files:
+      spec: codev/specs/0097-cloud-tower-client.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [tower, remote-access, cloud, tunnel]
+    timestamps:
+      conceived_at: "2026-02-10T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Client-side companion to codevos.ai server spec 0001. Replaces cloudflared with native tunnel. Written by codevos.ai builder agent."
+
 ## Next Available Number
 
-**0096** - Reserve this number for your next project
+**0098** - Reserve this number for your next project
 
 ---
 

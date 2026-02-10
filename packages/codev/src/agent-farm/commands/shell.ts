@@ -1,53 +1,54 @@
 /**
- * Shell command - spawns a utility shell terminal
+ * Shell command - creates a utility shell terminal tab in the dashboard.
  *
- * When the dashboard is running, this creates a tab in the dashboard.
- * When the dashboard is not running, it spawns the terminal directly via node-pty.
+ * Spec 0090: All terminals go through Tower on port 4100.
+ * The dashboard picks up new tabs via state polling — no browser open needed.
  */
 
-import type { UtilTerminal } from '../types.js';
-import { getConfig, getResolvedCommands } from '../utils/index.js';
+import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { openBrowser } from '../utils/shell.js';
-import { loadState, addUtil } from '../state.js';
+
+// Tower port is fixed at 4100
+const TOWER_PORT = 4100;
 
 interface UtilOptions {
   name?: string;
 }
 
 /**
- * Try to create a shell tab via the dashboard API
- * Returns true if successful, false if dashboard not available
+ * Encode project path for Tower URL (base64url)
  */
-async function tryDashboardApi(name?: string): Promise<boolean> {
-  const state = loadState();
+function encodeProjectPath(projectPath: string): string {
+  return Buffer.from(projectPath).toString('base64url');
+}
 
-  // Dashboard port from config
-  if (!state.architect) {
-    return false;
-  }
-
-  const config = getConfig();
-  const dashboardPort = config.dashboardPort;
+/**
+ * Try to create a shell tab via the Tower API
+ * Returns true if successful, false if Tower not available
+ */
+async function tryTowerApi(projectPath: string, name?: string): Promise<boolean> {
+  const encodedPath = encodeProjectPath(projectPath);
 
   try {
-    const response = await fetch(`http://localhost:${dashboardPort}/api/tabs/shell`, {
+    const response = await fetch(`http://localhost:${TOWER_PORT}/project/${encodedPath}/api/tabs/shell`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
 
     if (response.ok) {
-      const result = await response.json() as { name: string; port: number };
-      logger.success(`Shell opened in dashboard tab`);
+      const result = await response.json() as { id: string; name: string; terminalId: string };
+      logger.success('Shell opened in dashboard tab');
       logger.kv('Name', result.name);
       return true;
     }
 
-    // Dashboard returned an error, fall through to direct spawn
+    // Tower returned an error
+    const error = await response.text();
+    logger.error(`Tower API error: ${error}`);
     return false;
   } catch {
-    // Dashboard not available
+    // Tower not available
     return false;
   }
 }
@@ -58,59 +59,15 @@ async function tryDashboardApi(name?: string): Promise<boolean> {
 export async function shell(options: UtilOptions = {}): Promise<void> {
   const config = getConfig();
 
-  // Try to use dashboard API first (if dashboard is running)
-  const dashboardOpened = await tryDashboardApi(options.name);
-  if (dashboardOpened) {
+  // Create shell tab via Tower API
+  const opened = await tryTowerApi(config.projectRoot, options.name);
+  if (opened) {
     return;
   }
 
-  // Direct spawn via node-pty REST API
-  const id = generateUtilId();
-  const name = options.name || `util-${id}`;
-
-  // Get shell command from config (hierarchy: CLI > config.json > default)
-  const commands = getResolvedCommands();
-  const shellCmd = commands.shell;
-
-  logger.header(`Spawning Utility Terminal`);
-  logger.kv('ID', id);
-  logger.kv('Name', name);
-
-  // Create PTY session via REST API (node-pty backend)
-  logger.info('Creating PTY terminal session...');
-  const dashboardPort = config.dashboardPort;
-  const response = await fetch(`http://localhost:${dashboardPort}/api/terminals`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: shellCmd, args: [], cwd: config.projectRoot, cols: 200, rows: 50 }),
-  });
-
-  if (!response.ok) {
-    fatal(`Failed to create PTY session: ${response.status} ${await response.text()}`);
-  }
-
-  const result = await response.json() as { id: string };
-  const utilTerminal: UtilTerminal = {
-    id,
-    name,
-    port: 0,
-    pid: 0,
-  };
-  addUtil(utilTerminal);
-
-  logger.blank();
-  logger.success(`Utility terminal spawned!`);
-  logger.kv('Terminal ID', result.id);
-
-  // Open dashboard (terminal is accessible via WebSocket)
-  await openBrowser(`http://localhost:${config.dashboardPort}`);
-}
-
-/**
- * Generate a unique utility ID
- */
-function generateUtilId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 4);
-  return `U${timestamp.slice(-3)}${random}`.toUpperCase();
+  // Tower not available - tell user to start it
+  logger.error('Tower is not running.');
+  logger.info('Start it with: af tower start');
+  logger.info('Then try again: af shell');
+  process.exit(1);
 }

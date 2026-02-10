@@ -39,15 +39,15 @@ test.describe('Bug #1: Tower proxy for projects', () => {
     await expect(instance.first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('clicking Open on a project navigates to proxied dashboard', async ({ page }) => {
+  test('clicking Open on a project opens proxied dashboard in new tab', async ({ page }) => {
     await page.goto(TOWER_URL);
     await page.waitForTimeout(2000);
 
-    // Find an "Open" button inside an instance card
-    const openBtn = page.locator('.instance button:has-text("Open"), .instance a:has-text("Open")').first();
+    // Find an "Open" link inside an instance card (target="_blank")
+    const openBtn = page.locator('.instance a:has-text("Open")').first();
     await expect(openBtn).toBeVisible({ timeout: 10_000 });
 
-    // Click and wait for navigation (opens in new tab)
+    // Click opens new tab (target="_blank" preserved for tower overview links)
     const [newPage] = await Promise.all([
       page.context().waitForEvent('page'),
       openBtn.click(),
@@ -57,6 +57,9 @@ test.describe('Bug #1: Tower proxy for projects', () => {
     // Verify it's the React dashboard (not legacy)
     const root = newPage.locator('#root');
     await expect(root).toBeAttached({ timeout: 10_000 });
+
+    // URL should point to a project proxy path
+    expect(newPage.url()).toContain('/project/');
 
     // Should not contain legacy dashboard markers
     const html = await newPage.content();

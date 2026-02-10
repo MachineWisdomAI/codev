@@ -9,7 +9,6 @@ import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
-import { openBrowser } from '../utils/shell.js';
 
 // Tower port is fixed at 4100
 const TOWER_PORT = 4100;
@@ -84,10 +83,8 @@ export async function open(options: OpenOptions): Promise<void> {
   const tabId = await tryTowerApi(config.projectRoot, filePath);
 
   if (tabId) {
-    // Open the dashboard with the file tab selected
-    const encodedPath = encodeProjectPath(config.projectRoot);
-    const dashboardUrl = `http://localhost:${TOWER_PORT}/project/${encodedPath}/?tab=file-${tabId}`;
-    await openBrowser(dashboardUrl);
+    // Tab created server-side — dashboard picks it up via state polling.
+    // No need to open a browser; the user already has the dashboard open.
     return;
   }
 

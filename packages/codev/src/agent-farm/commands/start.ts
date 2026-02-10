@@ -323,9 +323,11 @@ async function startViaTower(options: StartOptions): Promise<void> {
   logger.success('Agent Farm started!');
   logger.kv('Dashboard', projectUrl);
 
-  // Open browser (unless --no-browser)
-  if (!options.noBrowser) {
+  // Open browser only if Tower wasn't already running (user already has it open)
+  if (!options.noBrowser && !towerRunning) {
     await openBrowser(projectUrl);
+  } else if (towerRunning) {
+    logger.info('Tower already running — project visible in your browser.');
   }
 
   // For remote mode, keep process alive
