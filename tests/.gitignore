@@ -1,9 +1,0 @@
-# Test artifacts
-*.tmp
-*.log
-test-results/
-
-# Keep vendored libraries but ignore their test artifacts
-lib/*/test/
-lib/*/.git/
-lib/*/.github/
