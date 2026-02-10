@@ -943,8 +943,7 @@ async function getTerminalsForProject(
         session = manager.getSession(newSession.id);
         log('INFO', `Reconnected to tmux "${dbSession.tmux_session}" on-the-fly → ${newSession.id}`);
       } catch (err) {
-        log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message}`);
-        deleteTerminalSession(dbSession.id);
+        log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message} — will retry on next poll`);
         continue;
       }
     } else if (!session) {

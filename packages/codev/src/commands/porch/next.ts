@@ -104,6 +104,21 @@ function findReviewFiles(
 }
 
 /**
+ * Compute the expected review file path for a given model.
+ * This must match the pattern used by findReviewFiles().
+ */
+function getReviewFilePath(
+  projectRoot: string,
+  state: ProjectState,
+  model: string
+): string {
+  const projectDir = getProjectDir(projectRoot, state.id, state.title);
+  const phase = state.current_plan_phase || state.phase;
+  const fileName = `${state.id}-${phase}-iter${state.iteration}-${model}.txt`;
+  return path.join(projectDir, fileName);
+}
+
+/**
  * Compute the next tasks for a project.
  *
  * This is a pure planner — it reads state and filesystem, infers what
@@ -134,6 +149,12 @@ export async function next(projectRoot: string, projectId: string): Promise<Porc
       phase: state.phase,
       iteration: state.iteration,
       summary: `Project ${state.id} has completed the ${state.protocol} protocol.`,
+      tasks: [{
+        subject: 'Merge the pull request',
+        activeForm: 'Merging pull request',
+        description: `The protocol is complete. Merge the PR using:\n\ngh pr merge --merge\n\nDo NOT squash merge. Use regular merge commits to preserve development history.\n\nAfter merging, notify the architect that the work is complete.`,
+        sequential: true,
+      }],
     };
   }
 
@@ -311,10 +332,10 @@ async function handleBuildVerify(
     if (reviews.length === 0) {
       const tasks: PorchTask[] = [];
 
-      // Build consultation commands
+      // Build consultation commands with --output so review files land where porch expects them
       const consultType = getConsultArtifactType(state.phase);
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type} ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       tasks.push({
@@ -334,7 +355,7 @@ async function handleBuildVerify(
         m => !reviews.find(r => r.model === m)
       );
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type} ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       return {

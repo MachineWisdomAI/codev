@@ -90,6 +90,7 @@ program
   .option('-n, --dry-run', 'Show what would execute without running')
   .option('-t, --type <type>', 'Review type: spec-review, plan-review, impl-review, pr-ready, integration-review')
   .option('-r, --role <role>', 'Custom role from codev/roles/<name>.md (e.g., gtm-specialist, security-reviewer)')
+  .option('--output <path>', 'Write consultation output to file (used by porch for review file collection)')
   .allowUnknownOption(true)
   .action(async (subcommand, args, options) => {
     try {
@@ -100,6 +101,7 @@ program
         dryRun: options.dryRun,
         reviewType: options.type,
         role: options.role,
+        output: options.output,
       });
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));

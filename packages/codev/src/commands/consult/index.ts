@@ -40,6 +40,7 @@ interface ConsultOptions {
   dryRun?: boolean;
   reviewType?: string;
   role?: string;
+  output?: string;
 }
 
 // Valid review types
@@ -263,7 +264,8 @@ async function runConsultation(
   projectRoot: string,
   dryRun: boolean,
   reviewType?: string,
-  customRole?: string
+  customRole?: string,
+  outputPath?: string,
 ): Promise<void> {
   // Use custom role if specified, otherwise use default consultant role
   let role = customRole ? loadCustomRole(projectRoot, customRole) : loadRole(projectRoot);
@@ -343,14 +345,25 @@ async function runConsultation(
 
   // Execute with passthrough stdio
   // Use 'ignore' for stdin to prevent blocking when spawned as subprocess
+  // When outputPath is set, capture stdout to write to file (used by porch)
   const fullEnv = { ...process.env, ...env };
   const startTime = Date.now();
+  const stdoutMode = outputPath ? 'pipe' : 'inherit';
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
       env: fullEnv,
-      stdio: ['ignore', 'inherit', 'inherit'],
+      stdio: ['ignore', stdoutMode, 'inherit'],
     });
+
+    const chunks: Buffer[] = [];
+    if (outputPath && proc.stdout) {
+      proc.stdout.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        // Also write to stdout so the user can still see output
+        process.stdout.write(chunk);
+      });
+    }
 
     proc.on('close', (code) => {
       const duration = (Date.now() - startTime) / 1000;
@@ -358,6 +371,16 @@ async function runConsultation(
 
       if (tempFile && fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
+      }
+
+      // Write captured output to file
+      if (outputPath && chunks.length > 0) {
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+        fs.writeFileSync(outputPath, Buffer.concat(chunks).toString('utf-8'));
+        console.error(`\nOutput written to: ${outputPath}`);
       }
 
       console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -571,7 +594,7 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
  * Main consult entry point
  */
 export async function consult(options: ConsultOptions): Promise<void> {
-  const { model: modelInput, subcommand, args, dryRun = false, reviewType, role: customRole } = options;
+  const { model: modelInput, subcommand, args, dryRun = false, reviewType, role: customRole, output: outputPath } = options;
 
   // Resolve model alias
   const model = MODEL_ALIASES[modelInput.toLowerCase()] || modelInput.toLowerCase();
@@ -692,5 +715,5 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, projectRoot, dryRun, reviewType, customRole);
+  await runConsultation(model, query, projectRoot, dryRun, reviewType, customRole, outputPath);
 }
