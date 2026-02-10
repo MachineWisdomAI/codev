@@ -50,11 +50,12 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
    - Tower gets a unique ID tied to the user's account
    - Credentials stored in `~/.agent-farm/cloud-config.json`
 
-2. **Built-in Tunnel Client**
-   - On tower startup, if registered, tower connects to codevos.ai using the tunnel library's client
-   - Authenticates with stored API key
-   - Incoming HTTP/WS requests from codevos.ai are reverse-proxied to localhost:4100
-   - The tunnel library handles multiplexing, WebSocket upgrades, SSE, and streaming transparently
+2. **Built-in Tunnel Client (HTTP/2 Role Reversal)**
+   - On tower startup, if registered, tower opens an outbound TCP connection to codevos.ai and authenticates with its API key
+   - Over that TCP connection, the tower runs an HTTP/2 **server** (roles are reversed)
+   - codevos.ai acts as the HTTP/2 **client**, making requests to the tower through the reversed connection
+   - The tower's H2 handler proxies incoming requests to `localhost:4100` via standard `node:http`
+   - HTTP/2 provides multiplexing, flow control, and streaming natively — no third-party tunnel library needed
 
 3. **Automatic Reconnection**
    - Exponential backoff with jitter (1s → 60s cap) for transient failures
@@ -97,6 +98,7 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
 - Must work behind NAT, corporate firewalls, and proxies (outbound HTTPS only)
 - `~/.agent-farm/cloud-config.json` permissions must be owner-only (0600)
 - **SSRF Prevention**: Tunnel client ONLY proxies to `localhost:4100`. Target host/port is hardcoded, never derived from incoming tunnel messages.
+- **Tunnel Path Blocking**: The H2 handler MUST reject requests to `/api/tunnel/*` before proxying to localhost:4100. These are local-only management endpoints (connect, disconnect, status). Without this blocklist, a remote user hitting `codevos.ai/t/<tower>/api/tunnel/disconnect` could kill the tunnel.
 
 ### Business Constraints
 - Tower must remain fully functional without registration (local-only mode is the default)
@@ -105,22 +107,34 @@ The codevos.ai service (companion spec 0001) is being built as a centralized hub
 
 ## Assumptions
 - codevos.ai tunnel server is operational
-- The tunnel library (pipenet, punchmole, or similar) handles HTTP, WebSocket, and SSE proxying
+- Node.js `node:http2` module supports role reversal (spiked and validated — see `codevos.ai/codev/resources/tunnel-architecture.md`)
 - Users have internet access for the tunnel (offline use remains local-only)
 
 ## Solution Approach
 
-### Tunnel Client
+### Tunnel Client (HTTP/2 Role Reversal)
 
-The tunnel client uses an off-the-shelf library (same as codevos.ai server side). The library handles:
-- Connection management (persistent outbound connection to codevos.ai)
-- Request/response proxying (HTTP, WebSocket, SSE, streaming)
-- Multiplexing (multiple concurrent requests over one connection)
-- Backpressure (prevents OOM when fast producer overwhelms slow consumer)
+The tunnel uses HTTP/2 with reversed roles — the same technique used by cloudflared. Built entirely on Node.js standard library modules (`node:http2`, `node:net`, `node:http`). No third-party tunnel dependencies.
 
-The tower's responsibility is:
-- Reading credentials from `cloud-config.json` and passing them to the library
-- Pointing the tunnel's proxy target at `localhost:4100`
+**How it works on the tower side:**
+1. Tower opens an outbound TCP connection to codevos.ai (works through NAT and firewalls — it's just an outbound connection)
+2. Tower sends its API key for authentication over the connection
+3. Tower runs an HTTP/2 **server** over the outbound socket: `h2server.emit('connection', outboundSocket)`
+4. codevos.ai runs an HTTP/2 **client** over its end of the same socket
+5. When codevos.ai receives a browser request for this tower, it makes an H2 request through the tunnel
+6. The tower's H2 stream handler proxies the request to `localhost:4100` via standard `node:http` and pipes the response back
+
+**What HTTP/2 gives us for free:**
+- Multiplexing (many concurrent requests over one TCP connection)
+- Flow control (backpressure — prevents OOM)
+- Bidirectional streaming (for terminal I/O)
+- Header compression
+
+**The tower's responsibility is:**
+- Reading credentials from `cloud-config.json`
+- Opening and maintaining the outbound TCP connection
+- Running the H2 server over the connection
+- Proxying H2 requests to `localhost:4100` (filtering hop-by-hop headers)
 - Reconnection logic (exponential backoff, circuit breaker)
 - Sending metadata (project list, terminal list) after connection
 
@@ -154,7 +168,7 @@ The tower's responsibility is:
     "tower_id": "uuid",
     "machine_id": "uuid",
     "api_key": "ctk_...",
-    "server_url": "wss://codevos.ai"
+    "server_url": "https://codevos.ai"
   }
   ```
 - If tower daemon is running, signals it to connect via `POST localhost:4100/api/tunnel/connect`
@@ -190,7 +204,7 @@ CLI commands communicate with the running tower via existing localhost HTTP API:
 - `POST /api/tunnel/disconnect` — close tunnel connection
 - `GET /api/tunnel/status` — return tunnel state
 
-These are localhost-only endpoints, not proxied through the tunnel.
+These are localhost-only management endpoints. The tower's H2 stream handler MUST blocklist `/api/tunnel/*` paths and return 403 before proxying to localhost:4100. Without this, remote requests through the tunnel could reach these endpoints and disrupt the tunnel connection.
 
 ### Graceful Degradation
 
@@ -211,10 +225,11 @@ These are localhost-only endpoints, not proxied through the tunnel.
 
 ## Security Considerations
 - **API Key Storage**: `cloud-config.json` with 0600 permissions. Keys masked in logs (show last 4 chars only).
-- **Transport Security**: All tunnel traffic over TLS. Tower validates server certificate.
+- **Transport Security**: Outbound TCP connection wrapped in TLS. Tower validates codevos.ai server certificate.
 - **SSRF Prevention**: Proxy target hardcoded to `localhost:4100`. Never derived from tunnel messages.
 - **Local Auth Unchanged**: localhost:4100 remains unauthenticated (same as current). Auth handled by codevos.ai.
 - **Tunnel Isolation**: No new listening ports opened. Tower only accepts proxied requests from its authenticated tunnel connection.
+- **Tunnel Path Blocking**: H2 handler blocklists `/api/tunnel/*` paths (returns 403) before proxying. Prevents remote access to local management endpoints (connect/disconnect/status).
 - **Compromised Config**: Attacker with `cloud-config.json` can impersonate the tower (not the user's account). Mitigation: file permissions, key revocation from dashboard.
 
 ## Test Scenarios
@@ -255,21 +270,23 @@ These are localhost-only endpoints, not proxied through the tunnel.
 ## Dependencies
 - **External Services**: codevos.ai (tunnel server)
 - **Internal Systems**: Tower server (Spec 0090), `af` CLI
-- **Libraries**: Tunnel client library (same as codevos.ai server — pipenet, punchmole, or similar)
+- **Libraries**: Node.js built-in only — `node:http2`, `node:net`, `node:http`, `node:tls` (no third-party tunnel library)
 
 ## References
 - Companion spec (server side): `codevos.ai/codev/specs/0001-cloud-tower-registration.md`
+- Tunnel architecture: `codevos.ai/codev/resources/tunnel-architecture.md` (spike results and implementation details)
 - Tower server: `packages/codev/src/agent-farm/servers/tower-server.ts`
 - Current cloudflared integration: `tower-server.ts` lines 759-832
 - Spec 0090: Tower Single Daemon
 - Spec 0062: Secure Remote Access (superseded by this spec)
+- Node.js HTTP/2 API: https://nodejs.org/api/http2.html
 
 ## Risks and Mitigation
 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| Tunnel library doesn't meet our needs | Medium | High | Evaluate pipenet + punchmole during planning; fall back to the other |
-| Terminal latency through tunnel | Low | High | Profile early; binary data frames minimize overhead |
+| HTTP/2 role reversal edge cases in production | Low | Medium | Technique spiked and validated; same approach used by cloudflared at scale; fallback: WS control plane + connection pool |
+| Terminal latency through tunnel | Low | High | HTTP/2 streams are lightweight; profile early |
 | codevos.ai outage blocks remote access | Low | Medium | Tower works locally regardless |
 | Config permission issues across OSes | Low | Medium | Test on macOS and Linux |
 | Reconnection storms after server restart | Medium | Medium | Exponential backoff + jitter; 5-min fallback after 10 failures |
@@ -284,7 +301,7 @@ These are localhost-only endpoints, not proxied through the tunnel.
 - `tunnel-setup.md` documentation
 
 **What gets added:**
-- Tunnel client (thin wrapper around library — connection, auth, reconnection)
+- Tunnel client (HTTP/2 role reversal — outbound TCP, H2 server, proxy to localhost:4100)
 - `af tower register` / `register --reauth` / `deregister` / `status` CLI commands
 - Tower HTTP endpoints: `/api/tunnel/connect`, `/api/tunnel/disconnect`, `/api/tunnel/status`
 - `cloud-config.json` management with validation

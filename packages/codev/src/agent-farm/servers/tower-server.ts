@@ -267,6 +267,19 @@ function deleteProjectTerminalSessions(projectPath: string): void {
   }
 }
 
+/**
+ * Look up a single terminal session by ID from SQLite.
+ * Used by /api/state to find tmux session names for reconnection.
+ */
+function getTerminalSessionById(terminalId: string): DbTerminalSession | null {
+  try {
+    const db = getGlobalDb();
+    return (db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get(terminalId) as DbTerminalSession) || null;
+  } catch {
+    return null;
+  }
+}
+
 // Whether tmux is available on this system (checked once at startup)
 let tmuxAvailable = false;
 
@@ -283,8 +296,19 @@ function checkTmux(): boolean {
 }
 
 /**
+ * Sanitize a tmux session name to match what tmux actually creates.
+ * tmux replaces dots with underscores and strips colons from session names.
+ * Without this, stored names won't match actual tmux session names,
+ * causing reconnection to fail (e.g., "builder-codevos.ai-0001" vs "builder-codevos_ai-0001").
+ */
+function sanitizeTmuxSessionName(name: string): string {
+  return name.replace(/\./g, '_').replace(/:/g, '');
+}
+
+/**
  * Create a tmux session with the given command.
- * Returns true if created successfully, false on failure.
+ * Returns the sanitized session name if created successfully, null on failure.
+ * Session names are sanitized to match tmux behavior (dots → underscores, colons stripped).
  */
 function createTmuxSession(
   sessionName: string,
@@ -293,7 +317,10 @@ function createTmuxSession(
   cwd: string,
   cols: number,
   rows: number
-): boolean {
+): string | null {
+  // Sanitize to match what tmux actually creates (dots → underscores, colons stripped)
+  sessionName = sanitizeTmuxSessionName(sessionName);
+
   // Kill any stale session with this name
   if (tmuxSessionExists(sessionName)) {
     killTmuxSession(sessionName);
@@ -312,7 +339,7 @@ function createTmuxSession(
     const result = spawnSync('tmux', tmuxArgs, { stdio: 'ignore' });
     if (result.status !== 0) {
       log('WARN', `tmux new-session exited with code ${result.status} for "${sessionName}"`);
-      return false;
+      return null;
     }
 
     // Hide tmux status bar (dashboard has its own tabs), enable mouse, and
@@ -321,19 +348,21 @@ function createTmuxSession(
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
     spawnSync('tmux', ['set-option', '-t', sessionName, 'aggressive-resize', 'on'], { stdio: 'ignore' });
 
-    return true;
+    return sessionName;
   } catch (err) {
     log('WARN', `Failed to create tmux session "${sessionName}": ${(err as Error).message}`);
-    return false;
+    return null;
   }
 }
 
 /**
- * Check if a tmux session exists
+ * Check if a tmux session exists.
+ * Sanitizes the name to handle legacy entries stored before dot-replacement fix.
  */
 function tmuxSessionExists(sessionName: string): boolean {
+  const sanitized = sanitizeTmuxSessionName(sessionName);
   try {
-    execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`, { stdio: 'ignore' });
+    execSync(`tmux has-session -t "${sanitized}" 2>/dev/null`, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -926,22 +955,23 @@ async function getTerminalsForProject(
   for (const dbSession of dbSessions) {
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
-    if (!session && dbSession.tmux_session && tmuxAvailable && tmuxSessionExists(dbSession.tmux_session)) {
+    const sanitizedTmux = dbSession.tmux_session ? sanitizeTmuxSessionName(dbSession.tmux_session) : null;
+    if (!session && sanitizedTmux && tmuxAvailable && tmuxSessionExists(sanitizedTmux)) {
       // PTY session gone but tmux session survives — reconnect on-the-fly
       try {
         const newSession = await manager.createSession({
           command: 'tmux',
-          args: ['attach-session', '-t', dbSession.tmux_session],
+          args: ['attach-session', '-t', sanitizedTmux],
           cwd: dbSession.project_path,
           label: dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`,
           env: process.env as Record<string, string>,
         });
-        // Update SQLite with new terminal ID
+        // Update SQLite with new terminal ID (use sanitized tmux name)
         deleteTerminalSession(dbSession.id);
-        saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, newSession.pid, dbSession.tmux_session);
+        saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, newSession.pid, sanitizedTmux);
         dbSession.id = newSession.id;
         session = manager.getSession(newSession.id);
-        log('INFO', `Reconnected to tmux "${dbSession.tmux_session}" on-the-fly → ${newSession.id}`);
+        log('INFO', `Reconnected to tmux "${sanitizedTmux}" on-the-fly → ${newSession.id}`);
       } catch (err) {
         log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message} — will retry on next poll`);
         continue;
@@ -1322,12 +1352,12 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         let activeTmuxSession: string | null = null;
 
         if (tmuxAvailable) {
-          const tmuxCreated = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
-          if (tmuxCreated) {
+          const sanitizedName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
+          if (sanitizedName) {
             cmd = 'tmux';
-            cmdArgs = ['attach-session', '-t', tmuxName];
-            activeTmuxSession = tmuxName;
-            log('INFO', `Created tmux session "${tmuxName}" for architect`);
+            cmdArgs = ['attach-session', '-t', sanitizedName];
+            activeTmuxSession = sanitizedName;
+            log('INFO', `Created tmux session "${sanitizedName}" for architect`);
           }
         }
 
@@ -1714,7 +1744,7 @@ const server = http.createServer(async (req, res) => {
         let activeTmuxSession: string | null = null;
 
         if (tmuxSession && tmuxAvailable && command && cwd) {
-          const tmuxCreated = createTmuxSession(
+          const sanitizedName = createTmuxSession(
             tmuxSession,
             command,
             args || [],
@@ -1722,12 +1752,12 @@ const server = http.createServer(async (req, res) => {
             cols || 200,
             rows || 50
           );
-          if (tmuxCreated) {
-            // Override: node-pty attaches to the tmux session
+          if (sanitizedName) {
+            // Override: node-pty attaches to the tmux session (use sanitized name)
             command = 'tmux';
-            args = ['attach-session', '-t', tmuxSession];
-            activeTmuxSession = tmuxSession;
-            log('INFO', `Created tmux session "${tmuxSession}" for terminal`);
+            args = ['attach-session', '-t', sanitizedName];
+            activeTmuxSession = sanitizedName;
+            log('INFO', `Created tmux session "${sanitizedName}" for terminal`);
           }
           // If tmux creation failed, fall through to bare node-pty
         }
@@ -2237,44 +2267,90 @@ const server = http.createServer(async (req, res) => {
             };
           }
 
-          // Add shells (skip stale entries whose terminal session is gone or exited)
+          // Add shells (attempt tmux reconnection for stale sessions before removing)
           const staleShellIds: string[] = [];
           for (const [shellId, terminalId] of entry.shells) {
-            const session = manager.getSession(terminalId);
+            let session = manager.getSession(terminalId);
             if (!session || session.status === 'exited') {
-              staleShellIds.push(shellId);
-              continue;
+              // Check SQLite for tmux session name and attempt reconnection
+              const dbRow = getTerminalSessionById(terminalId);
+              if (dbRow?.tmux_session && tmuxAvailable && tmuxSessionExists(dbRow.tmux_session)) {
+                try {
+                  const newSession = await manager.createSession({
+                    command: 'tmux', args: ['attach-session', '-t', dbRow.tmux_session],
+                    cwd: dbRow.project_path,
+                    label: `Shell ${shellId.replace('shell-', '')}`,
+                  });
+                  deleteTerminalSession(terminalId);
+                  saveTerminalSession(newSession.id, dbRow.project_path, 'shell', dbRow.role_id, newSession.pid, dbRow.tmux_session);
+                  entry.shells.set(shellId, newSession.id);
+                  session = manager.getSession(newSession.id);
+                  log('INFO', `[/api/state] Reconnected shell "${shellId}" to tmux "${dbRow.tmux_session}" → ${newSession.id}`);
+                } catch (err) {
+                  log('WARN', `[/api/state] Failed to reconnect shell tmux "${dbRow.tmux_session}": ${(err as Error).message}`);
+                  staleShellIds.push(shellId);
+                  continue;
+                }
+              } else {
+                staleShellIds.push(shellId);
+                continue;
+              }
             }
-            state.utils.push({
-              id: shellId,
-              name: `Shell ${shellId.replace('shell-', '')}`,
-              port: basePort || 0,
-              pid: session?.pid || 0,
-              terminalId,
-            });
+            if (session) {
+              state.utils.push({
+                id: shellId,
+                name: `Shell ${shellId.replace('shell-', '')}`,
+                port: basePort || 0,
+                pid: session.pid || 0,
+                terminalId: entry.shells.get(shellId) || terminalId,
+              });
+            }
           }
           for (const id of staleShellIds) entry.shells.delete(id);
 
-          // Add builders (skip stale entries whose terminal session is gone or exited)
+          // Add builders (attempt tmux reconnection for stale sessions before removing)
           const staleBuilderIds: string[] = [];
           for (const [builderId, terminalId] of entry.builders) {
-            const session = manager.getSession(terminalId);
+            let session = manager.getSession(terminalId);
             if (!session || session.status === 'exited') {
-              staleBuilderIds.push(builderId);
-              continue;
+              // Check SQLite for tmux session name and attempt reconnection
+              const dbRow = getTerminalSessionById(terminalId);
+              if (dbRow?.tmux_session && tmuxAvailable && tmuxSessionExists(dbRow.tmux_session)) {
+                try {
+                  const newSession = await manager.createSession({
+                    command: 'tmux', args: ['attach-session', '-t', dbRow.tmux_session],
+                    cwd: dbRow.project_path,
+                    label: `Builder ${builderId}`,
+                  });
+                  deleteTerminalSession(terminalId);
+                  saveTerminalSession(newSession.id, dbRow.project_path, 'builder', dbRow.role_id, newSession.pid, dbRow.tmux_session);
+                  entry.builders.set(builderId, newSession.id);
+                  session = manager.getSession(newSession.id);
+                  log('INFO', `[/api/state] Reconnected builder "${builderId}" to tmux "${dbRow.tmux_session}" → ${newSession.id}`);
+                } catch (err) {
+                  log('WARN', `[/api/state] Failed to reconnect builder tmux "${dbRow.tmux_session}": ${(err as Error).message}`);
+                  staleBuilderIds.push(builderId);
+                  continue;
+                }
+              } else {
+                staleBuilderIds.push(builderId);
+                continue;
+              }
             }
-            state.builders.push({
-              id: builderId,
-              name: `Builder ${builderId}`,
-              port: basePort || 0,
-              pid: session?.pid || 0,
-              status: 'running',
-              phase: '',
-              worktree: '',
-              branch: '',
-              type: 'spec',
-              terminalId,
-            });
+            if (session) {
+              state.builders.push({
+                id: builderId,
+                name: `Builder ${builderId}`,
+                port: basePort || 0,
+                pid: session.pid || 0,
+                status: 'running',
+                phase: '',
+                worktree: '',
+                branch: '',
+                type: 'spec',
+                terminalId: entry.builders.get(builderId) || terminalId,
+              });
+            }
           }
           for (const id of staleBuilderIds) entry.builders.delete(id);
 
@@ -2306,11 +2382,11 @@ const server = http.createServer(async (req, res) => {
             let activeTmuxSession: string | null = null;
 
             if (tmuxAvailable) {
-              const tmuxCreated = createTmuxSession(tmuxName, shellCmd, shellArgs, projectPath, 200, 50);
-              if (tmuxCreated) {
+              const sanitizedName = createTmuxSession(tmuxName, shellCmd, shellArgs, projectPath, 200, 50);
+              if (sanitizedName) {
                 shellCmd = 'tmux';
-                shellArgs = ['attach-session', '-t', tmuxName];
-                activeTmuxSession = tmuxName;
+                shellArgs = ['attach-session', '-t', sanitizedName];
+                activeTmuxSession = sanitizedName;
               }
             }
 
