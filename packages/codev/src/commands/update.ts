@@ -15,7 +15,7 @@ import {
   isUserDataPath,
   isUpdatableFile,
 } from '../lib/templates.js';
-import { copyConsultTypes } from '../lib/scaffold.js';
+import { copyConsultTypes, copySkills } from '../lib/scaffold.js';
 
 interface UpdateOptions {
   dryRun?: boolean;
@@ -81,6 +81,16 @@ export async function update(options: UpdateOptions = {}): Promise<void> {
     if (consultTypesResult.copied.length > 0) {
       for (const file of consultTypesResult.copied) {
         console.log(chalk.green('  + (new)'), `codev/consult-types/${file}`);
+      }
+    }
+  }
+
+  // Update .claude/skills/ (add new skills, preserve user customizations)
+  if (!dryRun) {
+    const skillsResult = copySkills(targetDir, templatesDir, { skipExisting: true });
+    if (skillsResult.copied.length > 0) {
+      for (const skill of skillsResult.copied) {
+        console.log(chalk.green('  + (new)'), `.claude/skills/${skill}/`);
       }
     }
   }

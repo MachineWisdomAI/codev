@@ -370,16 +370,6 @@ export function createProjectsDir(
   return { created: true, skipped: false };
 }
 
-interface CopyProtocolsOptions {
-  skipExisting?: boolean;
-}
-
-interface CopyProtocolsResult {
-  copied: string[];
-  skipped: string[];
-  directoryCreated: boolean;
-}
-
 /**
  * Recursively copy a directory
  */
@@ -399,6 +389,73 @@ function copyDirRecursive(src: string, dest: string): void {
       fs.copyFileSync(srcPath, destPath);
     }
   }
+}
+
+interface CopySkillsOptions {
+  skipExisting?: boolean;
+}
+
+interface CopySkillsResult {
+  copied: string[];
+  skipped: string[];
+  directoryCreated: boolean;
+}
+
+/**
+ * Copy .claude/skills/ from skeleton to project root.
+ * Skills are Claude Code slash commands that provide contextual guidance.
+ */
+export function copySkills(
+  targetDir: string,
+  skeletonDir: string,
+  options: CopySkillsOptions = {}
+): CopySkillsResult {
+  const { skipExisting = false } = options;
+  const skillsDir = path.join(targetDir, '.claude', 'skills');
+  const srcDir = path.join(skeletonDir, '.claude', 'skills');
+  const copied: string[] = [];
+  const skipped: string[] = [];
+  let directoryCreated = false;
+
+  // Ensure .claude/skills directory exists
+  if (!fs.existsSync(skillsDir)) {
+    fs.mkdirSync(skillsDir, { recursive: true });
+    directoryCreated = true;
+  }
+
+  // If source directory doesn't exist, return early
+  if (!fs.existsSync(srcDir)) {
+    return { copied, skipped, directoryCreated };
+  }
+
+  // Copy each skill directory
+  const skills = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of skills) {
+    if (!entry.isDirectory()) continue;
+
+    const destSkillDir = path.join(skillsDir, entry.name);
+    const srcSkillDir = path.join(srcDir, entry.name);
+
+    if (skipExisting && fs.existsSync(destSkillDir)) {
+      skipped.push(entry.name);
+      continue;
+    }
+
+    copyDirRecursive(srcSkillDir, destSkillDir);
+    copied.push(entry.name);
+  }
+
+  return { copied, skipped, directoryCreated };
+}
+
+interface CopyProtocolsOptions {
+  skipExisting?: boolean;
+}
+
+interface CopyProtocolsResult {
+  copied: string[];
+  skipped: string[];
+  directoryCreated: boolean;
 }
 
 /**

@@ -178,6 +178,12 @@ project-root/
 └── [project code]
 ```
 
+## Directory Map
+- npm install / npm run build / npm test → always run from `packages/codev/`
+- E2E tests → `packages/codev/tests/e2e/`
+- Unit tests → `packages/codev/tests/unit/`
+- Never run npm commands from the repository root unless explicitly told to.
+
 ## File Naming Convention
 
 Use sequential numbering with descriptive names:
@@ -216,6 +222,11 @@ When the user says **"cmap the PR"** or **"cmap spec 42"**, this means:
 **Always run consultations in parallel** using separate Bash tool calls in the same message, not sequentially.
 
 ## CLI Command Reference
+
+**IMPORTANT: Never guess CLI commands.** Use the `/af` skill to check the quick reference before running agent farm commands. Common mistakes to avoid:
+- There is NO `codev tower` command — use `af tower start` / `af tower stop`
+- There is NO `restart` subcommand — stop then start
+- When unsure about syntax, check the docs below first
 
 Codev provides three CLI tools. For complete reference documentation, see:
 

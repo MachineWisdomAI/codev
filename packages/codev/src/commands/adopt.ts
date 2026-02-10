@@ -19,6 +19,7 @@ import {
   copyConsultTypes,
   copyResourceTemplates,
   copyProtocols,
+  copySkills,
   copyRootFiles,
   updateGitignore,
 } from '../lib/scaffold.js';
@@ -169,6 +170,17 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   }
   for (const protocol of protocolsResult.copied) {
     console.log(chalk.green('  +'), `codev/protocols/${protocol}`);
+    fileCount++;
+  }
+
+  // Copy .claude/skills/ - skip existing (preserve user customizations)
+  const skillsResult = copySkills(targetDir, skeletonDir, { skipExisting: true });
+  if (skillsResult.directoryCreated) {
+    console.log(chalk.green('  +'), '.claude/skills/');
+    fileCount++;
+  }
+  for (const skill of skillsResult.copied) {
+    console.log(chalk.green('  +'), `.claude/skills/${skill}/`);
     fileCount++;
   }
 
