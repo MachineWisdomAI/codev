@@ -334,8 +334,9 @@ async function handleBuildVerify(
 
       // Build consultation commands with --output so review files land where porch expects them
       const consultType = getConsultArtifactType(state.phase);
+      const planPhaseFlag = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       tasks.push({
@@ -354,8 +355,9 @@ async function handleBuildVerify(
       const missingModels = verifyConfig.models.filter(
         m => !reviews.find(r => r.model === m)
       );
+      const planPhaseFlagPartial = state.current_plan_phase ? ` --plan-phase ${state.current_plan_phase}` : '';
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial} --output "${getReviewFilePath(projectRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       return {

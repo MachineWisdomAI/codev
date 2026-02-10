@@ -41,6 +41,7 @@ interface ConsultOptions {
   reviewType?: string;
   role?: string;
   output?: string;
+  planPhase?: string;
 }
 
 // Valid review types
@@ -511,11 +512,16 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 /**
  * Build query for implementation review
  */
-function buildImplQuery(projectNumber: number, projectRoot: string): string {
+function buildImplQuery(projectNumber: number, projectRoot: string, planPhase?: string): string {
   const specPath = findSpec(projectRoot, projectNumber);
   const planPath = findPlan(projectRoot, projectNumber);
 
-  let query = `Review Implementation for Project ${projectNumber}
+  let query = `Review Implementation for Project ${projectNumber}`;
+  if (planPhase) {
+    query += ` — Phase: ${planPhase}`;
+  }
+
+  query += `
 
 You are in the project working directory. Read the files directly from the filesystem to review the implementation.
 
@@ -529,17 +535,32 @@ You are in the project working directory. Read the files directly from the files
     query += `- Plan: ${planPath}\n`;
   }
 
+  if (planPhase) {
+    query += `\n## REVIEW SCOPE — CURRENT PLAN PHASE ONLY\n`;
+    query += `You are reviewing **plan phase "${planPhase}" ONLY**.\n`;
+    query += `The plan file contains multiple phases. Read the plan, find the section for "${planPhase}", and scope your review to ONLY the work described in that phase.\n\n`;
+    query += `**DO NOT** request changes for work that belongs to other plan phases.\n`;
+    query += `**DO NOT** flag missing functionality that is scheduled for a later phase.\n`;
+    query += `**DO** verify that this phase's deliverables are complete and correct.\n`;
+  }
+
   query += `
 ## Instructions
 
 Read the spec and plan files above, then explore the source code to review the implementation. You have full filesystem access — read whatever files you need.
+`;
 
+  if (planPhase) {
+    query += `\n**IMPORTANT**: Only review work relevant to plan phase "${planPhase}". Other phases will be reviewed separately.\n`;
+  }
+
+  query += `
 Please review:
-1. **Spec Adherence**: Does the code fulfill the spec requirements?
+1. **Spec Adherence**: Does the code fulfill the spec requirements${planPhase ? ' for this phase' : ''}?
 2. **Code Quality**: Is the code readable, maintainable, and bug-free?
-3. **Test Coverage**: Are there adequate tests for the changes?
+3. **Test Coverage**: Are there adequate tests for the changes${planPhase ? ' in this phase' : ''}?
 4. **Error Handling**: Are edge cases and errors handled properly?
-5. **Plan Alignment**: Does the implementation follow the plan?
+5. **Plan Alignment**: Does the implementation follow the plan${planPhase ? ` for phase "${planPhase}"` : ''}?
 
 End your review with a verdict in this EXACT format:
 
@@ -692,10 +713,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
       }
       const specPath = findSpec(projectRoot, implNumber);
       const planPath = findPlan(projectRoot, implNumber);
-      query = buildImplQuery(implNumber, projectRoot);
+      query = buildImplQuery(implNumber, projectRoot, options.planPhase);
       console.error(`Project: ${implNumber}`);
       if (specPath) console.error(`Spec: ${specPath}`);
       if (planPath) console.error(`Plan: ${planPath}`);
+      if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
       break;
     }
 

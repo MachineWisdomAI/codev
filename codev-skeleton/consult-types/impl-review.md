@@ -55,6 +55,15 @@ KEY_ISSUES:
 - `REQUEST_CHANGES`: Issues that must be fixed before proceeding
 - `COMMENT`: Minor suggestions, can proceed but note feedback
 
+## Scoping (Multi-Phase Plans)
+
+When the implementation plan has multiple phases (e.g., scaffolding, landing, media_rtl):
+- **ONLY review work belonging to the current plan phase**
+- The query will specify which phase you are reviewing
+- Do NOT request changes for functionality scheduled in later phases
+- Do NOT flag missing features that are out of scope for this phase
+- If unsure whether something belongs to this phase, check the plan file
+
 ## Notes
 
 - This is a phase-level review, not the final PR review
