@@ -16,6 +16,7 @@ import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
+import { removeAllocation } from '../utils/port-registry.js';
 
 const TEST_TOWER_PORT = 14600;
 const STARTUP_TIMEOUT = 15_000;
@@ -129,5 +130,8 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     const data2 = await listRes2.json();
     const found2 = data2.projects.find((p: { path: string }) => p.path === tempProjectDir);
     expect(found2).toBeUndefined();
+
+    // Cleanup: remove the stale port_allocations entry from global.db
+    removeAllocation(tempProjectDir);
   });
 });
