@@ -1150,6 +1150,11 @@ async function getDirectorySuggestions(inputPath: string): Promise<{ path: strin
     inputPath = inputPath.replace('~', homedir());
   }
 
+  // Relative paths are meaningless for the tower daemon — only absolute paths
+  if (!path.isAbsolute(inputPath)) {
+    return [];
+  }
+
   // Determine the directory to list and the prefix to filter by
   let dirToList: string;
   let prefix: string;
@@ -2013,13 +2018,31 @@ const server = http.createServer(async (req, res) => {
     // API: Launch new instance
     if (req.method === 'POST' && url.pathname === '/api/launch') {
       const body = await parseJsonBody(req);
-      const projectPath = body.projectPath as string;
+      let projectPath = body.projectPath as string;
 
       if (!projectPath) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
         return;
       }
+
+      // Expand ~ to home directory
+      if (projectPath.startsWith('~')) {
+        projectPath = projectPath.replace('~', homedir());
+      }
+
+      // Reject relative paths — tower daemon CWD is unpredictable
+      if (!path.isAbsolute(projectPath)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: `Relative paths are not supported. Use an absolute path (e.g., /Users/.../project or ~/Development/project).`,
+        }));
+        return;
+      }
+
+      // Normalize path (resolve .. segments, trailing slashes)
+      projectPath = path.resolve(projectPath);
 
       const result = await launchInstance(projectPath);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
