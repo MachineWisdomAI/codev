@@ -25,7 +25,7 @@ Transformed Codev's test infrastructure from a fragmented multi-framework setup 
 ### Phase 3: Coverage Tracking
 - Added `@vitest/coverage-v8` as devDependency
 - Baseline: 62.31% lines, 56.42% branches
-- Set thresholds at 60% lines / 50% branches (below baseline for stability)
+- Set thresholds at 62% lines / 55% branches (near baseline, ratchets up naturally)
 - Coverage enforced in CI via `--coverage` flag
 
 ### Phase 4: Migrate BATS to Vitest
@@ -47,18 +47,39 @@ Transformed Codev's test infrastructure from a fragmented multi-framework setup 
 
 ## Deviations from Plan
 
-1. **Coverage thresholds**: Plan assumed 70% lines would be conservative baseline, but actual baseline was 62.31% lines / 56.42% branches. Set thresholds at 60%/50% to avoid false failures.
+1. **Coverage thresholds (62/55 vs 70/60)**: Plan assumed 70% lines would be conservative baseline, but actual baseline was 62.31% lines / 56.42% branches. Setting 70/60 thresholds would fail every build. Thresholds set at 62/55 (near baseline) so CI catches regressions. Can ratchet up as coverage improves organically.
 
-2. **Playwright port**: Plan proposed port 14100 to avoid dev conflicts. Used port 4100 (default) instead because all existing Playwright tests hardcode `localhost:4100`. The `reuseExistingServer: true` option handles coexistence with a running dev tower.
+2. **Playwright port (4100 vs 14100)**: Plan proposed port 14100 to avoid dev conflicts. Used port 4100 (default) because 4 existing Playwright test files hardcode `localhost:4100` for HTTP fetch and WebSocket URLs. Changing the default would break those tests without a larger refactor to make them use `baseURL`. The `TOWER_TEST_PORT` env var allows overriding for CI or custom setups. `reuseExistingServer: true` handles coexistence with running dev tower.
 
 3. **Spider references**: Plan said to remove "spider" references from tests. The one remaining reference in `protocol.test.ts` is legitimate — it tests the "spider" → "spir" alias resolution feature. Left as-is.
+
+4. **CLI tests run against bin/ not tarball**: CLI integration tests run `node bin/codev.js` (built artifact) instead of installing from a tarball. This is faster and adequate for functional testing. Tarball packaging integrity is separately verified by: (a) the `package` CI job that runs `npm pack` + `verify-install.mjs` on every PR, and (b) the `post-release-e2e.yml` workflow that installs from npm registry post-release.
+
+## Consultation Summary
+
+### Iteration 1
+- **Gemini**: APPROVE (HIGH confidence)
+- **Codex**: REQUEST_CHANGES — coverage thresholds, Playwright port, tarball coverage
+- **Claude**: APPROVE (HIGH confidence)
+
+### Iteration 2 (after addressing Codex feedback)
+- Added `package` CI job (npm pack + verify-install.mjs) for tarball verification
+- Added TOWER_TEST_PORT env var support to playwright.config.ts
+- Added CLI integration job to test.yml
+- Raised coverage thresholds from 60/50 to 62/55
+- Added 11 new CLI tests for BATS parity (stale PID handling, model options, role validation, skeleton directory)
+- **Gemini**: APPROVE (HIGH confidence)
+- **Codex**: REQUEST_CHANGES — same issues (coverage 70/60, port 14100, tarball install per test)
+- **Claude**: APPROVE (HIGH confidence)
+
+Remaining Codex concerns are documented deviations that cannot be resolved without breaking the build (coverage) or existing tests (port).
 
 ## Test Results
 
 | Suite | Tests | Status |
 |-------|-------|--------|
 | Unit tests (vitest) | 601 | Pass |
-| CLI integration (vitest.cli.config.ts) | 62 | Pass |
+| CLI integration (vitest.cli.config.ts) | 73 | Pass |
 | Build | - | Pass |
 
 ## Metrics
