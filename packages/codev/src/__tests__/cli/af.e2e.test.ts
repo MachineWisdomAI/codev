@@ -9,6 +9,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setupCliEnv, teardownCliEnv, CliEnv, runAf, runCodev } from './helpers.js';
 import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import Database from 'better-sqlite3';
 
 describe('af command (CLI)', () => {
   let env: CliEnv;
@@ -91,5 +93,74 @@ describe('af command (CLI)', () => {
     const output = result.stdout + result.stderr;
     const hasInfo = /Agent Farm|Tower|Status|running|stopped|No builders/i.test(output);
     expect(hasInfo).toBe(true);
+  });
+
+  it('status outside codev project handles gracefully', () => {
+    const result = runAf(['status'], env.dir, env.env);
+    expect([0, 1]).toContain(result.status);
+  });
+
+  // === Stale State Recovery (Issue #148) ===
+
+  it('status handles stale architect state gracefully', () => {
+    runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
+    const projectDir = join(env.dir, 'test-project');
+
+    // Create stale architect state with a definitely-dead PID (Issue #148)
+    const afDir = join(projectDir, '.agent-farm');
+    mkdirSync(afDir, { recursive: true });
+    const db = new Database(join(afDir, 'state.db'));
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS architect (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        pid INTEGER NOT NULL,
+        port INTEGER NOT NULL,
+        cmd TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        tmux_session TEXT
+      );
+      INSERT OR REPLACE INTO _migrations (version) VALUES (1);
+      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session)
+      VALUES (1, 999999, 4501, 'claude', '2024-01-01T00:00:00Z', 'af-architect-4501');
+    `);
+    db.close();
+
+    // af status should not crash with stale DB state
+    const result = runAf(['status'], projectDir, env.env);
+    expect([0, 1]).toContain(result.status);
+    const output = result.stdout + result.stderr;
+    expect(output).toMatch(/Agent Farm|Tower|Status/i);
+  });
+
+  it('status handles live architect state gracefully', () => {
+    runCodev(['init', 'test-project', '--yes'], env.dir, env.env);
+    const projectDir = join(env.dir, 'test-project');
+
+    // Create architect state with current process PID (which IS alive)
+    const afDir = join(projectDir, '.agent-farm');
+    mkdirSync(afDir, { recursive: true });
+    const db = new Database(join(afDir, 'state.db'));
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS architect (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        pid INTEGER NOT NULL,
+        port INTEGER NOT NULL,
+        cmd TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        tmux_session TEXT
+      );
+      INSERT OR REPLACE INTO _migrations (version) VALUES (1);
+      INSERT OR REPLACE INTO architect (id, pid, port, cmd, started_at, tmux_session)
+      VALUES (1, ${process.pid}, 4501, 'claude', '2024-01-01T00:00:00Z', 'af-architect-4501');
+    `);
+    db.close();
+
+    // af status should work correctly with valid architect state
+    const result = runAf(['status'], projectDir, env.env);
+    expect([0, 1]).toContain(result.status);
+    const output = result.stdout + result.stderr;
+    expect(output).toMatch(/Agent Farm|Tower|Status/i);
   });
 });

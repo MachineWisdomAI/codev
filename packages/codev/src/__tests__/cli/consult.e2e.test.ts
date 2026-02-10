@@ -114,4 +114,43 @@ describe('consult command (CLI)', () => {
     const result = runConsult(['--help'], env.dir, env.env);
     expect(result.stdout).toContain('dry');
   });
+
+  // === Model Options ===
+
+  it('accepts --model gemini option', () => {
+    const result = runConsult(['--model', 'gemini', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+  });
+
+  it('accepts --model codex option', () => {
+    const result = runConsult(['--model', 'codex', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+  });
+
+  it('accepts --model claude option', () => {
+    const result = runConsult(['--model', 'claude', '--help'], env.dir, env.env);
+    expect(result.status).toBe(0);
+  });
+
+  // === Role Validation ===
+
+  it('--role accepts hyphens and underscores in names', () => {
+    const result = runConsult(
+      ['--model', 'gemini', '--role', 'my-custom_role123', 'general', 'test', '--dry-run'],
+      env.dir, env.env
+    );
+    const output = result.stdout + result.stderr;
+    // Should fail because the role doesn't exist, NOT because the name is invalid
+    expect(output).not.toContain('Invalid role name');
+  });
+
+  it('--role with nonexistent role shows helpful error', () => {
+    const result = runConsult(
+      ['--model', 'gemini', '--role', 'nonexistent-role-xyz', 'general', 'test', '--dry-run'],
+      env.dir, env.env
+    );
+    expect(result.status).not.toBe(0);
+    const output = result.stdout + result.stderr;
+    expect(output).toMatch(/Available roles|No custom roles found|not found|does not exist/i);
+  });
 });

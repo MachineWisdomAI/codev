@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   setupCliEnv, teardownCliEnv, CliEnv,
   runCodev, runAf, runConsult,
@@ -81,5 +82,22 @@ describe('package installation (CLI)', () => {
   it('af fails gracefully with unknown command', () => {
     const result = runAf(['unknown-command-that-does-not-exist'], env.dir, env.env);
     expect(result.status).not.toBe(0);
+  });
+
+  it('consult --version returns a version string', () => {
+    const result = runConsult(['--version'], env.dir, env.env);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  it('skeleton directory is included in package', () => {
+    // Verify skeleton/ dir exists alongside dist/ — critical for runtime protocol resolution
+    const skeletonDir = resolve(CODEV_BIN, '../../skeleton');
+    expect(existsSync(skeletonDir)).toBe(true);
+  });
+
+  it('dist directory is included in package', () => {
+    const distDir = resolve(CODEV_BIN, '../../dist');
+    expect(existsSync(distDir)).toBe(true);
   });
 });
