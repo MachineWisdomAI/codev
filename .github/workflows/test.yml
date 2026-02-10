@@ -22,9 +22,9 @@ jobs:
         working-directory: packages/codev
         run: npm install
 
-      - name: Run unit tests
+      - name: Run unit tests with coverage
         working-directory: packages/codev
-        run: npx vitest run
+        run: npx vitest run --coverage
 
   integration:
     name: Tower Integration Tests

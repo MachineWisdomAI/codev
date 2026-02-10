@@ -18,5 +18,20 @@ export default defineConfig({
       '**/worktrees/**',             // Git worktrees have their own test files
       '**/.builders/**',             // Builder worktrees
     ],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      thresholds: {
+        lines: 60,
+        branches: 50,
+      },
+      exclude: [
+        '**/dist/**',
+        '**/e2e/**',
+        '**/__tests__/**',
+        '**/dashboard/**',
+        '**/*.e2e.test.ts',
+      ],
+    },
   },
 });
