@@ -1055,6 +1055,11 @@ async function getInstances(): Promise<InstanceStatus[]> {
     if (allocation.project_path.includes('/.builders/')) {
       continue;
     }
+
+    // Skip projects whose directories no longer exist on disk (e.g. cleaned-up test temp dirs)
+    if (!allocation.project_path.startsWith('remote:') && !fs.existsSync(allocation.project_path)) {
+      continue;
+    }
     const basePort = allocation.base_port;
     const dashboardPort = basePort;
 
