@@ -74,6 +74,34 @@ jobs:
         working-directory: packages/codev
         run: npx vitest run --config vitest.cli.config.ts
 
+  package:
+    name: Package Install Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: packages/codev
+        run: npm install
+
+      - name: Build package
+        working-directory: packages/codev
+        run: npm run build
+
+      - name: Pack tarball
+        working-directory: packages/codev
+        run: npm pack
+
+      - name: Verify install from tarball
+        working-directory: packages/codev
+        run: node scripts/verify-install.mjs cluesmith-codev-*.tgz
+
   playwright:
     name: Dashboard Tests
     runs-on: ubuntu-latest
