@@ -3,11 +3,12 @@
  *
  * After running Playwright E2E tests, temp directories created by tests
  * appeared in the Tower UI under "Recent Projects". The root cause was that
- * test teardown deleted temp dirs from disk but left stale entries in
- * global.db's port_allocations table.
+ * test cleanup didn't reliably remove temp dirs from disk, and the original
+ * existsSync check only filtered deleted directories.
  *
- * This test verifies that GET /api/projects filters out projects whose
- * directories no longer exist on disk.
+ * This test verifies that:
+ * 1. GET /api/projects filters out projects whose directories no longer exist
+ * 2. GET /api/status filters out projects in temp directories even if they still exist
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -133,5 +134,42 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
 
     // Cleanup: remove the stale port_allocations entry from global.db
     removeAllocation(tempProjectDir);
+  });
+
+  it('filters temp directory projects from /api/status even when directory still exists', async () => {
+    const base = `http://localhost:${TEST_TOWER_PORT}`;
+
+    // Create a temp project that will NOT be deleted (the actual bug scenario)
+    const tempProjectDir = realpathSync(mkdtempSync(resolve(tmpdir(), 'bugfix-202-exists-')));
+    mkdirSync(resolve(tempProjectDir, 'codev'), { recursive: true });
+    writeFileSync(
+      resolve(tempProjectDir, 'af-config.json'),
+      JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+    );
+
+    const encodedPath = toBase64URL(tempProjectDir);
+
+    try {
+      // Activate the project
+      const activateRes = await fetch(`${base}/api/projects/${encodedPath}/activate`, {
+        method: 'POST',
+      });
+      expect(activateRes.ok).toBe(true);
+
+      // Deactivate so it becomes a "recent" project
+      await fetch(`${base}/api/projects/${encodedPath}/deactivate`, { method: 'POST' });
+
+      // The directory still exists, but /api/status should filter it out
+      const statusRes = await fetch(`${base}/api/status`);
+      expect(statusRes.ok).toBe(true);
+      const statusData = await statusRes.json();
+      const found = statusData.instances.find(
+        (i: { projectPath: string }) => i.projectPath === tempProjectDir
+      );
+      expect(found).toBeUndefined();
+    } finally {
+      removeAllocation(tempProjectDir);
+      rmSync(tempProjectDir, { recursive: true, force: true });
+    }
   });
 });

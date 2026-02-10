@@ -11,7 +11,7 @@ import path from 'node:path';
 import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn, execSync, spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -1042,6 +1042,25 @@ async function getTerminalsForProject(
   return { terminals, gateStatus };
 }
 
+// Resolve once at module load: both symlinked and real temp dir paths
+const _tmpDir = tmpdir();
+const _tmpDirResolved = (() => {
+  try {
+    return fs.realpathSync(_tmpDir);
+  } catch {
+    return _tmpDir;
+  }
+})();
+
+function isTempDirectory(projectPath: string): boolean {
+  return (
+    projectPath.startsWith(_tmpDir + '/') ||
+    projectPath.startsWith(_tmpDirResolved + '/') ||
+    projectPath.startsWith('/tmp/') ||
+    projectPath.startsWith('/private/tmp/')
+  );
+}
+
 /**
  * Get all instances with their status
  */
@@ -1055,9 +1074,14 @@ async function getInstances(): Promise<InstanceStatus[]> {
       continue;
     }
 
-    // Skip projects whose directories no longer exist on disk (e.g. cleaned-up test temp dirs)
-    if (!allocation.project_path.startsWith('remote:') && !fs.existsSync(allocation.project_path)) {
-      continue;
+    // Skip projects in temp directories (e.g. test artifacts) or whose directories no longer exist
+    if (!allocation.project_path.startsWith('remote:')) {
+      if (!fs.existsSync(allocation.project_path)) {
+        continue;
+      }
+      if (isTempDirectory(allocation.project_path)) {
+        continue;
+      }
     }
     const basePort = allocation.base_port;
     const dashboardPort = basePort;
