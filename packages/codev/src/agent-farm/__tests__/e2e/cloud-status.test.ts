@@ -13,9 +13,11 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import path from 'node:path';
 
 const TOWER_URL = process.env.TOWER_URL || 'http://localhost:4100';
-const PROJECT_PATH = process.env.PROJECT_PATH || '/Users/mwk/Development/cluesmith/codev-public';
+// Derive project root from this file's location (packages/codev/src/agent-farm/__tests__/e2e/)
+const PROJECT_PATH = process.env.PROJECT_PATH || path.resolve(import.meta.dirname, '../../../../../..');
 const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
 const PAGE_URL = `${TOWER_URL}/project/${ENCODED_PATH}/`;
 const BASE_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;

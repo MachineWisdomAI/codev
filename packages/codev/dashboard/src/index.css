@@ -945,6 +945,12 @@ body {
 
 .cloud-dot--yellow {
   background: var(--status-waiting);
+  animation: cloud-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cloud-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .cloud-dot--red {
