@@ -307,4 +307,114 @@ describe('tunnel edge cases (Phase 7)', () => {
       expect(uptimeAfter).toBeLessThan(uptimeBefore);
     });
   });
+
+  describe('config-related tunnel behavior', () => {
+    // Note: Config parsing edge cases (missing fields, invalid JSON, nonexistent file)
+    // are thoroughly tested in cloud-config.test.ts. Here we test the tunnel client's
+    // behavior when config-derived parameters are invalid.
+
+    it('handles connection with empty towerId gracefully', async () => {
+      await setup();
+
+      // TunnelClient with empty towerId (as would happen with partial config)
+      const localClient = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort: mockServer.port,
+        apiKey: 'ctk_test_key',
+        towerId: '', // Empty tower ID
+        localPort: echoPort,
+        usePlainTcp: true,
+      });
+
+      localClient.connect();
+      try {
+        // Should still connect — tower ID is sent as metadata, not auth
+        await waitFor(() => localClient.getState() === 'connected');
+        expect(localClient.getState()).toBe('connected');
+      } finally {
+        localClient.disconnect();
+      }
+    });
+
+    it('handles connection to unreachable server without crashing', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // Point to a port that's not listening
+      const localClient = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort: 59999, // Not listening
+        apiKey: 'ctk_test_key',
+        towerId: 'test-tower',
+        localPort: 4100,
+        usePlainTcp: true,
+      });
+
+      localClient.connect();
+
+      // Wait for connection attempt to fail
+      await waitFor(() => localClient.getState() === 'disconnected', 5000);
+      expect(localClient.getState()).toBe('disconnected');
+
+      localClient.disconnect();
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('non-functional: latency benchmarks', () => {
+    it('proxied HTTP requests have <100ms overhead p95', async () => {
+      await setup();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Warm up
+      await mockServer.sendRequest({ path: '/warmup' });
+
+      // Measure latency for 20 requests
+      const latencies: number[] = [];
+      for (let i = 0; i < 20; i++) {
+        const start = performance.now();
+        await mockServer.sendRequest({ path: `/api/bench/${i}` });
+        latencies.push(performance.now() - start);
+      }
+
+      latencies.sort((a, b) => a - b);
+      const p50 = latencies[Math.floor(latencies.length * 0.5)];
+      const p95 = latencies[Math.floor(latencies.length * 0.95)];
+      const p99 = latencies[Math.floor(latencies.length * 0.99)];
+
+      // Advisory: log benchmarks for visibility
+      console.log(`Tunnel latency — p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`);
+
+      // Target: <100ms overhead (generous threshold for CI — 2x spec target)
+      expect(p95).toBeLessThan(200);
+    });
+  });
+
+  describe('non-functional: memory under load', () => {
+    it('stays within bounds during 50 concurrent requests', async () => {
+      await setup();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Baseline memory
+      global.gc?.();
+      const before = process.memoryUsage().heapUsed;
+
+      // Send 50 concurrent requests
+      const requests = Array.from({ length: 50 }, (_, i) =>
+        mockServer.sendRequest({ path: `/api/mem/${i}` }),
+      );
+      await Promise.all(requests);
+
+      const after = process.memoryUsage().heapUsed;
+      const deltaBytes = after - before;
+      const deltaMB = deltaBytes / (1024 * 1024);
+
+      console.log(`Memory delta during 50 concurrent requests: ${deltaMB.toFixed(2)}MB`);
+
+      // Target: <50MB additional memory (spec target)
+      expect(deltaMB).toBeLessThan(50);
+    });
+  });
 });
