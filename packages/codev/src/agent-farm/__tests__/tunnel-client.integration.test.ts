@@ -365,6 +365,21 @@ describe('tunnel-client integration', () => {
       await new Promise((r) => setTimeout(r, 500));
       expect(client.getState()).toBe('disconnected');
     });
+
+    it('can reconnect after deliberate disconnect', async () => {
+      await setupTunnel();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      client.disconnect();
+      expect(client.getState()).toBe('disconnected');
+
+      // Re-connect should work
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+      expect(client.getState()).toBe('connected');
+    });
   });
 
   describe('metadata', () => {

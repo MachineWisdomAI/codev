@@ -142,8 +142,8 @@ export class TunnelClient {
    * Initiate tunnel connection. Non-blocking — connection happens asynchronously.
    */
   connect(): void {
-    if (this.destroyed) return;
     if (this.state === 'connecting' || this.state === 'connected') return;
+    this.destroyed = false;
     this.clearReconnectTimer();
     this.doConnect();
   }
