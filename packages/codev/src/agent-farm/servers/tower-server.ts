@@ -796,9 +796,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
     terminalManager.shutdown();
   }
 
-  // 4. Stop cloudflared tunnel if running
-  stopTunnel();
-
   log('INFO', 'Graceful shutdown complete');
   process.exit(0);
 }
@@ -923,81 +920,6 @@ async function getBasePortForProject(projectPath: string): Promise<number | null
   } catch {
     return null;
   }
-}
-
-// Cloudflared tunnel management
-let tunnelProcess: ReturnType<typeof spawn> | null = null;
-let tunnelUrl: string | null = null;
-
-function isCloudflaredInstalled(): boolean {
-  try {
-    execSync('which cloudflared', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getTunnelStatus(): { available: boolean; running: boolean; url: string | null } {
-  return {
-    available: isCloudflaredInstalled(),
-    running: tunnelProcess !== null && tunnelUrl !== null,
-    url: tunnelUrl,
-  };
-}
-
-async function startTunnel(port: number): Promise<{ success: boolean; url?: string; error?: string }> {
-  if (!isCloudflaredInstalled()) {
-    return { success: false, error: 'cloudflared not installed. Install with: brew install cloudflared' };
-  }
-
-  if (tunnelProcess) {
-    return { success: true, url: tunnelUrl || undefined };
-  }
-
-  return new Promise((resolve) => {
-    tunnelProcess = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const handleOutput = (data: Buffer) => {
-      const text = data.toString();
-      const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-      if (match && !tunnelUrl) {
-        tunnelUrl = match[0];
-        log('INFO', `Cloudflared tunnel started: ${tunnelUrl}`);
-        resolve({ success: true, url: tunnelUrl });
-      }
-    };
-
-    tunnelProcess.stdout?.on('data', handleOutput);
-    tunnelProcess.stderr?.on('data', handleOutput);
-
-    tunnelProcess.on('close', (code) => {
-      log('INFO', `Cloudflared tunnel closed with code ${code}`);
-      tunnelProcess = null;
-      tunnelUrl = null;
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      if (!tunnelUrl) {
-        tunnelProcess?.kill();
-        tunnelProcess = null;
-        resolve({ success: false, error: 'Tunnel startup timed out' });
-      }
-    }, 30000);
-  });
-}
-
-function stopTunnel(): { success: boolean } {
-  if (tunnelProcess) {
-    tunnelProcess.kill();
-    tunnelProcess = null;
-    tunnelUrl = null;
-    log('INFO', 'Cloudflared tunnel stopped');
-  }
-  return { success: true };
 }
 
 // SSE (Server-Sent Events) infrastructure for push notifications
@@ -2263,30 +2185,6 @@ const server = http.createServer(async (req, res) => {
 
       const result = await launchInstance(projectPath);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-      return;
-    }
-
-    // API: Get tunnel status (cloudflared availability and running tunnel)
-    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
-      const status = getTunnelStatus();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(status));
-      return;
-    }
-
-    // API: Start cloudflared tunnel
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/start') {
-      const result = await startTunnel(port);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(result));
-      return;
-    }
-
-    // API: Stop cloudflared tunnel
-    if (req.method === 'POST' && url.pathname === '/api/tunnel/stop') {
-      const result = stopTunnel();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
       return;
     }
