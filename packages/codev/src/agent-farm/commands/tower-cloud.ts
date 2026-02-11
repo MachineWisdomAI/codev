@@ -291,6 +291,7 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 
   logger.blank();
   logger.header('Cloud Connection');
+  logger.kv('Registration', 'registered');
   logger.kv('Tower Name', config.tower_name);
   logger.kv('Tower ID', config.tower_id);
   logger.kv('Server', config.server_url);
@@ -314,7 +315,7 @@ export async function towerCloudStatus(port?: number): Promise<void> {
 }
 
 /**
- * Format uptime in seconds to a human-readable string.
+ * Format uptime in milliseconds to a human-readable string.
  */
 function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
