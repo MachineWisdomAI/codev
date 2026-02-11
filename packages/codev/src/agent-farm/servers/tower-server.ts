@@ -267,19 +267,6 @@ function deleteProjectTerminalSessions(projectPath: string): void {
   }
 }
 
-/**
- * Look up a single terminal session by ID from SQLite.
- * Used by /api/state to find tmux session names for reconnection.
- */
-function getTerminalSessionById(terminalId: string): DbTerminalSession | null {
-  try {
-    const db = getGlobalDb();
-    return (db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get(terminalId) as DbTerminalSession) || null;
-  } catch {
-    return null;
-  }
-}
-
 // Whether tmux is available on this system (checked once at startup)
 let tmuxAvailable = false;
 
@@ -393,102 +380,255 @@ function killTmuxSession(sessionName: string): void {
   }
 }
 
+// ============================================================================
+// Tmux-First Discovery (tmux is source of truth for existence)
+// ============================================================================
+
 /**
- * Reconcile terminal sessions from SQLite against reality on startup.
- *
- * For sessions with surviving tmux sessions: re-attach via new node-pty,
- * register in projectTerminals, and update SQLite with new terminal ID.
- * For dead sessions: clean up SQLite rows and kill orphaned processes.
+ * Parsed metadata from a tmux session name.
+ * Our naming convention: architect-{basename}, builder-{basename}-{specId}, shell-{basename}-{shellId}
  */
-async function reconcileTerminalSessions(): Promise<void> {
-  const db = getGlobalDb();
-  let sessions: DbTerminalSession[];
+interface ParsedTmuxSession {
+  type: 'architect' | 'builder' | 'shell';
+  projectBasename: string;
+  roleId: string | null;  // specId for builders, shellId for shells, null for architect
+}
+
+/**
+ * Parse a codev tmux session name to extract type, project, and role.
+ * Returns null if the name doesn't match any known codev pattern.
+ *
+ * Examples:
+ *   "architect-codev-public"           → { type: 'architect', projectBasename: 'codev-public', roleId: null }
+ *   "builder-codevos_ai-0001"          → { type: 'builder', projectBasename: 'codevos_ai', roleId: '0001' }
+ *   "shell-codev-public-shell-1"       → { type: 'shell', projectBasename: 'codev-public', roleId: 'shell-1' }
+ */
+function parseTmuxSessionName(name: string): ParsedTmuxSession | null {
+  // architect-{basename}
+  const architectMatch = name.match(/^architect-(.+)$/);
+  if (architectMatch) {
+    return { type: 'architect', projectBasename: architectMatch[1], roleId: null };
+  }
+
+  // builder-{basename}-{specId} — specId is always the last segment (digits like "0001")
+  const builderMatch = name.match(/^builder-(.+)-(\d{4,})$/);
+  if (builderMatch) {
+    return { type: 'builder', projectBasename: builderMatch[1], roleId: builderMatch[2] };
+  }
+
+  // shell-{basename}-{shellId} — shellId is "shell-N" (last two segments)
+  const shellMatch = name.match(/^shell-(.+)-(shell-\d+)$/);
+  if (shellMatch) {
+    return { type: 'shell', projectBasename: shellMatch[1], roleId: shellMatch[2] };
+  }
+
+  return null;
+}
+
+/**
+ * List all tmux sessions that match codev naming conventions.
+ * Returns an array of { tmuxName, parsed } for each matching session.
+ */
+// Cache for listCodevTmuxSessions — avoid shelling out on every dashboard poll
+let _tmuxListCache: Array<{ tmuxName: string; parsed: ParsedTmuxSession }> = [];
+let _tmuxListCacheTime = 0;
+const TMUX_LIST_CACHE_TTL = 10_000;  // 10 seconds
+
+function listCodevTmuxSessions(bypassCache = false): Array<{ tmuxName: string; parsed: ParsedTmuxSession }> {
+  if (!tmuxAvailable) return [];
+
+  const now = Date.now();
+  if (!bypassCache && now - _tmuxListCacheTime < TMUX_LIST_CACHE_TTL) {
+    return _tmuxListCache;
+  }
 
   try {
-    sessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
-  } catch (err) {
-    log('WARN', `Failed to read terminal sessions for reconciliation: ${(err as Error).message}`);
-    return;
+    const result = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', { encoding: 'utf-8' });
+    const sessions = result.trim().split('\n').filter(Boolean);
+    const codevSessions: Array<{ tmuxName: string; parsed: ParsedTmuxSession }> = [];
+
+    for (const name of sessions) {
+      const parsed = parseTmuxSessionName(name);
+      if (parsed) {
+        codevSessions.push({ tmuxName: name, parsed });
+      }
+    }
+
+    _tmuxListCache = codevSessions;
+    _tmuxListCacheTime = now;
+    return codevSessions;
+  } catch {
+    _tmuxListCache = [];
+    _tmuxListCacheTime = now;
+    return [];
+  }
+}
+
+/**
+ * Find the SQLite row that matches a given tmux session name.
+ * Looks up by tmux_session column directly.
+ */
+function findSqliteRowForTmuxSession(tmuxName: string): DbTerminalSession | null {
+  try {
+    const db = getGlobalDb();
+    return (db.prepare('SELECT * FROM terminal_sessions WHERE tmux_session = ?').get(tmuxName) as DbTerminalSession) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find the full project path for a tmux session's project basename.
+ * Checks active port allocations (which have full paths) for a matching basename.
+ * Returns null if no match found.
+ */
+function resolveProjectPathFromBasename(projectBasename: string): string | null {
+  const allocations = loadPortAllocations();
+  for (const alloc of allocations) {
+    if (path.basename(alloc.project_path) === projectBasename) {
+      return normalizeProjectPath(alloc.project_path);
+    }
   }
 
-  if (sessions.length === 0) {
-    log('INFO', 'No terminal sessions to reconcile');
-    return;
+  // Also check projectTerminals cache (may have entries not yet in allocations)
+  for (const [projectPath] of projectTerminals) {
+    if (path.basename(projectPath) === projectBasename) {
+      return projectPath;
+    }
   }
 
-  log('INFO', `Reconciling ${sessions.length} terminal sessions from previous run...`);
+  return null;
+}
 
+/**
+ * Reconcile terminal sessions on startup.
+ *
+ * STRATEGY: tmux is the source of truth for existence.
+ *
+ * Phase 1 — tmux-first discovery:
+ *   List all codev tmux sessions. For each, look up SQLite for metadata.
+ *   If SQLite has a matching row → reconnect with full metadata.
+ *   If SQLite has no row (orphaned tmux) → derive metadata from session name, reconnect.
+ *
+ * Phase 2 — SQLite sweep:
+ *   Any SQLite rows not matched to a tmux session are stale → clean up.
+ *   (Also kills orphaned processes that have no tmux backing.)
+ */
+async function reconcileTerminalSessions(): Promise<void> {
   const manager = getTerminalManager();
+  const db = getGlobalDb();
+
+  // Phase 1: Discover living tmux sessions (bypass cache on startup)
+  const liveTmuxSessions = listCodevTmuxSessions(/* bypassCache */ true);
+
+  // Track which SQLite rows we matched (by tmux_session name)
+  const matchedTmuxNames = new Set<string>();
+
   let reconnected = 0;
+  let orphanReconnected = 0;
+
+  if (liveTmuxSessions.length > 0) {
+    log('INFO', `Found ${liveTmuxSessions.length} live codev tmux session(s) — reconnecting...`);
+  }
+
+  for (const { tmuxName, parsed } of liveTmuxSessions) {
+    // Look up SQLite for this tmux session's metadata
+    const dbRow = findSqliteRowForTmuxSession(tmuxName);
+    matchedTmuxNames.add(tmuxName);
+
+    // Determine metadata — prefer SQLite, fall back to parsed name
+    const projectPath = dbRow?.project_path || resolveProjectPathFromBasename(parsed.projectBasename);
+    const type = dbRow?.type || parsed.type;
+    const roleId = dbRow?.role_id || parsed.roleId;
+
+    if (!projectPath) {
+      log('WARN', `Cannot resolve project path for tmux session "${tmuxName}" (basename: ${parsed.projectBasename}) — skipping`);
+      continue;
+    }
+
+    try {
+      const label = type === 'architect' ? 'Architect' : `${type} ${roleId || 'unknown'}`;
+      const newSession = await manager.createSession({
+        command: 'tmux',
+        args: ['attach-session', '-t', tmuxName],
+        cwd: projectPath,
+        label,
+      });
+
+      // Register in projectTerminals Map
+      const entry = getProjectTerminalsEntry(projectPath);
+      if (type === 'architect') {
+        entry.architect = newSession.id;
+      } else if (type === 'builder') {
+        entry.builders.set(roleId || tmuxName, newSession.id);
+      } else if (type === 'shell') {
+        entry.shells.set(roleId || tmuxName, newSession.id);
+      }
+
+      // Update SQLite: delete old row (if any), insert fresh one
+      if (dbRow) {
+        db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
+      }
+      saveTerminalSession(newSession.id, projectPath, type, roleId, newSession.pid, tmuxName);
+
+      if (dbRow) {
+        log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);
+        reconnected++;
+      } else {
+        log('INFO', `Recovered orphaned tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)}) [no SQLite row]`);
+        orphanReconnected++;
+      }
+    } catch (err) {
+      log('WARN', `Failed to reconnect to tmux "${tmuxName}": ${(err as Error).message}`);
+    }
+  }
+
+  // Phase 2: Sweep stale SQLite rows (those with no matching live tmux session)
   let killed = 0;
   let cleaned = 0;
 
-  for (const session of sessions) {
-    // Can we reconnect to a surviving tmux session?
-    if (session.tmux_session && tmuxAvailable && tmuxSessionExists(session.tmux_session)) {
-      try {
-        // Create new node-pty that attaches to the surviving tmux session
-        const newSession = await manager.createSession({
-          command: 'tmux',
-          args: ['attach-session', '-t', session.tmux_session],
-          cwd: session.project_path,
-          label: session.type === 'architect' ? 'Architect' : `${session.type} ${session.role_id || session.id}`,
-        });
+  let allDbSessions: DbTerminalSession[];
+  try {
+    allDbSessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
+  } catch (err) {
+    log('WARN', `Failed to read terminal sessions for sweep: ${(err as Error).message}`);
+    allDbSessions = [];
+  }
 
-        // Register in projectTerminals Map
-        const entry = getProjectTerminalsEntry(session.project_path);
-        if (session.type === 'architect') {
-          entry.architect = newSession.id;
-        } else if (session.type === 'builder') {
-          const builderId = session.role_id || session.id;
-          entry.builders.set(builderId, newSession.id);
-        } else if (session.type === 'shell') {
-          const shellId = session.role_id || session.id;
-          entry.shells.set(shellId, newSession.id);
-        }
-
-        // Update SQLite: delete old row, insert new with new terminal ID
-        db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
-        saveTerminalSession(
-          newSession.id,
-          session.project_path,
-          session.type,
-          session.role_id,
-          newSession.pid,
-          session.tmux_session
-        );
-
-        log('INFO', `Reconnected to tmux session "${session.tmux_session}" → terminal ${newSession.id} (${session.type} for ${path.basename(session.project_path)})`);
-        reconnected++;
-        continue;
-      } catch (err) {
-        log('WARN', `Failed to reconnect to tmux session "${session.tmux_session}": ${(err as Error).message}`);
-        // Fall through to cleanup
-        killTmuxSession(session.tmux_session);
-        killed++;
-      }
+  for (const session of allDbSessions) {
+    // Skip rows that were already reconnected in Phase 1
+    if (session.tmux_session && matchedTmuxNames.has(session.tmux_session)) {
+      continue;
     }
-    // No tmux or tmux session dead — check for orphaned processes
-    else if (session.tmux_session && tmuxSessionExists(session.tmux_session)) {
-      // tmux exists but tmuxAvailable is false (shouldn't happen, but be safe)
-      killTmuxSession(session.tmux_session);
-      killed++;
-    } else if (session.pid && processExists(session.pid)) {
-      log('INFO', `Found orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
+
+    // Also skip rows whose terminal is still alive in PtyManager
+    // (non-tmux sessions created during this Tower run)
+    const existing = manager.getSession(session.id);
+    if (existing && existing.status !== 'exited') {
+      continue;
+    }
+
+    // Stale row — kill orphaned process if any, then delete
+    if (session.pid && processExists(session.pid)) {
+      log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
       try {
         process.kill(session.pid, 'SIGTERM');
         killed++;
       } catch {
-        // Process may not be killable (different user, etc)
+        // Process may not be killable
       }
     }
 
-    // Clean up the DB row for sessions we couldn't reconnect
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
     cleaned++;
   }
 
-  log('INFO', `Reconciliation complete: ${reconnected} reconnected, ${killed} orphaned killed, ${cleaned} cleaned up`);
+  const total = reconnected + orphanReconnected;
+  if (total > 0 || killed > 0 || cleaned > 0) {
+    log('INFO', `Reconciliation complete: ${reconnected} reconnected, ${orphanReconnected} orphan-recovered, ${killed} killed, ${cleaned} stale rows cleaned`);
+  } else {
+    log('INFO', 'No terminal sessions to reconcile');
+  }
 }
 
 /**
@@ -934,7 +1074,7 @@ async function getTerminalsForProject(
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
-  // SQLite is authoritative - query it first (Spec 0090 requirement)
+  // Query SQLite first, then augment with tmux discovery
   const dbSessions = getTerminalSessionsForProject(projectPath);
 
   // Use normalized path for cache consistency
@@ -1059,6 +1199,53 @@ async function getTerminalsForProject(
           });
         }
       }
+    }
+  }
+
+  // Phase 3: tmux discovery — find tmux sessions for this project that are
+  // missing from both SQLite and the in-memory cache.
+  // This is the safety net: if SQLite rows got deleted but tmux survived,
+  // the session will still appear in the dashboard.
+  const projectBasename = sanitizeTmuxSessionName(path.basename(normalizedPath));
+  const liveTmux = listCodevTmuxSessions();
+  for (const { tmuxName, parsed } of liveTmux) {
+    // Only process sessions whose sanitized project basename matches
+    if (parsed.projectBasename !== projectBasename) continue;
+
+    // Skip if we already have this session registered (from SQLite or in-memory)
+    const alreadyRegistered =
+      (parsed.type === 'architect' && freshEntry.architect) ||
+      (parsed.type === 'builder' && parsed.roleId && freshEntry.builders.has(parsed.roleId)) ||
+      (parsed.type === 'shell' && parsed.roleId && freshEntry.shells.has(parsed.roleId));
+    if (alreadyRegistered) continue;
+
+    // Orphaned tmux session — reconnect it
+    try {
+      const label = parsed.type === 'architect' ? 'Architect' : `${parsed.type} ${parsed.roleId || 'unknown'}`;
+      const newSession = await manager.createSession({
+        command: 'tmux',
+        args: ['attach-session', '-t', tmuxName],
+        cwd: normalizedPath,
+        label,
+      });
+
+      const roleId = parsed.roleId;
+      if (parsed.type === 'architect') {
+        freshEntry.architect = newSession.id;
+        terminals.push({ type: 'architect', id: 'architect', label: 'Architect', url: `${proxyUrl}?tab=architect`, active: true });
+      } else if (parsed.type === 'builder' && roleId) {
+        freshEntry.builders.set(roleId, newSession.id);
+        terminals.push({ type: 'builder', id: roleId, label: `Builder ${roleId}`, url: `${proxyUrl}?tab=builder-${roleId}`, active: true });
+      } else if (parsed.type === 'shell' && roleId) {
+        freshEntry.shells.set(roleId, newSession.id);
+        terminals.push({ type: 'shell', id: roleId, label: `Shell ${roleId.replace('shell-', '')}`, url: `${proxyUrl}?tab=shell-${roleId}`, active: true });
+      }
+
+      // Persist to SQLite so future polls find it directly
+      saveTerminalSession(newSession.id, normalizedPath, parsed.type, roleId, newSession.pid, tmuxName);
+      log('INFO', `[tmux-discovery] Recovered orphaned tmux "${tmuxName}" → ${newSession.id} (${parsed.type})`);
+    } catch (err) {
+      log('WARN', `[tmux-discovery] Failed to recover tmux "${tmuxName}": ${(err as Error).message}`);
     }
   }
 
@@ -2239,6 +2426,13 @@ const server = http.createServer(async (req, res) => {
 
         // GET /api/state - Return project state (architect, builders, shells)
         if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
+          // Refresh cache via getTerminalsForProject (handles SQLite sync,
+          // tmux reconnection, and tmux discovery in one place)
+          const encodedPath = Buffer.from(projectPath).toString('base64url');
+          const proxyUrl = `/project/${encodedPath}/`;
+          await getTerminalsForProject(projectPath, proxyUrl);
+
+          // Now read from the refreshed cache
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
@@ -2260,83 +2454,32 @@ const server = http.createServer(async (req, res) => {
           // Add architect if exists
           if (entry.architect) {
             const session = manager.getSession(entry.architect);
-            state.architect = {
-              port: basePort || 0,
-              pid: session?.pid || 0,
-              terminalId: entry.architect,
-            };
+            if (session) {
+              state.architect = {
+                port: basePort || 0,
+                pid: session.pid || 0,
+                terminalId: entry.architect,
+              };
+            }
           }
 
-          // Add shells (attempt tmux reconnection for stale sessions before removing)
-          const staleShellIds: string[] = [];
+          // Add shells from refreshed cache
           for (const [shellId, terminalId] of entry.shells) {
-            let session = manager.getSession(terminalId);
-            if (!session || session.status === 'exited') {
-              // Check SQLite for tmux session name and attempt reconnection
-              const dbRow = getTerminalSessionById(terminalId);
-              if (dbRow?.tmux_session && tmuxAvailable && tmuxSessionExists(dbRow.tmux_session)) {
-                try {
-                  const newSession = await manager.createSession({
-                    command: 'tmux', args: ['attach-session', '-t', dbRow.tmux_session],
-                    cwd: dbRow.project_path,
-                    label: `Shell ${shellId.replace('shell-', '')}`,
-                  });
-                  deleteTerminalSession(terminalId);
-                  saveTerminalSession(newSession.id, dbRow.project_path, 'shell', dbRow.role_id, newSession.pid, dbRow.tmux_session);
-                  entry.shells.set(shellId, newSession.id);
-                  session = manager.getSession(newSession.id);
-                  log('INFO', `[/api/state] Reconnected shell "${shellId}" to tmux "${dbRow.tmux_session}" → ${newSession.id}`);
-                } catch (err) {
-                  log('WARN', `[/api/state] Failed to reconnect shell tmux "${dbRow.tmux_session}": ${(err as Error).message}`);
-                  staleShellIds.push(shellId);
-                  continue;
-                }
-              } else {
-                staleShellIds.push(shellId);
-                continue;
-              }
-            }
+            const session = manager.getSession(terminalId);
             if (session) {
               state.utils.push({
                 id: shellId,
                 name: `Shell ${shellId.replace('shell-', '')}`,
                 port: basePort || 0,
                 pid: session.pid || 0,
-                terminalId: entry.shells.get(shellId) || terminalId,
+                terminalId,
               });
             }
           }
-          for (const id of staleShellIds) entry.shells.delete(id);
 
-          // Add builders (attempt tmux reconnection for stale sessions before removing)
-          const staleBuilderIds: string[] = [];
+          // Add builders from refreshed cache
           for (const [builderId, terminalId] of entry.builders) {
-            let session = manager.getSession(terminalId);
-            if (!session || session.status === 'exited') {
-              // Check SQLite for tmux session name and attempt reconnection
-              const dbRow = getTerminalSessionById(terminalId);
-              if (dbRow?.tmux_session && tmuxAvailable && tmuxSessionExists(dbRow.tmux_session)) {
-                try {
-                  const newSession = await manager.createSession({
-                    command: 'tmux', args: ['attach-session', '-t', dbRow.tmux_session],
-                    cwd: dbRow.project_path,
-                    label: `Builder ${builderId}`,
-                  });
-                  deleteTerminalSession(terminalId);
-                  saveTerminalSession(newSession.id, dbRow.project_path, 'builder', dbRow.role_id, newSession.pid, dbRow.tmux_session);
-                  entry.builders.set(builderId, newSession.id);
-                  session = manager.getSession(newSession.id);
-                  log('INFO', `[/api/state] Reconnected builder "${builderId}" to tmux "${dbRow.tmux_session}" → ${newSession.id}`);
-                } catch (err) {
-                  log('WARN', `[/api/state] Failed to reconnect builder tmux "${dbRow.tmux_session}": ${(err as Error).message}`);
-                  staleBuilderIds.push(builderId);
-                  continue;
-                }
-              } else {
-                staleBuilderIds.push(builderId);
-                continue;
-              }
-            }
+            const session = manager.getSession(terminalId);
             if (session) {
               state.builders.push({
                 id: builderId,
@@ -2348,11 +2491,10 @@ const server = http.createServer(async (req, res) => {
                 worktree: '',
                 branch: '',
                 type: 'spec',
-                terminalId: entry.builders.get(builderId) || terminalId,
+                terminalId,
               });
             }
           }
-          for (const id of staleBuilderIds) entry.builders.delete(id);
 
           // Add file tabs (Spec 0092 - served through Tower, no separate ports)
           for (const [tabId, tab] of entry.fileTabs) {

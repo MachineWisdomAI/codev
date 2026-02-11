@@ -161,23 +161,24 @@ The tunnel uses HTTP/2 with reversed roles — the same technique used by cloudf
 - Opens browser to `https://codevos.ai/towers/register?callback=http://localhost:<port>/callback`
 - If callback received within 2 minutes → proceed automatically
 - If callback fails (headless env, firewall) → prompt: `"Paste registration token from browser:"`
-- Exchanges token for API key and tower ID via codevos.ai API
+- Prompts for a human-friendly tower name: `"Tower name (e.g. my-macbook):"` — defaults to hostname
+- Exchanges token + tower name for API key and tower ID via codevos.ai API
 - Stores in `~/.agent-farm/cloud-config.json` (0600 permissions):
   ```
   {
     "tower_id": "uuid",
-    "machine_id": "uuid",
+    "tower_name": "my-macbook",
     "api_key": "ctk_...",
     "server_url": "https://codevos.ai"
   }
   ```
 - If tower daemon is running, signals it to connect via `POST localhost:4100/api/tunnel/connect`
-- If already registered, prompts: `"This tower is already registered as '<name>'. Re-register? (y/N)"`
+- If already registered, prompts: `"This tower is already registered as '<tower_name>'. Re-register? (y/N)"`
 
 **`af tower register --reauth`**
 - For when the API key has been rotated from the dashboard
 - Opens browser to codevos.ai reauth flow
-- Updates `cloud-config.json` with new API key (preserves tower_id and machine_id)
+- Updates `cloud-config.json` with new API key (preserves tower_id and tower_name)
 - Signals running tower daemon to reconnect
 
 **`af tower deregister`**
@@ -187,15 +188,19 @@ The tunnel uses HTTP/2 with reversed roles — the same technique used by cloudf
 - Signals running daemon to disconnect via `POST localhost:4100/api/tunnel/disconnect`
 
 **`af tower status`**
-- Shows registration and connection status:
+- **Extends** the existing `af tower status` output (which shows daemon running/stopped, port, PID). Cloud info is appended as a new section — existing local output is preserved.
   ```
+  Tower Daemon:      running (PID 12345, port 4100)
+  Projects:          3 active
+  Terminals:         5 active
+
   Cloud Registration: registered
-  Tower Name:        my-macbook
+  Tower Name:        my-macbook (from cloud-config.json)
   Tower ID:          a1b2c3d4-...
   Connection:        connected (uptime: 2h 15m)
-  Access URL:        https://codevos.ai/t/a1b2c3d4-.../
+  Access URL:        https://codevos.ai/t/my-macbook/
   ```
-- If not registered: `"Cloud Registration: not registered. Run 'af tower register' to connect to codevos.ai."`
+- If not registered, the cloud section shows: `"Cloud Registration: not registered. Run 'af tower register' to connect to codevos.ai."`
 
 ### Signaling the Running Daemon
 
@@ -215,6 +220,7 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 - **Connected**: Serves both local and remote requests.
 - **API key revoked**: Circuit breaker stops retries. Clear error log. User runs `--reauth`.
 - **Multiple OS users on same machine**: Each user has their own `~/.agent-farm/cloud-config.json`. No interference.
+- **Multiple towers per user**: A user can register towers from multiple machines. Each machine has its own `cloud-config.json` with a unique `tower_id`. codevos.ai routes to the correct tower by ID.
 
 ## Performance Requirements
 - **Tunnel overhead**: <100ms added latency per proxied request
@@ -255,6 +261,7 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 - Already registered → confirmation prompt
 - Config deleted while running → local-only mode on next reconnect
 - Config with missing fields → local-only mode with warning
+- Request to `/api/tunnel/disconnect` through tunnel → 403 (path blocklist enforced)
 
 ### Non-Functional Tests
 - Tunnel latency p50/p95/p99
@@ -292,6 +299,11 @@ These are localhost-only management endpoints. The tower's H2 stream handler MUS
 | Reconnection storms after server restart | Medium | Medium | Exponential backoff + jitter; 5-min fallback after 10 failures |
 
 ## Notes
+
+**Migration from cloudflared:**
+- No automatic migration. Existing `af web keygen` API keys and cloudflared tunnel configs are ignored.
+- Users must run `af tower register` to set up the new cloud connection.
+- cloudflared can remain installed on the system — it's simply no longer used by codev.
 
 **What gets removed:**
 - `startTunnel()`, `stopTunnel()`, `isCloudflaredInstalled()`, `getTunnelStatus()`
