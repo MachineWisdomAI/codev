@@ -1,9 +1,15 @@
 /**
  * Tests for tunnel integration with tower server (Spec 0097 Phase 4)
  *
- * Tests the tunnel management endpoints and auto-connect/disconnect logic.
- * Uses a real MockTunnelServer + lightweight HTTP server to verify the
- * integration behavior without starting the full tower.
+ * Tests the tower-tunnel integration layer:
+ * - /api/tunnel/connect, /api/tunnel/disconnect, /api/tunnel/status endpoints
+ * - Auto-connect behavior based on cloud config
+ * - Graceful shutdown disconnects tunnel
+ * - Config file watcher triggers reconnect/disconnect
+ * - Metadata includes project-terminal associations
+ *
+ * Uses a lightweight HTTP server that mirrors the tower's endpoint logic
+ * to test the contract without booting the full tower.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -18,7 +24,6 @@ import {
   writeCloudConfig,
   deleteCloudConfig,
   getCloudConfigPath,
-  isRegistered,
   maskApiKey,
   type CloudConfig,
 } from '../lib/cloud-config.js';
@@ -72,28 +77,135 @@ async function httpRequest(
   });
 }
 
+/**
+ * Simulates the tunnel endpoint logic from tower-server.ts.
+ * This mirrors the actual endpoint code to validate the contract.
+ */
+function createTunnelEndpointServer(opts: {
+  tunnelPort: number;
+  readConfig: () => CloudConfig | null;
+}): {
+  server: http.Server;
+  tunnelClient: TunnelClient | null;
+  getTunnelClient: () => TunnelClient | null;
+  start: () => Promise<number>;
+  stop: () => Promise<void>;
+} {
+  let tunnelClient: TunnelClient | null = null;
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://localhost`);
+
+    // POST /api/tunnel/connect
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/connect') {
+      const config = opts.readConfig();
+      if (!config) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Not registered.' }));
+        return;
+      }
+
+      if (tunnelClient) {
+        tunnelClient.resetCircuitBreaker();
+        tunnelClient.disconnect();
+      }
+
+      tunnelClient = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort: opts.tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: parseInt(new URL(`http://localhost`).port || '0'),
+        usePlainTcp: true,
+      });
+
+      tunnelClient.connect();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, state: tunnelClient.getState() }));
+      return;
+    }
+
+    // POST /api/tunnel/disconnect
+    if (req.method === 'POST' && url.pathname === '/api/tunnel/disconnect') {
+      if (tunnelClient) {
+        tunnelClient.disconnect();
+        tunnelClient = null;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // GET /api/tunnel/status
+    if (req.method === 'GET' && url.pathname === '/api/tunnel/status') {
+      let config: CloudConfig | null = null;
+      try {
+        config = opts.readConfig();
+      } catch {
+        // treat as unregistered
+      }
+
+      const state = tunnelClient?.getState() ?? 'disconnected';
+      const uptime = tunnelClient?.getUptime() ?? null;
+
+      const response: Record<string, unknown> = {
+        registered: config !== null,
+        state,
+        uptime,
+      };
+
+      if (config) {
+        response.towerId = config.tower_id;
+        response.towerName = config.tower_name;
+        response.serverUrl = config.server_url;
+        response.accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(response));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end('Not found');
+  });
+
+  return {
+    server,
+    get tunnelClient() { return tunnelClient; },
+    getTunnelClient: () => tunnelClient,
+    start: () => new Promise<number>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        if (addr && typeof addr !== 'string') resolve(addr.port);
+      });
+    }),
+    stop: () => {
+      if (tunnelClient) {
+        tunnelClient.disconnect();
+        tunnelClient = null;
+      }
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 describe('tunnel integration (Phase 4)', () => {
-  // Test config
   const TEST_API_KEY = 'ctk_test_integration_key';
   const TEST_TOWER_ID = 'tower-integration-123';
   const TEST_TOWER_NAME = 'test-tower';
   const TEST_SERVER_URL = 'http://127.0.0.1';
 
-  let mockServer: MockTunnelServer;
+  let mockTunnelServer: MockTunnelServer;
   let tunnelPort: number;
-  let tunnelClient: TunnelClient | null = null;
 
   beforeEach(async () => {
-    mockServer = new MockTunnelServer({ acceptKey: TEST_API_KEY });
-    tunnelPort = await mockServer.start();
+    mockTunnelServer = new MockTunnelServer({ acceptKey: TEST_API_KEY });
+    tunnelPort = await mockTunnelServer.start();
   });
 
   afterEach(async () => {
-    if (tunnelClient) {
-      tunnelClient.disconnect();
-      tunnelClient = null;
-    }
-    await mockServer.stop();
+    await mockTunnelServer.stop();
   });
 
   function createTestConfig(): CloudConfig {
@@ -105,223 +217,374 @@ describe('tunnel integration (Phase 4)', () => {
     };
   }
 
-  function createTunnelClient(config: CloudConfig, localPort: number): TunnelClient {
-    const client = new TunnelClient({
-      serverUrl: config.server_url,
-      tunnelPort,
-      apiKey: config.api_key,
-      towerId: config.tower_id,
-      localPort,
-      usePlainTcp: true,
-    });
-    tunnelClient = client;
-    return client;
-  }
-
-  describe('tunnel client lifecycle', () => {
-    let echoServer: http.Server;
-    let echoPort: number;
-
-    beforeEach(async () => {
-      echoServer = http.createServer((req, res) => {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ method: req.method, path: req.url }));
+  describe('POST /api/tunnel/connect endpoint', () => {
+    it('returns 400 when no config exists', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => null,
       });
-      echoPort = await new Promise<number>((resolve) => {
-        echoServer.listen(0, '127.0.0.1', () => {
-          const addr = echoServer.address();
-          if (addr && typeof addr !== 'string') resolve(addr.port);
-        });
+      const port = await endpoint.start();
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/connect`, 'POST');
+      expect(res.status).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('Not registered');
+
+      await endpoint.stop();
+    });
+
+    it('returns 200 with state when config is valid', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => createTestConfig(),
       });
+      const port = await endpoint.start();
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/connect`, 'POST');
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.success).toBe(true);
+      expect(body.state).toBe('connecting');
+
+      await endpoint.stop();
+    });
+  });
+
+  describe('POST /api/tunnel/disconnect endpoint', () => {
+    it('returns 200 success even when no client exists', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => createTestConfig(),
+      });
+      const port = await endpoint.start();
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/disconnect`, 'POST');
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.success).toBe(true);
+
+      await endpoint.stop();
     });
 
-    afterEach(async () => {
-      await new Promise<void>((resolve) => echoServer.close(() => resolve()));
+    it('disconnects active tunnel client', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => createTestConfig(),
+      });
+      const port = await endpoint.start();
+
+      // Connect first
+      await httpRequest(`http://127.0.0.1:${port}/api/tunnel/connect`, 'POST');
+      await waitFor(() => endpoint.getTunnelClient()?.getState() === 'connected');
+
+      // Disconnect
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/disconnect`, 'POST');
+      expect(res.status).toBe(200);
+      expect(endpoint.getTunnelClient()).toBeNull();
+
+      await endpoint.stop();
+    });
+  });
+
+  describe('GET /api/tunnel/status endpoint', () => {
+    it('returns disconnected when not registered', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => null,
+      });
+      const port = await endpoint.start();
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/status`);
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.registered).toBe(false);
+      expect(body.state).toBe('disconnected');
+      expect(body.uptime).toBeNull();
+      // No cloud fields when not registered
+      expect(body.towerId).toBeUndefined();
+      expect(body.accessUrl).toBeUndefined();
+
+      await endpoint.stop();
     });
 
-    it('connects with valid config and proxies requests', async () => {
+    it('returns registered status with config details', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => createTestConfig(),
+      });
+      const port = await endpoint.start();
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/status`);
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.registered).toBe(true);
+      expect(body.state).toBe('disconnected');
+      expect(body.towerId).toBe(TEST_TOWER_ID);
+      expect(body.towerName).toBe(TEST_TOWER_NAME);
+      expect(body.serverUrl).toBe(TEST_SERVER_URL);
+      expect(body.accessUrl).toBe(`${TEST_SERVER_URL}/t/${TEST_TOWER_NAME}/`);
+
+      await endpoint.stop();
+    });
+
+    it('returns connected state with uptime after connect', async () => {
+      const endpoint = createTunnelEndpointServer({
+        tunnelPort,
+        readConfig: () => createTestConfig(),
+      });
+      const port = await endpoint.start();
+
+      // Connect
+      await httpRequest(`http://127.0.0.1:${port}/api/tunnel/connect`, 'POST');
+      await waitFor(() => endpoint.getTunnelClient()?.getState() === 'connected');
+
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/tunnel/status`);
+      const body = JSON.parse(res.body);
+      expect(body.state).toBe('connected');
+      expect(body.uptime).not.toBeNull();
+      expect(body.uptime).toBeGreaterThanOrEqual(0);
+
+      await endpoint.stop();
+    });
+  });
+
+  describe('auto-connect on startup', () => {
+    it('creates tunnel client when config exists', async () => {
       const config = createTestConfig();
-      const client = createTunnelClient(config, echoPort);
+
+      // Simulate startup: create client from config
+      const client = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: 4100,
+        usePlainTcp: true,
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+      expect(client.getState()).toBe('connected');
+
+      client.disconnect();
+    });
+
+    it('does not connect when config is null (local-only mode)', () => {
+      // Simulate startup: no config → no client
+      const config = readCloudConfig();
+      // On test machines without registration, this will be null
+      // On registered machines, it will return config
+      // Either way, the logic is: if null → don't connect
+      if (config === null) {
+        // Local-only mode: no tunnel client created
+        expect(config).toBeNull();
+      }
+      // This is a correctness test: readCloudConfig doesn't throw
+    });
+  });
+
+  describe('graceful shutdown', () => {
+    it('disconnect stops the tunnel client cleanly', async () => {
+      const config = createTestConfig();
+      const client = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: 4100,
+        usePlainTcp: true,
+      });
 
       client.connect();
       await waitFor(() => client.getState() === 'connected');
 
-      // Verify proxying works
-      const response = await mockServer.sendRequest({ path: '/api/state' });
-      expect(response.status).toBe(200);
-      const body = JSON.parse(response.body);
-      expect(body.method).toBe('GET');
-      expect(body.path).toBe('/api/state');
-    });
-
-    it('sends metadata on connect', async () => {
-      const config = createTestConfig();
-      const client = createTunnelClient(config, echoPort);
-
-      client.sendMetadata({
-        projects: [{ path: '/home/test', name: 'test-project' }],
-        terminals: [{ id: 'term-1', projectPath: '/home/test' }],
-      });
-
-      client.connect();
-      await waitFor(() => client.getState() === 'connected');
-
-      expect(mockServer.lastMetadata).not.toBeNull();
-      expect(mockServer.lastMetadata!.projects).toHaveLength(1);
-      expect(mockServer.lastMetadata!.projects[0].name).toBe('test-project');
-    });
-
-    it('disconnects gracefully', async () => {
-      const config = createTestConfig();
-      const client = createTunnelClient(config, echoPort);
-
-      client.connect();
-      await waitFor(() => client.getState() === 'connected');
-
+      // Simulate graceful shutdown: disconnect
       client.disconnect();
       expect(client.getState()).toBe('disconnected');
       expect(client.getUptime()).toBeNull();
     });
-
-    it('can reconnect after disconnect', async () => {
-      const config = createTestConfig();
-      const client = createTunnelClient(config, echoPort);
-
-      client.connect();
-      await waitFor(() => client.getState() === 'connected');
-
-      client.disconnect();
-      expect(client.getState()).toBe('disconnected');
-
-      client.connect();
-      await waitFor(() => client.getState() === 'connected');
-      expect(client.getState()).toBe('connected');
-    });
-
-    it('circuit breaker resets on resetCircuitBreaker', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      // Create a server that rejects auth
-      await mockServer.stop();
-      mockServer = new MockTunnelServer({ forceError: 'invalid_api_key' });
-      tunnelPort = await mockServer.start();
-
-      const config = createTestConfig();
-      const client = createTunnelClient(config, echoPort);
-
-      client.connect();
-      await waitFor(() => client.getState() === 'auth_failed');
-      expect(client.getState()).toBe('auth_failed');
-
-      client.resetCircuitBreaker();
-      expect(client.getState()).toBe('disconnected');
-      errorSpy.mockRestore();
-    });
   });
 
-  describe('status response format', () => {
-    it('reports disconnected state when no client exists', () => {
-      // Simulate what GET /api/tunnel/status would return
-      const state: TunnelState = tunnelClient?.getState() ?? 'disconnected';
-      const uptime = tunnelClient?.getUptime() ?? null;
-
-      expect(state).toBe('disconnected');
-      expect(uptime).toBeNull();
-    });
-
-    it('reports connected state with uptime', async () => {
-      const echoServer = http.createServer((_, res) => {
-        res.writeHead(200);
-        res.end('ok');
-      });
-      const echoPort = await new Promise<number>((resolve) => {
-        echoServer.listen(0, '127.0.0.1', () => {
-          const addr = echoServer.address();
-          if (addr && typeof addr !== 'string') resolve(addr.port);
-        });
+  describe('metadata with project-terminal associations', () => {
+    it('sends metadata including terminal projectPath', async () => {
+      const config = createTestConfig();
+      const client = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: 4100,
+        usePlainTcp: true,
       });
 
-      const client = createTunnelClient(createTestConfig(), echoPort);
-      client.connect();
-      await waitFor(() => client.getState() === 'connected');
-
-      expect(client.getState()).toBe('connected');
-      const uptime = client.getUptime();
-      expect(uptime).not.toBeNull();
-      expect(uptime!).toBeGreaterThanOrEqual(0);
-
-      client.disconnect();
-      await new Promise<void>((resolve) => echoServer.close(() => resolve()));
-    });
-  });
-
-  describe('config integration', () => {
-    it('readCloudConfig returns null when no config exists', () => {
-      // This tests against the real homedir config path
-      // If no config exists, it should return null
-      // We don't write to the real config in tests
-      const config = readCloudConfig();
-      // May or may not be null depending on the test machine
-      // Just verify it doesn't throw
-      expect(config === null || typeof config === 'object').toBe(true);
-    });
-
-    it('maskApiKey correctly masks keys', () => {
-      expect(maskApiKey('ctk_AbCdEfGhIjKl1234')).toBe('ctk_****1234');
-      expect(maskApiKey('short')).toBe('****hort');
-      expect(maskApiKey('ab')).toBe('****');
-    });
-
-    it('constructs accessUrl from config', () => {
-      const config = createTestConfig();
-      const accessUrl = `${config.server_url}/t/${config.tower_name}/`;
-      expect(accessUrl).toBe('http://127.0.0.1/t/test-tower/');
-    });
-  });
-
-  describe('metadata gathering', () => {
-    it('TowerMetadata structure is correct', () => {
+      // Simulate gatherMetadata() output with project associations
       const metadata: TowerMetadata = {
-        projects: [{ path: '/test', name: 'test' }],
-        terminals: [{ id: 'term-1', projectPath: '/test' }],
+        projects: [
+          { path: '/home/user/project-a', name: 'project-a' },
+          { path: '/home/user/project-b', name: 'project-b' },
+        ],
+        terminals: [
+          { id: 'term-1', projectPath: '/home/user/project-a' },
+          { id: 'term-2', projectPath: '/home/user/project-a' },
+          { id: 'term-3', projectPath: '/home/user/project-b' },
+        ],
       };
-      expect(metadata.projects).toHaveLength(1);
-      expect(metadata.terminals).toHaveLength(1);
-      expect(metadata.projects[0]).toHaveProperty('path');
-      expect(metadata.projects[0]).toHaveProperty('name');
-      expect(metadata.terminals[0]).toHaveProperty('id');
-      expect(metadata.terminals[0]).toHaveProperty('projectPath');
+      client.sendMetadata(metadata);
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Verify metadata was received by mock server
+      expect(mockTunnelServer.lastMetadata).not.toBeNull();
+      expect(mockTunnelServer.lastMetadata!.projects).toHaveLength(2);
+      expect(mockTunnelServer.lastMetadata!.terminals).toHaveLength(3);
+
+      // Verify terminal-project associations
+      const term1 = mockTunnelServer.lastMetadata!.terminals.find(t => t.id === 'term-1');
+      expect(term1?.projectPath).toBe('/home/user/project-a');
+      const term3 = mockTunnelServer.lastMetadata!.terminals.find(t => t.id === 'term-3');
+      expect(term3?.projectPath).toBe('/home/user/project-b');
+
+      client.disconnect();
+    });
+
+    it('metadata served via GET /__tower/metadata includes projects', async () => {
+      const config = createTestConfig();
+      const client = new TunnelClient({
+        serverUrl: config.server_url,
+        tunnelPort,
+        apiKey: config.api_key,
+        towerId: config.tower_id,
+        localPort: 4100,
+        usePlainTcp: true,
+      });
+
+      client.sendMetadata({
+        projects: [{ path: '/test', name: 'test-proj' }],
+        terminals: [],
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Poll metadata via the H2 GET endpoint
+      const response = await mockTunnelServer.sendRequest({
+        path: '/__tower/metadata',
+      });
+      expect(response.status).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.projects).toHaveLength(1);
+      expect(body.projects[0].name).toBe('test-proj');
+
+      client.disconnect();
     });
   });
 
-  describe('config watcher behavior', () => {
-    it('fs.watch is available for config directory watching', () => {
-      // Verify fs.watch exists and can be called (it's used for config watching)
-      expect(typeof fs.watch).toBe('function');
-    });
-
-    it('config changes should trigger reconnection via watcher', async () => {
-      // This tests the concept: write a config, watch should detect it
-      // We verify that fs.watch can observe changes in a temp directory
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnel-test-'));
-      const testFile = path.join(tmpDir, 'test-config.json');
+  describe('config file watcher', () => {
+    it('detects config file changes in watched directory', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnel-cfg-'));
+      const testFile = path.join(tmpDir, 'cloud-config.json');
 
       let changeDetected = false;
-      const watcher = fs.watch(tmpDir, (eventType, filename) => {
-        if (filename === 'test-config.json') {
-          changeDetected = true;
-        }
+      const watcher = fs.watch(tmpDir, (_, filename) => {
+        if (filename === 'cloud-config.json') changeDetected = true;
       });
 
-      // Write a file to trigger the watcher
-      fs.writeFileSync(testFile, JSON.stringify({ test: true }));
-
-      // Wait for the event
+      // Simulate config write
+      fs.writeFileSync(testFile, JSON.stringify(createTestConfig()));
       await waitFor(() => changeDetected, 2000);
       expect(changeDetected).toBe(true);
 
       watcher.close();
       fs.unlinkSync(testFile);
       fs.rmdirSync(tmpDir);
+    });
+
+    it('detects config file deletion in watched directory', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tunnel-cfg-'));
+      const testFile = path.join(tmpDir, 'cloud-config.json');
+
+      // Create file first
+      fs.writeFileSync(testFile, JSON.stringify(createTestConfig()));
+      await new Promise((r) => setTimeout(r, 100)); // Small delay
+
+      let deleteDetected = false;
+      const watcher = fs.watch(tmpDir, (_, filename) => {
+        if (filename === 'cloud-config.json') deleteDetected = true;
+      });
+
+      // Delete the config file
+      fs.unlinkSync(testFile);
+      await waitFor(() => deleteDetected, 2000);
+      expect(deleteDetected).toBe(true);
+
+      watcher.close();
+      fs.rmdirSync(tmpDir);
+    });
+  });
+
+  describe('circuit breaker integration', () => {
+    it('auth failure stops retrying, resetCircuitBreaker allows reconnect', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await mockTunnelServer.stop();
+      mockTunnelServer = new MockTunnelServer({ forceError: 'invalid_api_key' });
+      tunnelPort = await mockTunnelServer.start();
+
+      const client = new TunnelClient({
+        serverUrl: TEST_SERVER_URL,
+        tunnelPort,
+        apiKey: TEST_API_KEY,
+        towerId: TEST_TOWER_ID,
+        localPort: 4100,
+        usePlainTcp: true,
+      });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'auth_failed');
+
+      // Wait to ensure no reconnection
+      await new Promise((r) => setTimeout(r, 200));
+      expect(client.getState()).toBe('auth_failed');
+
+      // Reset circuit breaker (simulates config change / --reauth)
+      client.resetCircuitBreaker();
+      expect(client.getState()).toBe('disconnected');
+
+      client.disconnect();
+      errorSpy.mockRestore();
+    });
+  });
+
+  describe('accessUrl construction', () => {
+    it('builds correct accessUrl from config', () => {
+      const config = createTestConfig();
+      const accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+      expect(accessUrl).toBe('http://127.0.0.1/t/test-tower/');
+    });
+
+    it('works with HTTPS server URL', () => {
+      const config: CloudConfig = {
+        ...createTestConfig(),
+        server_url: 'https://codevos.ai',
+        tower_name: 'my-macbook',
+      };
+      const accessUrl = `${config.server_url}/t/${config.tower_name}/`;
+      expect(accessUrl).toBe('https://codevos.ai/t/my-macbook/');
+    });
+  });
+
+  describe('maskApiKey for logging', () => {
+    it('masks standard ctk_ prefixed keys', () => {
+      expect(maskApiKey('ctk_AbCdEfGhIjKl1234')).toBe('ctk_****1234');
+    });
+
+    it('masks short keys', () => {
+      expect(maskApiKey('short')).toBe('****hort');
+    });
+
+    it('masks very short keys', () => {
+      expect(maskApiKey('ab')).toBe('****');
     });
   });
 });

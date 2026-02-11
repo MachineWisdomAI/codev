@@ -104,11 +104,22 @@ async function gatherMetadata(): Promise<TowerMetadata> {
     name: i.projectName,
   }));
 
+  // Build reverse mapping: terminal ID → project path
+  const terminalToProject = new Map<string, string>();
+  for (const [projectPath, entry] of projectTerminals) {
+    if (entry.architect) terminalToProject.set(entry.architect, projectPath);
+    for (const termId of entry.builders.values()) terminalToProject.set(termId, projectPath);
+    for (const termId of entry.shells.values()) terminalToProject.set(termId, projectPath);
+  }
+
   const manager = terminalManager;
   const terminals: TowerMetadata['terminals'] = [];
   if (manager) {
     for (const session of manager.listSessions()) {
-      terminals.push({ id: session.id, projectPath: '' });
+      terminals.push({
+        id: session.id,
+        projectPath: terminalToProject.get(session.id) ?? '',
+      });
     }
   }
 
