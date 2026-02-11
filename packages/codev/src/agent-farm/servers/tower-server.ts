@@ -139,9 +139,13 @@ async function gatherMetadata(): Promise<TowerMetadata> {
 function startMetadataRefresh(): void {
   stopMetadataRefresh();
   metadataRefreshInterval = setInterval(async () => {
-    if (tunnelClient && tunnelClient.getState() === 'connected') {
-      const metadata = await gatherMetadata();
-      tunnelClient.sendMetadata(metadata);
+    try {
+      if (tunnelClient && tunnelClient.getState() === 'connected') {
+        const metadata = await gatherMetadata();
+        tunnelClient.sendMetadata(metadata);
+      }
+    } catch (err) {
+      log('WARN', `Metadata refresh failed: ${(err as Error).message}`);
     }
   }, METADATA_REFRESH_MS);
 }
