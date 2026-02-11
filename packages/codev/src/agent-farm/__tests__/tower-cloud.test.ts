@@ -17,7 +17,7 @@ import {
   maskApiKey,
   type CloudConfig,
 } from '../lib/cloud-config.js';
-import { getTunnelStatus } from '../commands/tower-cloud.js';
+import { getTunnelStatus, towerCloudStatus } from '../commands/tower-cloud.js';
 
 // Test constants
 const TEST_CONFIG: CloudConfig = {
@@ -192,14 +192,14 @@ describe('tower cloud commands (Phase 5)', () => {
   });
 
   describe('getTunnelStatus', () => {
-    it('returns status from running tower daemon', async () => {
+    it('returns status from running tower daemon via custom port', async () => {
       const mockServer = http.createServer((req, res) => {
         if (req.url === '/api/tunnel/status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             registered: true,
             state: 'connected',
-            uptime: 3600,
+            uptime: 3600000,
             towerId: 'tower-123',
             towerName: 'my-tower',
             serverUrl: 'https://codevos.ai',
@@ -218,23 +218,21 @@ describe('tower cloud commands (Phase 5)', () => {
       });
 
       try {
-        // getTunnelStatus uses hardcoded port 4100, so we test the fetch pattern directly
-        const response = await fetch(`http://127.0.0.1:${port}/api/tunnel/status`);
-        expect(response.ok).toBe(true);
-        const data = await response.json() as { state: string; uptime: number };
-        expect(data.state).toBe('connected');
-        expect(data.uptime).toBe(3600);
+        // Call getTunnelStatus directly with custom port
+        const status = await getTunnelStatus(port);
+        expect(status).not.toBeNull();
+        expect(status!.state).toBe('connected');
+        expect(status!.uptime).toBe(3600000);
+        expect(status!.towerId).toBe('tower-123');
       } finally {
         mockServer.close();
       }
     });
 
-    it('returns null when tower is not running', async () => {
-      // getTunnelStatus tries port 4100 — if nothing is there, it returns null
-      const status = await getTunnelStatus();
-      // This will be null if no tower is running on 4100 (which is typical in tests)
-      // It could also return data if a real tower happens to be running
-      expect(status === null || typeof status === 'object').toBe(true);
+    it('returns null when tower is not running on given port', async () => {
+      // Use a port that nothing is listening on
+      const status = await getTunnelStatus(19999);
+      expect(status).toBeNull();
     });
   });
 
@@ -261,6 +259,61 @@ describe('tower cloud commands (Phase 5)', () => {
     it('isRegistered returns false when no config exists', () => {
       deleteCloudConfig();
       expect(readCloudConfig()).toBeNull();
+    });
+  });
+
+  describe('towerCloudStatus', () => {
+    afterEach(() => {
+      deleteCloudConfig();
+    });
+
+    it('shows not-registered message when no config exists', async () => {
+      deleteCloudConfig();
+      // Should not throw even when no config exists
+      await towerCloudStatus();
+    });
+
+    it('shows cloud info when registered with daemon running', async () => {
+      // Set up config
+      writeCloudConfig(TEST_CONFIG);
+
+      // Mock tunnel status endpoint
+      const mockServer = http.createServer((req, res) => {
+        if (req.url === '/api/tunnel/status') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            registered: true,
+            state: 'connected',
+            uptime: 300000, // 5 minutes in ms
+            towerId: TEST_CONFIG.tower_id,
+            towerName: TEST_CONFIG.tower_name,
+            serverUrl: TEST_CONFIG.server_url,
+            accessUrl: `${TEST_CONFIG.server_url}/t/${TEST_CONFIG.tower_name}/`,
+          }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+
+      const port = await new Promise<number>((resolve) => {
+        mockServer.listen(0, '127.0.0.1', () => {
+          resolve((mockServer.address() as { port: number }).port);
+        });
+      });
+
+      try {
+        // Call towerCloudStatus with custom port pointing to our mock
+        await towerCloudStatus(port);
+      } finally {
+        mockServer.close();
+      }
+    });
+
+    it('shows cloud info when registered but daemon not running', async () => {
+      writeCloudConfig(TEST_CONFIG);
+      // Call with a port that nothing is listening on
+      await towerCloudStatus(19998);
     });
   });
 
