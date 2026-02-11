@@ -211,15 +211,17 @@ export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
 }
 
 export async function connectTunnel(): Promise<void> {
-  await fetch(apiUrl('api/tunnel/connect'), {
+  const res = await fetch(apiUrl('api/tunnel/connect'), {
     method: 'POST',
     headers: getAuthHeaders(),
   });
+  if (!res.ok) throw new Error(`Connect failed: ${res.status}`);
 }
 
 export async function disconnectTunnel(): Promise<void> {
-  await fetch(apiUrl('api/tunnel/disconnect'), {
+  const res = await fetch(apiUrl('api/tunnel/disconnect'), {
     method: 'POST',
     headers: getAuthHeaders(),
   });
+  if (!res.ok) throw new Error(`Disconnect failed: ${res.status}`);
 }
