@@ -175,6 +175,10 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         if (filtered) term.write(filtered);
         initialBuffer = '';
       }
+      // Re-fit after buffer flush — CSS layout may have settled since
+      // the initial fit(). If dimensions changed, triggers PTY resize
+      // which causes the shell to redraw at the correct size.
+      fitAddon.fit();
     };
 
     ws.onopen = () => {
