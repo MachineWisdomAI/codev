@@ -308,6 +308,62 @@ describe('tunnel edge cases (Phase 7)', () => {
     });
   });
 
+  describe('streaming response through tunnel', () => {
+    it('proxies chunked/streaming responses correctly', async () => {
+      // Create a streaming server that sends chunked data
+      const streamServer = http.createServer((req, res) => {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'transfer-encoding': 'chunked',
+        });
+        // Send 5 chunks with slight delays
+        let count = 0;
+        const interval = setInterval(() => {
+          res.write(`data: chunk-${count}\n\n`);
+          count++;
+          if (count >= 5) {
+            clearInterval(interval);
+            res.end();
+          }
+        }, 10);
+      });
+
+      const streamPort = await startServer(streamServer);
+
+      const localMockServer = new MockTunnelServer();
+      const tunnelPort = await localMockServer.start();
+
+      const streamClient = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort,
+        apiKey: 'ctk_test_key',
+        towerId: '',
+        localPort: streamPort,
+        usePlainTcp: true,
+      });
+
+      streamClient.connect();
+
+      try {
+        await waitFor(() => streamClient.getState() === 'connected');
+
+        const response = await localMockServer.sendRequest({
+          path: '/api/events',
+        });
+
+        expect(response.status).toBe(200);
+        // Verify all 5 chunks arrived
+        for (let i = 0; i < 5; i++) {
+          expect(response.body).toContain(`data: chunk-${i}`);
+        }
+      } finally {
+        streamClient.disconnect();
+        await localMockServer.stop();
+        await stopServer(streamServer);
+      }
+    });
+  });
+
   describe('config-related tunnel behavior', () => {
     // Note: Config parsing edge cases (missing fields, invalid JSON, nonexistent file)
     // are thoroughly tested in cloud-config.test.ts. Here we test the tunnel client's
@@ -387,6 +443,102 @@ describe('tunnel edge cases (Phase 7)', () => {
 
       // Target: <100ms overhead (generous threshold for CI — 2x spec target)
       expect(p95).toBeLessThan(200);
+    });
+  });
+
+  describe('non-functional: WebSocket/terminal keystroke latency', () => {
+    it('terminal keystroke round-trip has <50ms p95 overhead', async () => {
+      // Set up a WebSocket echo server (simulates terminal)
+      const upgradeSockets: net.Socket[] = [];
+      const wsServer = http.createServer();
+      wsServer.on('upgrade', (req, socket, head) => {
+        upgradeSockets.push(socket);
+        socket.write(
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          '\r\n',
+        );
+        // Echo back any data received (simulates terminal echo)
+        socket.on('data', (data) => {
+          socket.write(data);
+        });
+        socket.on('error', () => {});
+      });
+
+      const wsPort = await startServer(wsServer);
+
+      // Create tunnel client pointing at ws echo server
+      const localMockServer = new MockTunnelServer();
+      const tunnelPort = await localMockServer.start();
+
+      const wsClient = new TunnelClient({
+        serverUrl: 'http://127.0.0.1',
+        tunnelPort,
+        apiKey: 'ctk_test_key',
+        towerId: '',
+        localPort: wsPort,
+        usePlainTcp: true,
+      });
+
+      wsClient.connect();
+
+      try {
+        await waitFor(() => wsClient.getState() === 'connected');
+
+        // Open a CONNECT stream (WebSocket proxy)
+        const stream = localMockServer.sendConnect('/ws/terminal/bench');
+
+        await new Promise<void>((resolve, reject) => {
+          stream.on('response', (headers) => {
+            expect(headers[':status']).toBe(200);
+            resolve();
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('CONNECT timeout')), 5000);
+        });
+
+        // Measure keystroke round-trip latency
+        const latencies: number[] = [];
+
+        for (let i = 0; i < 20; i++) {
+          const keystroke = String.fromCharCode(97 + (i % 26)); // a-z
+          const start = performance.now();
+
+          await new Promise<void>((resolve, reject) => {
+            const onData = (chunk: Buffer) => {
+              latencies.push(performance.now() - start);
+              stream.removeListener('data', onData);
+              resolve();
+            };
+            stream.on('data', onData);
+            stream.write(keystroke);
+            setTimeout(() => {
+              stream.removeListener('data', onData);
+              reject(new Error('Keystroke echo timeout'));
+            }, 5000);
+          });
+        }
+
+        latencies.sort((a, b) => a - b);
+        const p50 = latencies[Math.floor(latencies.length * 0.5)];
+        const p95 = latencies[Math.floor(latencies.length * 0.95)];
+        const p99 = latencies[Math.floor(latencies.length * 0.99)];
+
+        console.log(`Terminal keystroke latency — p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`);
+
+        // Target: <50ms p95 overhead (generous for CI)
+        expect(p95).toBeLessThan(100);
+
+        stream.destroy();
+      } finally {
+        wsClient.disconnect();
+        await localMockServer.stop();
+        for (const s of upgradeSockets) {
+          if (!s.destroyed) s.destroy();
+        }
+        await stopServer(wsServer);
+      }
     });
   });
 
