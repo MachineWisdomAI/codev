@@ -141,6 +141,22 @@ describe('CloudStatus', () => {
     });
   });
 
+  it('shows error state when API returns error', () => {
+    const status: TunnelStatus = {
+      registered: false,
+      state: 'error',
+      uptime: null,
+      towerId: null,
+      towerName: null,
+      serverUrl: null,
+      accessUrl: null,
+    };
+    render(<CloudStatus tunnelStatus={status} onRefresh={onRefresh} />);
+    expect(screen.getByText('Cloud: error')).toBeTruthy();
+    const dot = screen.getByTestId('cloud-status').querySelector('.cloud-dot--red');
+    expect(dot).toBeTruthy();
+  });
+
   it('shows connected state without uptime when null', () => {
     const status: TunnelStatus = {
       registered: true,

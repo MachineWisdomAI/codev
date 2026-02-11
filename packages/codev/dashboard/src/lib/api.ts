@@ -186,7 +186,7 @@ export async function fetchRecentFiles(): Promise<RecentFile[]> {
 
 export interface TunnelStatus {
   registered: boolean;
-  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed';
+  state: 'disconnected' | 'connecting' | 'connected' | 'auth_failed' | 'error';
   uptime: number | null;
   towerId: string | null;
   towerName: string | null;
@@ -194,13 +194,19 @@ export interface TunnelStatus {
   accessUrl: string | null;
 }
 
+const ERROR_STATUS: TunnelStatus = {
+  registered: false, state: 'error', uptime: null,
+  towerId: null, towerName: null, serverUrl: null, accessUrl: null,
+};
+
 export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
   try {
     const res = await fetch(apiUrl('api/tunnel/status'), { headers: getAuthHeaders() });
-    if (!res.ok) return null;
+    if (res.status === 404) return null; // Tunnel not configured
+    if (!res.ok) return ERROR_STATUS; // Server error — distinct from not-registered
     return res.json();
   } catch {
-    return null;
+    return ERROR_STATUS; // Network error
   }
 }
 

@@ -43,8 +43,28 @@ export function CloudStatus({ tunnelStatus, onRefresh }: CloudStatusProps) {
     }
   }, [onRefresh]);
 
-  // Not registered or tunnel status unavailable
-  if (!tunnelStatus || !tunnelStatus.registered) {
+  // Tunnel status unavailable (404 — not configured)
+  if (!tunnelStatus) {
+    return (
+      <span className="cloud-status cloud-status--none" data-testid="cloud-status">
+        <span className="cloud-dot cloud-dot--gray" />
+        Cloud: not registered
+      </span>
+    );
+  }
+
+  // API/network error — distinguish from not-registered
+  if (tunnelStatus.state === 'error') {
+    return (
+      <span className="cloud-status cloud-status--error" data-testid="cloud-status">
+        <span className="cloud-dot cloud-dot--red" />
+        Cloud: error
+      </span>
+    );
+  }
+
+  // Not registered
+  if (!tunnelStatus.registered) {
     return (
       <span className="cloud-status cloud-status--none" data-testid="cloud-status">
         <span className="cloud-dot cloud-dot--gray" />
