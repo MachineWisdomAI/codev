@@ -8,9 +8,36 @@
 import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
+import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
 import { getResolvedCommands, setCliOverrides, initializePorts } from './utils/config.js';
 import { version } from '../version.js';
+
+/**
+ * Show tower daemon status and cloud connection info.
+ */
+async function towerStatus(port?: number): Promise<void> {
+  const towerPort = port || 4100;
+
+  logger.header('Tower Status');
+
+  // Check if daemon is running
+  try {
+    const response = await fetch(`http://127.0.0.1:${towerPort}/api/status`, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (response.ok) {
+      logger.kv('Daemon', `running on port ${towerPort}`);
+    } else {
+      logger.kv('Daemon', 'not responding');
+    }
+  } catch {
+    logger.kv('Daemon', 'not running');
+  }
+
+  // Show cloud connection status
+  await towerCloudStatus();
+}
 
 /**
  * Run agent-farm CLI with given arguments
@@ -435,6 +462,44 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           follow: options.follow,
           lines: options.lines ? parseInt(options.lines, 10) : undefined,
         });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  towerCmd
+    .command('register')
+    .description('Register this tower with codevos.ai for remote access')
+    .option('--reauth', 'Update API key without changing tower name')
+    .action(async (options) => {
+      try {
+        await towerRegister({ reauth: options.reauth });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  towerCmd
+    .command('deregister')
+    .description('Remove this tower from codevos.ai')
+    .action(async () => {
+      try {
+        await towerDeregister();
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  towerCmd
+    .command('status')
+    .description('Show tower daemon and cloud connection status')
+    .option('-p, --port <port>', 'Tower port (default: 4100)')
+    .action(async (options) => {
+      try {
+        await towerStatus(options.port ? parseInt(options.port, 10) : undefined);
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
