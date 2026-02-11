@@ -367,7 +367,35 @@ describe('tunnel edge cases (Phase 7)', () => {
   describe('config-related tunnel behavior', () => {
     // Note: Config parsing edge cases (missing fields, invalid JSON, nonexistent file)
     // are thoroughly tested in cloud-config.test.ts. Here we test the tunnel client's
-    // behavior when config-derived parameters are invalid.
+    // behavior when config-derived parameters are invalid or config is removed.
+
+    it('config deleted while connected: disconnect prevents auto-reconnect', async () => {
+      // Scenario: Tower is connected, server drops connection, config is deleted.
+      // The tower integration should call client.disconnect() to cancel the
+      // auto-reconnect timer. Verify the client stays disconnected.
+      await setup();
+
+      client.connect();
+      await waitFor(() => client.getState() === 'connected');
+
+      // Track state changes
+      const states: TunnelState[] = [];
+      client.onStateChange((s) => states.push(s));
+
+      // Server drops the connection (simulates network failure)
+      mockServer.disconnectAll();
+
+      // Client will transition to 'disconnected' and schedule auto-reconnect
+      await waitFor(() => client.getState() === 'disconnected');
+
+      // Simulate "config deleted" — tower calls disconnect() to cancel reconnect
+      client.disconnect();
+
+      // Wait and verify client stays disconnected (no auto-reconnect)
+      await new Promise((r) => setTimeout(r, 500));
+      expect(client.getState()).toBe('disconnected');
+      expect(client.getUptime()).toBeNull();
+    });
 
     it('handles connection with empty towerId gracefully', async () => {
       await setup();
