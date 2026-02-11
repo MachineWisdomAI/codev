@@ -134,14 +134,19 @@ export function App() {
 
   if (isMobile) {
     return (
-      <MobileLayout
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={selectTab}
-        onRefresh={refresh}
-      >
-        {renderPersistentContent(['architect', 'builder', 'shell'])}
-      </MobileLayout>
+      <div className="mobile-wrapper">
+        <div className="mobile-header">
+          <CloudStatus tunnelStatus={tunnelStatus} onRefresh={refresh} />
+        </div>
+        <MobileLayout
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelectTab={selectTab}
+          onRefresh={refresh}
+        >
+          {renderPersistentContent(['architect', 'builder', 'shell'])}
+        </MobileLayout>
+      </div>
     );
   }
 

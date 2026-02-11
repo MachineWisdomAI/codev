@@ -1001,3 +1001,21 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Mobile cloud status header */
+.mobile-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.mobile-header {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.mobile-wrapper .mobile-layout {
+  flex: 1;
+  min-height: 0;
+}
