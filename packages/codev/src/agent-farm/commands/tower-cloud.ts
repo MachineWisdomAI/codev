@@ -101,7 +101,7 @@ async function signalTower(endpoint: 'connect' | 'disconnect'): Promise<void> {
 /**
  * Get tunnel status from the running tower daemon.
  */
-export async function getTunnelStatus(): Promise<{
+export async function getTunnelStatus(port?: number): Promise<{
   registered: boolean;
   state: string;
   uptime: number | null;
@@ -110,9 +110,10 @@ export async function getTunnelStatus(): Promise<{
   serverUrl: string | null;
   accessUrl: string | null;
 } | null> {
+  const towerPort = port || DEFAULT_TOWER_PORT;
   try {
     const response = await fetch(
-      `http://127.0.0.1:${DEFAULT_TOWER_PORT}/api/tunnel/status`,
+      `http://127.0.0.1:${towerPort}/api/tunnel/status`,
       { signal: AbortSignal.timeout(3_000) },
     );
     if (!response.ok) return null;
@@ -279,7 +280,7 @@ export async function towerDeregister(): Promise<void> {
 /**
  * Display cloud connection status.
  */
-export async function towerCloudStatus(): Promise<void> {
+export async function towerCloudStatus(port?: number): Promise<void> {
   const config = readCloudConfig();
 
   if (!config) {
@@ -296,7 +297,7 @@ export async function towerCloudStatus(): Promise<void> {
   logger.kv('API Key', maskApiKey(config.api_key));
 
   // Try to get live tunnel status from daemon
-  const status = await getTunnelStatus();
+  const status = await getTunnelStatus(port);
 
   if (status) {
     logger.kv('Connection', status.state);

@@ -36,7 +36,7 @@ async function towerStatus(port?: number): Promise<void> {
   }
 
   // Show cloud connection status
-  await towerCloudStatus();
+  await towerCloudStatus(towerPort);
 }
 
 /**
