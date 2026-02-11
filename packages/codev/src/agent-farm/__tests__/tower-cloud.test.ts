@@ -10,6 +10,24 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { mkdirSync, rmSync } from 'node:fs';
+
+// Redirect homedir to a temp directory so tests don't touch real ~/.agent-farm/
+const TEST_DIR = vi.hoisted(() => {
+  const { resolve } = require('node:path');
+  const { tmpdir } = require('node:os');
+  const { randomBytes } = require('node:crypto');
+  return resolve(tmpdir(), `tower-cloud-test-${randomBytes(4).toString('hex')}`);
+});
+
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual('node:os');
+  return {
+    ...actual,
+    homedir: () => TEST_DIR,
+  };
+});
+
 import {
   readCloudConfig,
   writeCloudConfig,
@@ -37,6 +55,14 @@ async function waitFor(fn: () => boolean, timeoutMs = 5000): Promise<void> {
 }
 
 describe('tower cloud commands (Phase 5)', () => {
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
   describe('token redemption server', () => {
     it('exchanges token for API credentials via POST', async () => {
       // Mock the codevos.ai /api/towers/register/redeem endpoint
