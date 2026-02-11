@@ -186,6 +186,24 @@ describe('tunnel-client integration', () => {
     });
   });
 
+  describe('rate limiting', () => {
+    it('retries after rate_limited response (stays disconnected, not auth_failed)', async () => {
+      await setupTunnel({ forceError: 'rate_limited' });
+
+      client.connect();
+      await waitFor(() => client.getState() === 'disconnected' && stateChanges.length >= 2);
+
+      // Should have gone connecting → disconnected (not auth_failed)
+      expect(client.getState()).toBe('disconnected');
+      expect(stateChanges).toContainEqual({ state: 'connecting', prev: 'disconnected' });
+      expect(stateChanges).toContainEqual({ state: 'disconnected', prev: 'connecting' });
+      // Should NOT have triggered circuit breaker
+      const authFailed = stateChanges.filter((s) => s.state === 'auth_failed');
+      expect(authFailed).toHaveLength(0);
+    });
+
+  });
+
   describe('HTTP proxying', () => {
     it('proxies GET request to local server', async () => {
       await setupTunnel();
