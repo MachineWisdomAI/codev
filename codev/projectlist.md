@@ -1128,24 +1128,24 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0099"
     title: "Tower Codebase Hygiene"
     summary: "Dead code removal, naming drift fixes, CLI consolidation onto TowerClient, state management fixes, error handling, dedup"
-    status: specified
+    status: integrated
     priority: medium
     release: v2.0.0
     files:
       spec: codev/specs/0099-tower-codebase-hygiene.md
-      plan: null
-      review: null
+      plan: codev/plans/0099-tower-codebase-hygiene.md
+      review: codev/reviews/0099-tower-codebase-hygiene.md
     dependencies: ["0098"]
     tags: [architecture, cleanup, agent-farm, maintenance]
     timestamps:
       conceived_at: "2026-02-11T00:00:00-08:00"
       specified_at: "2026-02-11T00:00:00-08:00"
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Based on Codex codebase health survey. Covers everything non-port (0098 handles ports). Five phases: dead code, naming, CLI consolidation, state fixes, dedup."
+      planned_at: "2026-02-12T00:00:00-08:00"
+      implementing_at: "2026-02-12T00:00:00-08:00"
+      implemented_at: "2026-02-12T00:00:00-08:00"
+      committed_at: "2026-02-12T00:00:00-08:00"
+      integrated_at: "2026-02-12T00:00:00-08:00"
+    notes: "Tower hygiene: dead code removal, TowerClient consolidation, file-tab persistence, path traversal fix. PR #212 merged."
 
 ## Next Available Number
 
