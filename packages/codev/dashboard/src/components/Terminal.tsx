@@ -27,7 +27,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const lastSelectionRef = useRef('');
+
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -106,30 +106,25 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     // Clipboard handling
     const isMac = navigator.platform.toUpperCase().includes('MAC');
 
-    // Auto-copy on select: track selection text as it changes during drag,
-    // then copy to clipboard on mouseup (which qualifies as user activation
-    // for the Clipboard API).
-    const selectionDisposable = term.onSelectionChange(() => {
-      const sel = term.getSelection();
-      if (sel) lastSelectionRef.current = sel;
-    });
-
-    const container = containerRef.current;
-    const handleMouseUp = () => {
-      const sel = lastSelectionRef.current;
-      if (sel) {
-        navigator.clipboard.writeText(sel).catch(() => {});
-        lastSelectionRef.current = '';
-      }
-    };
-    container.addEventListener('mouseup', handleMouseUp);
-
+    // Copy: Cmd+C (Mac) or Ctrl+Shift+C (Linux/Windows) copies selection.
+    // If no selection, let the key event pass through (sends SIGINT on Ctrl+C).
     // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.type !== 'keydown') return true;
 
       const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
       if (!modKey) return true;
+
+      if (event.key === 'c' || event.key === 'C') {
+        const sel = term.getSelection();
+        if (sel) {
+          event.preventDefault();
+          navigator.clipboard.writeText(sel).catch(() => {});
+          return false;
+        }
+        // No selection — let it pass through (Ctrl+C → SIGINT)
+        return true;
+      }
 
       if (event.key === 'v' || event.key === 'V') {
         event.preventDefault();
@@ -263,8 +258,6 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       if (flushTimer) clearTimeout(flushTimer);
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
-      selectionDisposable.dispose();
-      container.removeEventListener('mouseup', handleMouseUp);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();
