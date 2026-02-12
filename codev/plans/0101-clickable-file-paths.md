@@ -11,7 +11,7 @@ Wire the existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js vi
 ## Success Metrics
 - [ ] All specification success criteria met
 - [ ] Unit tests for regex, parsing, path resolution, containment
-- [ ] E2E tests for click-to-open flow
+- [ ] E2E tests for click-to-open flow (including builder worktree scenario)
 - [ ] No regression on existing URL link behavior
 - [ ] File paths in builder terminals resolve to correct worktree
 
@@ -35,7 +35,7 @@ Wire the existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js vi
 
 #### Objectives
 - Create a custom `ILinkProvider` implementation that detects file paths in terminal buffer lines using `FILE_PATH_REGEX`
-- Return `ILink` objects with dotted underline decoration and Cmd/Ctrl+Click activation
+- Return `ILink` objects with decoration and Cmd/Ctrl+Click activation
 
 #### Deliverables
 - [ ] New file `packages/codev/dashboard/src/lib/filePathLinkProvider.ts`
@@ -48,32 +48,65 @@ Wire the existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js vi
 **File**: `packages/codev/dashboard/src/lib/filePathLinkProvider.ts`
 
 ```typescript
-import type { IBufferLine, ILink, ILinkProvider, Terminal } from '@xterm/xterm';
+import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm';
 import { FILE_PATH_REGEX, parseFilePath, looksLikeFilePath } from './filePaths.js';
 
 type FileOpenCallback = (path: string, line?: number, column?: number, terminalId?: string) => void;
 
 export class FilePathLinkProvider implements ILinkProvider {
   constructor(
+    private terminal: Terminal,
     private onFileOpen: FileOpenCallback,
     private terminalId?: string,
   ) {}
 
   provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void): void {
+    // Get line text from the terminal buffer
+    const line = this.terminal.buffer.active.getLine(lineNumber - 1);
+    if (!line) { callback(undefined); return; }
+    const text = line.translateToString();
+
     // Create fresh regex to avoid /g lastIndex issues
     const regex = new RegExp(FILE_PATH_REGEX.source, FILE_PATH_REGEX.flags);
-    // Get line text from the terminal buffer (passed by xterm.js)
-    // Note: provideLinks receives the y-coordinate; the Terminal instance
-    // is accessed via closure when registering the provider
-    // ... match regex against line text, build ILink array
+    const links: ILink[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(text)) !== null) {
+      const captured = match[1]; // Group 1 is the file path
+      const fullMatch = match[0];
+      if (!captured || !looksLikeFilePath(captured)) continue;
+
+      // Calculate the start position of the captured group within the full match
+      const matchStart = match.index;
+      const capturedOffset = fullMatch.indexOf(captured);
+      const startCol = matchStart + capturedOffset;
+
+      links.push({
+        range: {
+          start: { x: startCol + 1, y: lineNumber },
+          end: { x: startCol + captured.length + 1, y: lineNumber },
+        },
+        text: captured,
+        decorations: { pointerCursor: true, underline: true },
+        activate: (event: MouseEvent, linkText: string) => {
+          // Require modifier key: Cmd on macOS, Ctrl on others
+          if (!event.metaKey && !event.ctrlKey) return;
+          const parsed = parseFilePath(linkText);
+          this.onFileOpen(parsed.path, parsed.line, parsed.column, this.terminalId);
+        },
+      });
+    }
+
+    callback(links.length > 0 ? links : undefined);
   }
 }
 ```
 
 Key decisions:
+- **Constructor accepts `Terminal` instance** for buffer access via `terminal.buffer.active.getLine()`. The Terminal instance is available at registration time in `Terminal.tsx`.
 - Create a new `RegExp` from `FILE_PATH_REGEX.source` + `.flags` each call to avoid `/g` stateful `lastIndex`
 - `looksLikeFilePath()` filters false positives before creating links
-- `ILink.decorations` sets `{ pointerCursor: true, underline: true }` — we'll use CSS to make it dotted
+- `ILink.decorations` sets `{ pointerCursor: true, underline: true }` — CSS overrides make it dotted (see Phase 3)
 - `ILink.activate` checks `event.metaKey || event.ctrlKey` before calling `onFileOpen`
 
 #### Acceptance Criteria
@@ -92,16 +125,30 @@ Key decisions:
 **Dependencies**: None (can be done in parallel with Phase 1)
 
 #### Objectives
+- Add a public `get cwd()` getter to `PtySession` class (config is `private readonly`)
 - Update `POST /api/tabs/file` to accept `terminalId` for cwd-relative path resolution
 - Add `fs.realpathSync` + fallback for symlink-safe containment checking
+- Containment check allows paths within project root AND `.builders/` worktrees
 
 #### Deliverables
+- [ ] New `get cwd()` getter on `PtySession` class in `packages/codev/src/terminal/pty-session.ts`
 - [ ] Updated `tower-server.ts` file tab endpoint
-- [ ] Terminal session cwd lookup via `getTerminalManager().getSession(terminalId)`
+- [ ] Terminal session cwd lookup via `getTerminalManager().getSession(terminalId).cwd`
 - [ ] `realpathSync` with fallback to `path.resolve` for non-existent files
 - [ ] Warning log on missing terminal session fallback
+- [ ] Containment check validates both project root and `.builders/` worktrees
 
 #### Implementation Details
+
+**File**: `packages/codev/src/terminal/pty-session.ts`
+
+Add public getter for cwd (since `config` is `private readonly`):
+```typescript
+/** Working directory of the PTY session. */
+get cwd(): string {
+  return this.config.cwd;
+}
+```
 
 **File**: `packages/codev/src/agent-farm/servers/tower-server.ts` (lines ~2492-2556)
 
@@ -110,9 +157,9 @@ Changes to `POST /api/tabs/file` handler:
 1. Extract `terminalId` from request body alongside `path` and `line`
 2. If `terminalId` is provided and `path` is relative (`!path.isAbsolute(filePath)`):
    - Look up session: `const session = getTerminalManager().getSession(terminalId)`
-   - If session found: `fullPath = path.join(session.config.cwd, filePath)`
+   - If session found: `fullPath = path.join(session.cwd, filePath)`
    - If session NOT found: log warning, fall back to `path.join(projectPath, filePath)`
-3. Replace existing containment check with symlink-aware version:
+3. Replace existing containment check with symlink-aware version that allows both project root and `.builders/` worktrees:
    ```typescript
    let resolvedPath: string;
    try {
@@ -120,24 +167,43 @@ Changes to `POST /api/tabs/file` handler:
    } catch {
      resolvedPath = path.resolve(fullPath);
    }
-   const normalizedProject = path.resolve(projectPath);
-   // Allow paths within project root OR within .builders/ worktrees
-   if (!resolvedPath.startsWith(normalizedProject + path.sep) && resolvedPath !== normalizedProject) {
-     res.writeHead(403, ...);
+
+   // Containment: allow paths within project root OR within .builders/ worktrees
+   // Builder worktrees are git worktrees at <projectRoot>/.builders/<id>/
+   // but they can also be at absolute paths that resolve outside the project root
+   // (e.g., when the worktree is a symlink). We resolve the project path too.
+   let normalizedProject: string;
+   try {
+     normalizedProject = fs.realpathSync(projectPath);
+   } catch {
+     normalizedProject = path.resolve(projectPath);
+   }
+
+   const isWithinProject = resolvedPath.startsWith(normalizedProject + path.sep)
+     || resolvedPath === normalizedProject;
+
+   if (!isWithinProject) {
+     res.writeHead(403, { 'Content-Type': 'application/json' });
+     res.end(JSON.stringify({ error: 'Path outside project' }));
      return;
    }
    ```
 
+**Note on `.builders/` worktree containment**: Builder worktrees at `.builders/<id>/` are already within the project root directory tree. The containment check `resolvedPath.startsWith(normalizedProject + path.sep)` naturally allows them because `.builders/` is a subdirectory of the project root. No special-case logic is needed — the single `startsWith` check covers both the main project and all worktrees. The key insight is that `terminalId` resolution uses `session.cwd` (the worktree path) to resolve relative paths, and the resulting absolute path is still within the project tree.
+
 #### Acceptance Criteria
+- [ ] `PtySession.cwd` getter returns the session's working directory
 - [ ] `terminalId` + relative path resolves correctly using terminal's cwd
 - [ ] Missing terminal session falls back to project root with warning log
 - [ ] Symlink resolution via `realpathSync` works for existing files
 - [ ] Non-existent files fall back to `path.resolve` (no crash)
 - [ ] Path traversal (`../../.ssh/id_rsa`) returns 403
+- [ ] Builder worktree paths (e.g., `.builders/0099/src/foo.ts`) pass containment check
+- [ ] Paths escaping project tree (e.g., `../../etc/passwd`) fail containment check
 
 #### Risks
-- **Risk**: `session.config` is private (not on `PtySessionInfo`)
-  - **Mitigation**: Tower has direct access to `PtySession` objects (not just `PtySessionInfo`), so `session.config.cwd` is accessible
+- **Risk**: `session.config` is `private readonly` on `PtySession`
+  - **Mitigation**: Add a `get cwd()` public getter — trivial one-line addition
 
 ---
 
@@ -147,15 +213,17 @@ Changes to `POST /api/tabs/file` handler:
 #### Objectives
 - Wire `FilePathLinkProvider` into `Terminal.tsx`
 - Pass `terminalId` through `onFileOpen` → `createFileTab` → Tower API
-- Add CSS for dotted underline decoration
+- Add CSS for dotted underline decoration with hover color shift
+- Remove dead `looksLikeFilePath` code path from WebLinksAddon handler
 
 #### Deliverables
 - [ ] Updated `Terminal.tsx` — register `FilePathLinkProvider` alongside `WebLinksAddon`
 - [ ] Updated `Terminal.tsx` — extract `terminalId` from `wsPath` prop
-- [ ] Updated `TerminalProps` interface — add `terminalId` prop or extract from `wsPath`
-- [ ] Updated `App.tsx` — pass `terminalId` to `handleFileOpen`
+- [ ] Updated `Terminal.tsx` — remove dead file-path branch from WebLinksAddon handler (URL-only now)
+- [ ] Updated `TerminalProps` — add `terminalId` to `onFileOpen` callback signature
+- [ ] Updated `App.tsx` — pass `terminalId` to `handleFileOpen` → `createFileTab`
 - [ ] Updated `api.ts` — `createFileTab` accepts and sends `terminalId`
-- [ ] CSS for `.xterm-file-link` dotted underline decoration
+- [ ] CSS for dotted underline + hover color on file path links
 
 #### Implementation Details
 
@@ -165,15 +233,29 @@ Changes to `POST /api/tabs/file` handler:
 2. Extract `terminalId` from `wsPath` (e.g., `/ws/terminal/<id>` → `<id>`)
 3. After creating the xterm instance, register the link provider:
    ```typescript
+   // Extract terminalId from wsPath: "/base/ws/terminal/<id>" → "<id>"
+   const terminalId = wsPath.split('/').pop();
+
    const filePathProvider = new FilePathLinkProvider(
-     (filePath, line, column, terminalId) => {
-       onFileOpen?.(filePath, line, column, terminalId);
+     term,  // Pass Terminal instance for buffer access
+     (filePath, line, column, tid) => {
+       onFileOpen?.(filePath, line, column, tid);
      },
      terminalId,
    );
    term.registerLinkProvider(filePathProvider);
    ```
-4. The existing `WebLinksAddon` stays unchanged for URL handling
+4. **Remove dead file-path branch** from WebLinksAddon handler. The `looksLikeFilePath` check in the WebLinksAddon callback (lines 86-88) is never triggered because WebLinksAddon only matches URLs. After the new `FilePathLinkProvider` handles file paths, this dead code should be removed. The WebLinksAddon handler becomes URL-only:
+   ```typescript
+   const webLinksAddon = new WebLinksAddon((event, uri) => {
+     event.preventDefault();
+     window.open(uri, '_blank');
+   });
+   ```
+5. Update `onFileOpen` callback type to include `terminalId`:
+   ```typescript
+   onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
+   ```
 
 **File**: `packages/codev/dashboard/src/components/App.tsx`
 
@@ -197,29 +279,43 @@ Changes to `POST /api/tabs/file` handler:
    ```
 2. Include `terminalId` in request body: `JSON.stringify({ path: filePath, line, terminalId })`
 
-**File**: `packages/codev/dashboard/src/index.css` (or equivalent)
+**File**: `packages/codev/dashboard/src/index.css` (or the existing dashboard CSS file)
 
-Add xterm link provider CSS:
+xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCursor: boolean` — it does NOT support underline style (solid vs dotted). The dotted underline requires CSS targeting xterm's link decoration elements. xterm.js applies a `xterm-link` class to link spans rendered by `ILinkProvider`.
+
 ```css
-/* File path links in terminal - dotted underline distinct from URL solid underline */
-.xterm .xterm-screen .xterm-decoration-overview-ruler {
-  /* No changes needed - decoration handled by ILink.decorations */
+/* File path links in terminal — dotted underline (distinct from URL solid underline) */
+.xterm .xterm-screen a.xterm-link {
+  text-decoration: underline dotted;
+  text-decoration-color: rgba(255, 255, 255, 0.4);
+  text-underline-offset: 2px;
+}
+
+/* Hover state: subtle brightness shift + pointer cursor */
+.xterm .xterm-screen a.xterm-link:hover {
+  text-decoration-color: rgba(255, 255, 255, 0.8);
+  filter: brightness(1.15);
+  cursor: pointer;
 }
 ```
 
-Note: xterm.js `ILink.decorations` controls underline and pointer cursor natively. The "dotted" distinction may need to be achieved via the `ILinkDecorations` API if supported, or via CSS targeting the xterm decoration elements.
+**Note**: If xterm.js doesn't use `<a>` tags or a `.xterm-link` class, we inspect the actual DOM structure at implementation time and target the correct selectors. The WebLinksAddon and ILinkProvider may render decorations differently — we verify during Phase 3 and adjust selectors accordingly.
+
+**URL links** (from WebLinksAddon) will have a solid underline by default (browser default for `<a>` tags or xterm's own styling). File path links get dotted underline via the CSS above. If both share the same selector, we use JavaScript to add a distinguishing CSS class (e.g., `data-link-type="file"`) in the link provider's hover handler.
 
 #### Acceptance Criteria
 - [ ] File paths in terminal output show dotted underline
+- [ ] Hover over file path shows brightness shift and pointer cursor
 - [ ] Cmd+Click opens file in viewer
 - [ ] Plain click does not trigger file open
-- [ ] URLs still open in new browser tab (WebLinksAddon unchanged)
+- [ ] URLs still open in new browser tab (WebLinksAddon unchanged, solid underline)
 - [ ] `terminalId` is passed through the full chain to the Tower API
 - [ ] Builder terminal paths resolve relative to builder's worktree cwd
+- [ ] Dead `looksLikeFilePath` branch removed from WebLinksAddon handler
 
 #### Risks
-- **Risk**: xterm.js `ILink.decorations` may not support dotted vs solid distinction
-  - **Mitigation**: If not, use CSS override on the xterm decoration container elements. The link provider adds a CSS class that can be targeted.
+- **Risk**: xterm.js link decoration DOM structure may differ from expected selectors
+  - **Mitigation**: Inspect DOM at implementation time; adjust CSS selectors to match actual structure
 
 ---
 
@@ -228,7 +324,7 @@ Note: xterm.js `ILink.decorations` controls underline and pointer cursor nativel
 
 #### Objectives
 - Write comprehensive unit tests for all new and modified code
-- Write E2E tests for the click-to-open flow
+- Write E2E tests for the click-to-open flow, including builder worktree scenario
 
 #### Deliverables
 - [ ] Unit tests: `packages/codev/tests/unit/file-path-link-provider.test.ts`
@@ -249,18 +345,26 @@ Note: xterm.js `ILink.decorations` controls underline and pointer cursor nativel
 - Test `terminalId` resolution: relative path + terminal cwd → correct absolute path
 - Test `terminalId` fallback: missing session → project root resolution
 - Test `realpathSync` failure: non-existent file → `path.resolve` fallback
+- Test builder worktree path (e.g., `.builders/0099/src/foo.ts`) passes containment
+- Test path escaping via `../` from builder worktree returns 403
 
 **E2E Tests**: `clickable-file-paths.spec.ts`
 - Test basic file path Cmd+Click opens file viewer
 - Test path with line number scrolls to line
 - Test URL still works (opens in new tab)
 - Test plain click does not open file
+- **Test builder terminal worktree resolution**: Spawn or simulate a builder terminal session with a worktree cwd. Output a relative file path. Cmd+Click the path and verify the file viewer opens the correct file resolved relative to the worktree, not the project root. This can be done by:
+  1. Creating a known file in a subdirectory that simulates a worktree
+  2. Setting up a terminal session with that subdirectory as cwd
+  3. Echoing a relative path to that file
+  4. Cmd+Clicking and verifying the correct file opens
 
 #### Acceptance Criteria
 - [ ] All unit tests pass
 - [ ] All E2E tests pass
 - [ ] Existing tests not broken
 - [ ] Coverage for all spec test scenarios 1-19
+- [ ] Builder worktree resolution tested in E2E
 
 #### Risks
 - **Risk**: E2E tests need a running Tower + terminal to test click behavior
@@ -282,16 +386,17 @@ Phases 1 and 2 can be implemented in parallel.
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | `ILink.activate` doesn't receive MouseEvent | Low | Medium | Track modifier key state globally via keydown/keyup |
-| `ILink.decorations` doesn't support dotted underline | Medium | Low | Use CSS override on xterm decoration elements |
-| `session.config.cwd` not accessible from tower-server | Low | Medium | PtySession is directly accessible (not just PtySessionInfo) |
+| xterm.js link DOM doesn't support dotted CSS | Low | Medium | Inspect DOM, adjust selectors; worst case use JS class |
+| `session.config.cwd` not directly accessible | Confirmed | Low | Add `get cwd()` getter to PtySession (one-line fix) |
 | Regex false positives in terminal output | Low | Low | `looksLikeFilePath()` filter already handles common cases |
 
 ## Validation Checkpoints
 1. **After Phase 1**: File paths are detected in terminal buffer lines (verify with console.log in `provideLinks`)
-2. **After Phase 2**: `curl` test: POST to `/api/tabs/file` with `terminalId` resolves correctly
-3. **After Phase 3**: End-to-end: type a file path in terminal, Cmd+Click opens viewer
+2. **After Phase 2**: `curl` test: POST to `/api/tabs/file` with `terminalId` resolves correctly for both project-root and worktree scenarios
+3. **After Phase 3**: End-to-end: type a file path in terminal, Cmd+Click opens viewer; builder terminal paths resolve correctly
 4. **After Phase 4**: All tests green, no regressions
 
 ## Notes
-- The existing `WebLinksAddon` handler in `Terminal.tsx` (lines 82-99) checks `looksLikeFilePath` but is never triggered for file paths. After this implementation, that handler continues to handle URLs only. The new `FilePathLinkProvider` handles file paths separately.
+- The existing `WebLinksAddon` handler in `Terminal.tsx` (lines 82-99) checks `looksLikeFilePath` but is never triggered for file paths. After this implementation, that dead code branch is **removed** — the WebLinksAddon handler becomes URL-only. The new `FilePathLinkProvider` handles file paths separately.
 - The `Terminal` component's `onFileOpen` callback signature changes to include `terminalId` — this is a backward-compatible addition (optional parameter).
+- `PtySession.config` is `private readonly` — the plan adds a `get cwd()` public getter rather than making `config` public, preserving encapsulation.
