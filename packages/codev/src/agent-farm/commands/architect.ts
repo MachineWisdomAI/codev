@@ -60,9 +60,10 @@ function attachToSession(sessionName: string): void {
 }
 
 /**
- * Create a new tmux session with the architect role and attach to it
+ * Shared session setup: write role file, create launch script, create tmux session, configure it.
+ * Returns the launch script path for callers that need it.
  */
-async function createAndAttach(args: string[]): Promise<void> {
+async function createSession(sessionName: string, args: string[]): Promise<void> {
   const config = getConfig();
 
   // Ensure state directory exists for launch script
@@ -95,15 +96,12 @@ cd "${config.projectRoot}"
 exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
 `, { mode: 0o755 });
 
-  const sessionName = getSessionName();
-  logger.info('Creating new architect session...');
-
   // Create tmux session running the launch script
   await run(
     `tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
   );
 
-  // Configure tmux session (same settings as start.ts)
+  // Configure tmux session
   await run(`tmux set-option -t "${sessionName}" status off`);
   await run(`tmux set-option -t "${sessionName}" -g mouse on`);
   await run(`tmux set-option -t "${sessionName}" -g set-clipboard on`);
@@ -111,8 +109,15 @@ exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
   // Copy selection to clipboard when mouse is released (pbcopy for macOS)
   await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
   await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
+}
 
-  // Attach to the session
+/**
+ * Create a new tmux session with the architect role and attach to it
+ */
+async function createAndAttach(args: string[]): Promise<void> {
+  const sessionName = getSessionName();
+  logger.info('Creating new architect session...');
+  await createSession(sessionName, args);
   attachToSession(sessionName);
 }
 
@@ -128,49 +133,9 @@ exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
  */
 async function createLayoutAndAttach(args: string[]): Promise<void> {
   const config = getConfig();
-
-  // Ensure state directory exists for launch script
-  await ensureDirectories(config);
-
-  // Load architect role
-  const role = findRolePromptPath(config, 'architect');
-  if (!role) {
-    fatal('Architect role not found. Expected at: codev/roles/architect.md');
-  }
-
-  logger.info(`Loaded architect role (${role.source})`);
-
-  // Write a minimal pointer - AI reads the full file
-  const roleFile = resolve(config.stateDir, 'architect-role.md');
-  const shortPointer = `You are an Architect. Read codev/roles/architect.md before starting work.
-`;
-  writeFileSync(roleFile, shortPointer, 'utf-8');
-
-  // Create launch script for architect
-  const launchScript = resolve(config.stateDir, 'launch-architect-cli.sh');
-
-  let argsStr = '';
-  if (args.length > 0) {
-    argsStr = ' ' + args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-  }
-
-  writeFileSync(launchScript, `#!/bin/bash
-cd "${config.projectRoot}"
-exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
-`, { mode: 0o755 });
-
   const layoutName = getLayoutSessionName();
   logger.info('Creating layout session...');
-
-  // Create main session with architect pane (left, 70% width)
-  await run(
-    `tmux new-session -d -s "${layoutName}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
-  );
-
-  // Configure tmux session
-  await run(`tmux set-option -t "${layoutName}" status off`);
-  await run(`tmux set-option -t "${layoutName}" -g mouse on`);
-  await run(`tmux set-option -t "${layoutName}" -g set-clipboard on`);
+  await createSession(layoutName, args);
 
   // Split right: create utility shell pane (40% width)
   await run(`tmux split-window -h -t "${layoutName}" -p 40 -c "${config.projectRoot}"`);
@@ -181,7 +146,6 @@ exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
   logger.info('Layout: Architect (left) | Shell (right)');
   logger.info('Navigation: Ctrl+B ←/→ | Detach: Ctrl+B d');
 
-  // Attach to the session
   attachToSession(layoutName);
 }
 

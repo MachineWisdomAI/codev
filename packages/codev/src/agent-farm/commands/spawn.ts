@@ -17,6 +17,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { run, commandExists } from '../utils/shell.js';
 import { loadState, upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
+import { getBuilderSessionName } from '../utils/session.js';
 
 // Tower port — the single HTTP server since Spec 0090
 const DEFAULT_TOWER_PORT = 4100;
@@ -184,13 +185,6 @@ ${context.issue.body || '(No description provided)'}
  */
 function getProjectName(config: Config): string {
   return basename(config.projectRoot);
-}
-
-/**
- * Get a namespaced tmux session name: builder-{project}-{id}
- */
-function getSessionName(config: Config, builderId: string): string {
-  return `builder-${getProjectName(config)}-${builderId}`;
 }
 
 function generateShortId(): string {
@@ -575,7 +569,7 @@ async function startBuilderSession(
   roleContent: string | null,
   roleSource: string | null,
 ): Promise<{ sessionName: string; terminalId?: string }> {
-  const sessionName = getSessionName(config, builderId);
+  const sessionName = getBuilderSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
 
@@ -991,7 +985,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
   const commands = getResolvedCommands();
 
   // Worktree mode: launch Claude with no prompt, but in the worktree directory
-  const sessionName = getSessionName(config, builderId);
+  const sessionName = getBuilderSessionName(config, builderId);
 
   logger.info('Creating tmux session...');
 

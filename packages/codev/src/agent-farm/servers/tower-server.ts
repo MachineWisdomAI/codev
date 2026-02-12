@@ -2596,6 +2596,7 @@ const server = http.createServer(async (req, res) => {
               }));
             }
           } catch (err) {
+            log('ERROR', `GET /api/file/:id failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2610,8 +2611,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -2625,8 +2626,9 @@ const server = http.createServer(async (req, res) => {
             });
             res.end(data);
           } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end((err as Error).message);
+            log('ERROR', `GET /api/file/:id/raw failed: ${(err as Error).message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
           }
           return;
         }
@@ -2664,6 +2666,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
           } catch (err) {
+            log('ERROR', `POST /api/file/:id/save failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2828,7 +2831,8 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified, staged, untracked }));
           } catch (err) {
-            // Not a git repo or git command failed
+            // Not a git repo or git command failed — return graceful degradation with error field
+            log('WARN', `GET /api/git/status failed: ${(err as Error).message}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified: [], staged: [], untracked: [], error: (err as Error).message }));
           }
@@ -2864,8 +2868,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -2884,8 +2888,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
               res.end(content);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/file failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2909,8 +2914,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ ok: true }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `POST /api/annotate/:id/save failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2922,8 +2928,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ mtime: stat.mtimeMs }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/api/mtime failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2940,8 +2947,9 @@ const server = http.createServer(async (req, res) => {
               });
               res.end(data);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/${subRoute} failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
