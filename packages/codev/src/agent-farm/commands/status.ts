@@ -59,8 +59,17 @@ export async function status(): Promise<void> {
       }
 
       if (projectStatus.gateStatus?.hasGate) {
+        const gate = projectStatus.gateStatus;
+        let waitInfo = '';
+        if (gate.requestedAt) {
+          const elapsed = Date.now() - new Date(gate.requestedAt).getTime();
+          const mins = Math.floor(elapsed / 60_000);
+          waitInfo = mins > 0 ? ` (waiting ${mins}m)` : ' (waiting <1m)';
+        }
         logger.blank();
-        logger.warn(`Gate pending: ${projectStatus.gateStatus.gateName} (builder: ${projectStatus.gateStatus.builderId})`);
+        logger.warn(
+          `  Builder ${gate.builderId}  ${chalk.yellow('blocked')}  ${gate.gateName}${waitInfo}  → porch approve ${gate.builderId} ${gate.gateName}`
+        );
       }
 
       return;

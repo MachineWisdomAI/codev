@@ -18,6 +18,7 @@ import { getGlobalDb } from '../db/index.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 import { getGateStatusForProject } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
+import { GateWatcher } from '../utils/gate-watcher.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
@@ -863,7 +864,13 @@ async function gracefulShutdown(signal: string): Promise<void> {
     terminalManager.shutdown();
   }
 
-  // 4. Stop cloudflared tunnel if running
+  // 4. Stop gate watcher
+  if (gateWatcherInterval) {
+    clearInterval(gateWatcherInterval);
+    gateWatcherInterval = null;
+  }
+
+  // 5. Stop cloudflared tunnel if running
   stopTunnel();
 
   log('INFO', 'Graceful shutdown complete');
@@ -933,6 +940,24 @@ function getKnownProjectPaths(): string[] {
  */
 function getProjectName(projectPath: string): string {
   return path.basename(projectPath);
+}
+
+// Spec 0100: Gate watcher for af send notifications
+const gateWatcher = new GateWatcher(log);
+let gateWatcherInterval: ReturnType<typeof setInterval> | null = null;
+
+function startGateWatcher(): void {
+  gateWatcherInterval = setInterval(async () => {
+    const projectPaths = getKnownProjectPaths();
+    for (const projectPath of projectPaths) {
+      try {
+        const gateStatus = getGateStatusForProject(projectPath);
+        await gateWatcher.checkAndNotify(gateStatus, projectPath);
+      } catch (err) {
+        log('WARN', `Gate watcher error for ${projectPath}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }, 10_000);
 }
 
 // Cloudflared tunnel management
@@ -2356,25 +2381,25 @@ const server = http.createServer(async (req, res) => {
           // tmux reconnection, and tmux discovery in one place)
           const encodedPath = Buffer.from(projectPath).toString('base64url');
           const proxyUrl = `/project/${encodedPath}/`;
-          await getTerminalsForProject(projectPath, proxyUrl);
+          const { gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
 
           // Now read from the refreshed cache
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
-
-          // Build state response compatible with React dashboard
           const state: {
             architect: { port: number; pid: number; terminalId?: string } | null;
             builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string }>;
             utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string }>;
             annotations: Array<{ id: string; file: string; port: number; pid: number }>;
             projectName?: string;
+            gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
           } = {
             architect: null,
             builders: [],
             utils: [],
             annotations: [],
             projectName: path.basename(projectPath),
+            gateStatus,
           };
 
           // Add architect if exists
@@ -3063,6 +3088,10 @@ server.listen(port, '127.0.0.1', async () => {
 
   // TICK-001: Reconcile terminal sessions from previous run
   await reconcileTerminalSessions();
+
+  // Spec 0100: Start background gate watcher for af send notifications
+  startGateWatcher();
+  log('INFO', 'Gate watcher started (10s poll interval)');
 });
 
 // Initialize terminal WebSocket server (Phase 2 - Spec 0090)

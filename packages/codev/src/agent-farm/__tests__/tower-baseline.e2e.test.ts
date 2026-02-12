@@ -274,6 +274,19 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       expect(state).toHaveProperty('architect');
     });
 
+    // Spec 0100: /api/state includes gateStatus field
+    it('/api/state includes gateStatus field', async () => {
+      await activateProject(towerPort, testProjectPath);
+      const encodedPath = encodeProjectPath(testProjectPath);
+      const response = await fetch(`http://localhost:${towerPort}/project/${encodedPath}/api/state`);
+      expect(response.ok).toBe(true);
+      const state = await response.json();
+      expect(state).toHaveProperty('gateStatus');
+      expect(state.gateStatus).toHaveProperty('hasGate');
+      // No pending gates in test project, so hasGate should be false
+      expect(state.gateStatus.hasGate).toBe(false);
+    });
+
     it('dashboard serves React or legacy UI', async () => {
       // Activate project first
       await activateProject(towerPort, testProjectPath);

@@ -47,7 +47,7 @@ export interface TowerProjectStatus {
     hasGate: boolean;
     gateName?: string;
     builderId?: string;
-    timestamp?: number;
+    requestedAt?: string;
   };
 }
 

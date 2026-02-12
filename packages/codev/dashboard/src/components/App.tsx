@@ -10,6 +10,7 @@ import { Terminal } from './Terminal.js';
 import { StatusPanel } from './StatusPanel.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
+import { GateBanner } from './GateBanner.js';
 
 export function App() {
   const { state, refresh } = useBuilderStatus();
@@ -133,6 +134,8 @@ export function App() {
 
   if (isMobile) {
     return (
+      <>
+      <GateBanner gateStatus={state?.gateStatus} />
       <MobileLayout
         tabs={tabs}
         activeTabId={activeTabId}
@@ -141,6 +144,7 @@ export function App() {
       >
         {renderPersistentContent(['architect', 'builder', 'shell'])}
       </MobileLayout>
+      </>
     );
   }
 
@@ -160,6 +164,7 @@ export function App() {
           </span>
         </div>
       </header>
+      <GateBanner gateStatus={state?.gateStatus} />
       <div className="app-body">
         <SplitPane
           left={leftPane}
