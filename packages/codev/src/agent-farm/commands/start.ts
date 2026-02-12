@@ -205,10 +205,10 @@ async function startRemote(options: StartOptions): Promise<void> {
   const cdCommand = remotePath
     ? `cd ${remotePath}`
     : `cd ${projectName} 2>/dev/null || cd ~/${projectName} 2>/dev/null`;
-  // Always pass --no-browser to remote since we open browser locally
-  // No --port needed: Tower always runs on DEFAULT_TOWER_PORT (4100)
-  // Wrap in bash -l to source login environment (gets PATH from .profile)
-  const innerCommand = `${cdCommand} && af dash start --no-browser`;
+  // Start Tower and activate project on remote, without opening a browser
+  // (entire startRemote function removed in Phase 3)
+  const startCmd = ['af', 'dash', 'start', '--no-browser'].join(' ');
+  const innerCommand = `${cdCommand} && ${startCmd}`;
   const remoteCommand = `bash -l -c '${innerCommand.replace(/'/g, "'\\''")}'`;
 
   // Check passwordless SSH is configured
