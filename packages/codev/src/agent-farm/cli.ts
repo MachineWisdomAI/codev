@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { start, stop } from './commands/index.js';
 import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { logger } from './utils/logger.js';
-import { getResolvedCommands, setCliOverrides } from './utils/config.js';
+import { setCliOverrides } from './utils/config.js';
 import { version } from '../version.js';
 
 /**
@@ -51,22 +51,11 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   dashCmd
     .command('start')
     .description('Start the architect dashboard')
-    .option('-c, --cmd <command>', 'Command to run in architect terminal')
-    .option('-p, --port <port>', 'Port for architect terminal')
-    .option('--no-role', 'Skip loading architect role prompt')
     .option('--no-browser', 'Skip opening browser after start')
-    .option('--allow-insecure-remote', 'Bind to 0.0.0.0 for remote access (WARNING: no auth)')
-    .option('-r, --remote <target>', 'Start Agent Farm on remote machine (user@host or user@host:/path)')
     .action(async (options) => {
       try {
-        const commands = getResolvedCommands();
         await start({
-          cmd: options.cmd || commands.architect,
-          port: options.port ? parseInt(options.port, 10) : undefined,
-          noRole: !options.role,
           noBrowser: !options.browser,
-          allowInsecureRemote: options.allowInsecureRemote,
-          remote: options.remote,
         });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));

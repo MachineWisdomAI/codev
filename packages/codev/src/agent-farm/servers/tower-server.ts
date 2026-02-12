@@ -16,6 +16,14 @@ import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getGlobalDb } from '../db/index.js';
 import { escapeHtml, parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import { getGateStatusForProject } from '../utils/gate-status.js';
+import type { GateStatus } from '../utils/gate-status.js';
+import {
+  saveFileTab as saveFileTabToDb,
+  deleteFileTab as deleteFileTabFromDb,
+  loadFileTabsForProject as loadFileTabsFromDb,
+} from '../utils/file-tabs.js';
+import type { FileTab } from '../utils/file-tabs.js';
 import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 
@@ -84,11 +92,7 @@ let terminalManager: TerminalManager | null = null;
 
 // Project terminal registry - tracks which terminals belong to which project
 // Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
-interface FileTab {
-  id: string;
-  path: string;
-  createdAt: number;
-}
+// FileTab type is imported from utils/file-tabs.ts
 
 interface ProjectTerminals {
   architect?: string;
@@ -99,12 +103,14 @@ interface ProjectTerminals {
 const projectTerminals = new Map<string, ProjectTerminals>();
 
 /**
- * Get or create project terminal registry entry
+ * Get or create project terminal registry entry.
+ * On first access for a project, hydrates file tabs from SQLite so
+ * persisted tabs are available immediately (not just after /api/state).
  */
 function getProjectTerminalsEntry(projectPath: string): ProjectTerminals {
   let entry = projectTerminals.get(projectPath);
   if (!entry) {
-    entry = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
+    entry = { builders: new Map(), shells: new Map(), fileTabs: loadFileTabsForProject(projectPath) };
     projectTerminals.set(projectPath, entry);
   }
   // Migration: ensure fileTabs exists for older entries
@@ -263,6 +269,45 @@ function deleteProjectTerminalSessions(projectPath: string): void {
   } catch (err) {
     log('WARN', `Failed to delete project terminal sessions: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Save a file tab to SQLite for persistence across Tower restarts.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
+ */
+function saveFileTab(id: string, projectPath: string, filePath: string, createdAt: number): void {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    saveFileTabToDb(getGlobalDb(), id, normalizedPath, filePath, createdAt);
+  } catch (err) {
+    log('WARN', `Failed to save file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Delete a file tab from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling.
+ */
+function deleteFileTab(id: string): void {
+  try {
+    deleteFileTabFromDb(getGlobalDb(), id);
+  } catch (err) {
+    log('WARN', `Failed to delete file tab: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Load file tabs for a project from SQLite.
+ * Thin wrapper around utils/file-tabs.ts with error handling and path normalization.
+ */
+function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
+  try {
+    const normalizedPath = normalizeProjectPath(projectPath);
+    return loadFileTabsFromDb(getGlobalDb(), normalizedPath);
+  } catch (err) {
+    log('WARN', `Failed to load file tabs: ${(err as Error).message}`);
+  }
+  return new Map<string, FileTab>();
 }
 
 // Whether tmux is available on this system (checked once at startup)
@@ -496,7 +541,20 @@ function resolveProjectPathFromBasename(projectBasename: string): string | null 
 /**
  * Reconcile terminal sessions on startup.
  *
- * STRATEGY: tmux is the source of truth for existence.
+ * DUAL-SOURCE STRATEGY (tmux + SQLite):
+ *
+ * tmux is the source of truth for LIVENESS (process existence).
+ * SQLite is the source of truth for METADATA (project association, type, role ID).
+ *
+ * This is intentional: tmux sessions survive Tower restarts because they are
+ * OS-level processes independent of Tower. SQLite rows, on the other hand,
+ * cannot track process liveness — a row may exist for a terminal whose process
+ * has long since exited. Therefore:
+ *   - We NEVER trust SQLite alone to determine if a terminal is running.
+ *   - We ALWAYS check tmux for liveness, then use SQLite for enrichment.
+ *
+ * File tabs are the exception: they have no backing process, so SQLite is
+ * the sole source of truth for their persistence (see file_tabs table).
  *
  * Phase 1 — tmux-first discovery:
  *   List all codev tmux sessions. For each, look up SQLite for metadata.
@@ -823,13 +881,7 @@ if (isNaN(port) || port < 1 || port > 65535) {
 
 log('INFO', `Tower server starting on port ${port}`);
 
-// Interface for gate status
-interface GateStatus {
-  hasGate: boolean;
-  gateName?: string;
-  builderId?: string;
-  timestamp?: number;
-}
+// GateStatus type is imported from utils/gate-status.ts
 
 // Interface for terminal entry in tower UI
 interface TerminalEntry {
@@ -1008,10 +1060,13 @@ async function getTerminalsForProject(
   // if their SQLite rows were deleted by external interference (e.g., tests).
   const freshEntry: ProjectTerminals = { builders: new Map(), shells: new Map(), fileTabs: new Map() };
 
-  // Preserve file tabs from existing entry (not stored in SQLite)
+  // Load file tabs from SQLite (persisted across restarts)
   const existingEntry = projectTerminals.get(normalizedPath);
-  if (existingEntry) {
+  if (existingEntry && existingEntry.fileTabs.size > 0) {
+    // Use in-memory state if already populated (avoids redundant DB reads)
     freshEntry.fileTabs = existingEntry.fileTabs;
+  } else {
+    freshEntry.fileTabs = loadFileTabsForProject(projectPath);
   }
 
   for (const dbSession of dbSessions) {
@@ -1174,9 +1229,8 @@ async function getTerminalsForProject(
   // Atomically replace the cache entry
   projectTerminals.set(normalizedPath, freshEntry);
 
-  // Gate status - builders don't have gate tracking yet in tower
-  // TODO: Add gate status tracking when porch integration is updated
-  const gateStatus: GateStatus = { hasGate: false };
+  // Read gate status from porch YAML files
+  const gateStatus = getGateStatusForProject(projectPath);
 
   return { terminals, gateStatus };
 }
@@ -1368,16 +1422,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   // Phase 4 (Spec 0090): Tower manages terminals directly
   // No dashboard-server spawning - tower handles everything
   try {
-    // Clear any stale state file
-    const stateFile = path.join(projectPath, '.agent-farm', 'state.json');
-    if (fs.existsSync(stateFile)) {
-      try {
-        fs.unlinkSync(stateFile);
-      } catch {
-        // Ignore - file might not exist or be locked
-      }
-    }
-
+    // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
 
     // Initialize project terminal entry
@@ -1445,7 +1490,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         // TICK-001: Save to SQLite for persistence (with tmux session name)
         saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
 
-        // Auto-restart architect on exit (restored from pre-Phase 4 dashboard-server.ts)
+        // Auto-restart architect on exit
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
           const startedAt = Date.now();
@@ -1595,7 +1640,6 @@ const templatePath = findTemplatePath();
 // WebSocket server for terminal connections (Phase 2 - Spec 0090)
 let terminalWss: WebSocketServer | null = null;
 
-// React dashboard dist path (for serving directly from tower)
 // React dashboard dist path (for serving directly from tower)
 // Phase 4 (Spec 0090): Tower serves everything directly, no dashboard-server
 const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');
@@ -2223,8 +2267,8 @@ const server = http.createServer(async (req, res) => {
       const subPath = pathParts.slice(3).join('/');
 
       if (!encodedPath) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Missing project path');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing project path' }));
         return;
       }
 
@@ -2239,8 +2283,8 @@ const server = http.createServer(async (req, res) => {
         // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
         projectPath = normalizeProjectPath(projectPath);
       } catch {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Invalid project path encoding');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
         return;
       }
 
@@ -2460,10 +2504,10 @@ const server = http.createServer(async (req, res) => {
               ? filePath
               : path.join(projectPath, filePath);
 
-            // Security: ensure path is within project or is absolute path user provided
+            // Security: ensure resolved path is within project root
             const normalizedFull = path.normalize(fullPath);
             const normalizedProject = path.normalize(projectPath);
-            if (!normalizedFull.startsWith(normalizedProject) && !path.isAbsolute(filePath)) {
+            if (!normalizedFull.startsWith(normalizedProject + path.sep) && normalizedFull !== normalizedProject) {
               res.writeHead(403, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Path outside project' }));
               return;
@@ -2487,9 +2531,11 @@ const server = http.createServer(async (req, res) => {
               }
             }
 
-            // Create new file tab
-            const id = `file-${Date.now().toString(36)}`;
-            entry.fileTabs.set(id, { id, path: fullPath, createdAt: Date.now() });
+            // Create new file tab (write-through: in-memory + SQLite)
+            const id = `file-${crypto.randomUUID()}`;
+            const createdAt = Date.now();
+            entry.fileTabs.set(id, { id, path: fullPath, createdAt });
+            saveFileTab(id, projectPath, fullPath, createdAt);
 
             log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
 
@@ -2550,6 +2596,7 @@ const server = http.createServer(async (req, res) => {
               }));
             }
           } catch (err) {
+            log('ERROR', `GET /api/file/:id failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2564,8 +2611,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -2579,8 +2626,9 @@ const server = http.createServer(async (req, res) => {
             });
             res.end(data);
           } catch (err) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end((err as Error).message);
+            log('ERROR', `GET /api/file/:id/raw failed: ${(err as Error).message}`);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: (err as Error).message }));
           }
           return;
         }
@@ -2618,6 +2666,7 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true }));
           } catch (err) {
+            log('ERROR', `POST /api/file/:id/save failed: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: (err as Error).message }));
           }
@@ -2631,10 +2680,11 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
-          // Check if it's a file tab first (Spec 0092)
+          // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
           if (tabId.startsWith('file-')) {
             if (entry.fileTabs.has(tabId)) {
               entry.fileTabs.delete(tabId);
+              deleteFileTab(tabId);
               log('INFO', `Deleted file tab: ${tabId}`);
               res.writeHead(204);
               res.end();
@@ -2781,7 +2831,8 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified, staged, untracked }));
           } catch (err) {
-            // Not a git repo or git command failed
+            // Not a git repo or git command failed — return graceful degradation with error field
+            log('WARN', `GET /api/git/status failed: ${(err as Error).message}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ modified: [], staged: [], untracked: [], error: (err as Error).message }));
           }
@@ -2817,8 +2868,8 @@ const server = http.createServer(async (req, res) => {
           const tab = entry.fileTabs.get(tabId);
 
           if (!tab) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('File tab not found');
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'File tab not found' }));
             return;
           }
 
@@ -2837,8 +2888,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
               res.end(content);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/file failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2862,8 +2914,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ ok: true }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `POST /api/annotate/:id/save failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2875,8 +2928,9 @@ const server = http.createServer(async (req, res) => {
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ mtime: stat.mtimeMs }));
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/api/mtime failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2893,8 +2947,9 @@ const server = http.createServer(async (req, res) => {
               });
               res.end(data);
             } catch (err) {
-              res.writeHead(500, { 'Content-Type': 'text/plain' });
-              res.end((err as Error).message);
+              log('ERROR', `GET /api/annotate/:id/${subRoute} failed: ${(err as Error).message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: (err as Error).message }));
             }
             return;
           }
@@ -2987,8 +3042,8 @@ const server = http.createServer(async (req, res) => {
     res.end('Not found');
   } catch (err) {
     log('ERROR', `Request error: ${(err as Error).message}`);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Internal server error: ' + (err as Error).message);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
   }
 });
 

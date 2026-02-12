@@ -123,7 +123,7 @@ export class TowerClient {
   /**
    * Make a request to the tower API
    */
-  private async request<T>(
+  async request<T>(
     path: string,
     options: RequestInit = {}
   ): Promise<{ ok: boolean; status: number; data?: T; error?: string }> {
