@@ -424,6 +424,7 @@ af tower register [options]
 
 **Options:**
 - `--reauth` - Re-authenticate without changing tower name
+- `-p, --port <port>` - Tower port to signal after registration (default: 4100)
 
 **Description:**
 
@@ -437,6 +438,9 @@ af tower register
 
 # Re-authenticate existing registration
 af tower register --reauth
+
+# Register and signal tower on custom port
+af tower register -p 4300
 ```
 
 #### af tower deregister
@@ -444,8 +448,11 @@ af tower register --reauth
 Remove this tower's registration from codevos.ai.
 
 ```bash
-af tower deregister
+af tower deregister [options]
 ```
+
+**Options:**
+- `-p, --port <port>` - Tower port to signal after deregistration (default: 4100)
 
 **Description:**
 

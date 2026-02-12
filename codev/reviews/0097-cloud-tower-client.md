@@ -114,6 +114,16 @@ Codex requested changes on two issues. Both valid and now addressed:
 
 2. **Documentation regression**: `agent-farm.md` still documented the old `--web`/`CODEV_WEB_KEY` flow and didn't mention `af tower register`, `deregister`, or `status`. **Fixed**: Replaced the outdated `af tower` section with full documentation for all tower subcommands including `register`, `deregister`, `status`, and the `CODEVOS_URL` env var.
 
+## Review Iteration 5 — Codex + Claude Feedback (Fixed)
+
+Codex requested changes on two issues; Claude noted one minor issue. All three addressed:
+
+1. **Custom-port towers**: `signalTower()` hard-coded port 4100, so `af tower register`/`deregister` couldn't signal towers on custom ports. **Fixed**: Added `port` parameter to `signalTower()`, `TowerRegisterOptions`, and `towerDeregister()`. Added `-p, --port` CLI option to both `af tower register` and `af tower deregister`.
+
+2. **Skeleton docs**: `codev-skeleton/resources/commands/agent-farm.md` still documented old `--web`/`CODEV_WEB_KEY` flow. **Fixed**: Mirrored the new tower cloud documentation into the skeleton template.
+
+3. **`redeemToken()` missing try-catch** (Claude): Network failures in registration flow produced raw stack traces instead of user-friendly error messages. **Fixed**: Wrapped `redeemToken()` call in try-catch with `fatal()` message, matching the pattern used in `towerDeregister()`.
+
 ## Merge Resolution
 
 The merge from `main` into the builder branch re-introduced cloudflared code that was removed in Phase 2, along with a dead `getBasePortForProject` function (removed by Spec 0098 on main). Both were cleaned up in the review phase.

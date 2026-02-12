@@ -87,9 +87,10 @@ async function redeemToken(
 /**
  * Signal the running tower daemon to connect/disconnect the tunnel.
  */
-async function signalTower(endpoint: 'connect' | 'disconnect'): Promise<void> {
+async function signalTower(endpoint: 'connect' | 'disconnect', port?: number): Promise<void> {
+  const towerPort = port || DEFAULT_TOWER_PORT;
   try {
-    await fetch(`http://127.0.0.1:${DEFAULT_TOWER_PORT}/api/tunnel/${endpoint}`, {
+    await fetch(`http://127.0.0.1:${towerPort}/api/tunnel/${endpoint}`, {
       method: 'POST',
       signal: AbortSignal.timeout(5_000),
     });
@@ -125,6 +126,7 @@ export async function getTunnelStatus(port?: number): Promise<{
 
 export interface TowerRegisterOptions {
   reauth?: boolean;
+  port?: number;
 }
 
 /**
@@ -205,7 +207,13 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   const serverUrl = existing?.server_url || CODEVOS_URL;
   logger.info('Exchanging token...');
 
-  const { towerId, apiKey } = await redeemToken(serverUrl, token, towerName, getMachineId());
+  let towerId: string;
+  let apiKey: string;
+  try {
+    ({ towerId, apiKey } = await redeemToken(serverUrl, token, towerName, getMachineId()));
+  } catch (err) {
+    fatal(`Token exchange failed: ${(err as Error).message}`);
+  }
 
   // Write config
   const config: CloudConfig = {
@@ -217,7 +225,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   writeCloudConfig(config);
 
   // Signal tower daemon if running
-  await signalTower('connect');
+  await signalTower('connect', options.port);
 
   // Print success
   const accessUrl = `${serverUrl}/t/${towerName}/`;
@@ -231,7 +239,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
 /**
  * Deregister this tower from codevos.ai.
  */
-export async function towerDeregister(): Promise<void> {
+export async function towerDeregister(options: { port?: number } = {}): Promise<void> {
   const config = readCloudConfig();
 
   if (!config) {
@@ -271,7 +279,7 @@ export async function towerDeregister(): Promise<void> {
   deleteCloudConfig();
 
   // Signal tower daemon to disconnect
-  await signalTower('disconnect');
+  await signalTower('disconnect', options.port);
 
   logger.blank();
   logger.success('Tower deregistered successfully.');

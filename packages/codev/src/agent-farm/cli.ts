@@ -426,9 +426,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('register')
     .description('Register this tower with codevos.ai for remote access')
     .option('--reauth', 'Update API key without changing tower name')
+    .option('-p, --port <port>', 'Tower port to signal after registration (default: 4100)')
     .action(async (options) => {
       try {
-        await towerRegister({ reauth: options.reauth });
+        await towerRegister({ reauth: options.reauth, port: options.port ? parseInt(options.port, 10) : undefined });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
@@ -438,9 +439,10 @@ export async function runAgentFarm(args: string[]): Promise<void> {
   towerCmd
     .command('deregister')
     .description('Remove this tower from codevos.ai')
-    .action(async () => {
+    .option('-p, --port <port>', 'Tower port to signal after deregistration (default: 4100)')
+    .action(async (options) => {
       try {
-        await towerDeregister();
+        await towerDeregister({ port: options.port ? parseInt(options.port, 10) : undefined });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
