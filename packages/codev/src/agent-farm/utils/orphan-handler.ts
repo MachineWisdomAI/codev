@@ -41,13 +41,16 @@ interface OrphanedSession {
 async function findOrphanedSessions(): Promise<OrphanedSession[]> {
   const config = getConfig();
   const state = loadState();
-  const projectBasename = basename(config.projectRoot);
+  // Use basename to match Tower's naming convention (tower-server.ts creates
+  // sessions as `architect-<basename>`). Basename-based matching is intentional —
+  // it must align with how sessions are actually created.
+  const escapedBasename = basename(config.projectRoot).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // Match architect sessions scoped to THIS project:
   // - Tower-managed: architect-<basename> (e.g., architect-codev-public)
   // - Legacy CLI: af-architect (no project scope — single session)
   // - Legacy port-based: af-architect-XXXX (e.g., af-architect-4201)
-  const architectPattern = new RegExp(`^(architect-${projectBasename}|af-architect(-\\d+)?)$`);
+  const architectPattern = new RegExp(`^(architect-${escapedBasename}|af-architect(-\\d+)?)$`);
 
   try {
     const result = await run('tmux list-sessions -F "#{session_name}" 2>/dev/null');
