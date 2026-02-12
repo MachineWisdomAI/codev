@@ -68,9 +68,6 @@ export interface TmuxSession {
 }
 
 export interface StartOptions {
-  cmd?: string;
-  port?: number;
-  noRole?: boolean;
   noBrowser?: boolean;  // Skip opening browser after start
 }
 
