@@ -831,6 +831,69 @@ interface GateStatus {
   timestamp?: number;
 }
 
+/**
+ * Read gate status from porch YAML files for a project.
+ * Scans codev/projects/<id>/status.yaml for gates with status: pending.
+ */
+function getGateStatusForProject(projectPath: string): GateStatus {
+  try {
+    const projectsDir = path.join(projectPath, 'codev', 'projects');
+    if (!fs.existsSync(projectsDir)) {
+      return { hasGate: false };
+    }
+
+    const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const statusFile = path.join(projectsDir, entry.name, 'status.yaml');
+      if (!fs.existsSync(statusFile)) continue;
+
+      const content = fs.readFileSync(statusFile, 'utf-8');
+
+      // Simple YAML parsing: look for pending gates
+      // Format:
+      //   gates:
+      //     spec-approval:
+      //       status: pending
+      const gatesMatch = content.match(/^gates:\s*$/m);
+      if (!gatesMatch) continue;
+
+      const gatesSection = content.slice(gatesMatch.index! + gatesMatch[0].length);
+      const lines = gatesSection.split('\n');
+
+      let currentGate = '';
+      for (const line of lines) {
+        // Stop at next top-level key
+        if (/^\S/.test(line) && line.trim() !== '') break;
+
+        const gateNameMatch = line.match(/^\s{2}(\S+):\s*$/);
+        if (gateNameMatch) {
+          currentGate = gateNameMatch[1];
+          continue;
+        }
+
+        const statusMatch = line.match(/^\s{4}status:\s*(\S+)/);
+        if (statusMatch && currentGate) {
+          if (statusMatch[1] === 'pending') {
+            // Extract builder ID from directory name (e.g., "0099-tower-hygiene" → "0099")
+            const builderId = entry.name.match(/^(\d+)/)?.[1] || entry.name;
+            return {
+              hasGate: true,
+              gateName: currentGate,
+              builderId,
+            };
+          }
+        }
+      }
+    }
+  } catch (err) {
+    log('WARN', `[gate-status] Failed to read porch YAML: ${(err as Error).message}`);
+  }
+
+  return { hasGate: false };
+}
+
 // Interface for terminal entry in tower UI
 interface TerminalEntry {
   type: 'architect' | 'builder' | 'shell' | 'file';
@@ -1174,9 +1237,8 @@ async function getTerminalsForProject(
   // Atomically replace the cache entry
   projectTerminals.set(normalizedPath, freshEntry);
 
-  // Gate status - builders don't have gate tracking yet in tower
-  // TODO: Add gate status tracking when porch integration is updated
-  const gateStatus: GateStatus = { hasGate: false };
+  // Read gate status from porch YAML files
+  const gateStatus = getGateStatusForProject(projectPath);
 
   return { terminals, gateStatus };
 }
