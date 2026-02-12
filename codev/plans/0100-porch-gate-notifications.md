@@ -58,7 +58,7 @@ The work decomposes naturally into four phases: backend data plumbing, dashboard
 - Change `GateStatus.timestamp?: number` to `GateStatus.requestedAt?: string`
 - In the parsing loop, after finding a pending gate, also extract `requested_at` from the YAML. The format is `requested_at: 'ISO-8601-string'` indented at 4 spaces under the gate name
 - Return `requestedAt` as the raw ISO 8601 string (let consumers format it)
-- Add sanitization: strip ANSI escape sequences from `gateName` and `builderId`; reject values containing tmux control chars (`;`, `\n`, `\r`) — if rejected, return `{ hasGate: false }`
+- **No sanitization here** — `getGateStatusForProject()` returns raw data. Sanitization for `af send` is handled in the `GateWatcher` (Phase 3). The dashboard uses React JSX which auto-escapes strings, so no sanitization needed for display. This keeps the data source truthful — a pending gate always shows in the dashboard even if the gate name has unusual characters.
 
 **File: `packages/codev/src/agent-farm/servers/tower-server.ts` (around line 2366)**
 - Import `getGateStatusForProject`
@@ -80,16 +80,14 @@ The work decomposes naturally into four phases: backend data plumbing, dashboard
 **Tests: `packages/codev/src/agent-farm/__tests__/gate-status.test.ts`**
 - Test: `getGateStatusForProject` returns `requestedAt` when present in YAML
 - Test: `getGateStatusForProject` returns `undefined` for `requestedAt` when missing
-- Test: `getGateStatusForProject` returns `{ hasGate: false }` for malformed gate names
-- Test: ANSI escape sequences stripped from gate names
-- Test: Semicolons in gate names cause rejection (returns `hasGate: false`)
+- Test: `getGateStatusForProject` returns `{ hasGate: false }` when no pending gates exist
+- Test: `getGateStatusForProject` returns gate name as-is (no sanitization at data layer)
 
 #### Acceptance Criteria
 - [ ] `getGateStatusForProject()` correctly parses `requested_at` from status.yaml
 - [ ] Missing `requested_at` returns `requestedAt: undefined` (no error)
 - [ ] `/api/state` response includes `gateStatus` field
 - [ ] Dashboard `DashboardState` type includes `gateStatus`
-- [ ] Sanitization rejects tmux control characters
 - [ ] All new unit tests pass
 - [ ] All existing tests still pass
 
@@ -156,7 +154,10 @@ Revert the three files to their previous versions. No schema migration needed.
 
 #### Test Plan
 - **Unit Tests**: React Testing Library tests with mocked state
-- **Manual Testing**: Start tower, write pending gate to status.yaml, verify banner appears in browser
+- **Playwright E2E Tests**: `packages/codev/src/agent-farm/__tests__/e2e/dashboard-gate-banner.test.ts`
+  - Test: Gate banner appears when `status.yaml` has a pending gate (write pending gate, wait for dashboard poll, assert banner visible with correct text)
+  - Test: Gate banner disappears when gate is approved (change status.yaml to approved, wait for poll, assert banner gone)
+  - Test: Gate banner renders without time indicator when `requested_at` is missing
 
 #### Rollback Strategy
 Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
@@ -205,8 +206,9 @@ Remove `GateBanner.tsx`, revert App.tsx import, remove CSS classes.
 
 **File: `packages/codev/src/agent-farm/servers/tower-server.ts`**
 - Import `GateWatcher`, instantiate one per Tower process (singleton)
-- In the `/api/state` handler, after computing `gateStatus`, call `gateWatcher.checkAndNotify(gateStatus, projectPath)` (fire-and-forget — don't await in the request path, or await but catch errors)
-- Alternative: if there's a background poll loop, hook it there instead. The `/api/state` handler is polled every ~3-5s by the dashboard, so it serves as a natural trigger point.
+- **Add a background `setInterval` (every 10s)** that iterates over all active projects, calls `getGateStatusForProject()`, and invokes `gateWatcher.checkAndNotify()`. This ensures architect notifications fire even if the dashboard tab is closed or focused on another project. The interval is independent of dashboard polling.
+- Clean up the interval on server shutdown (add to the existing cleanup logic)
+- The `/api/state` handler does NOT trigger `checkAndNotify` — that's solely the background poll's job. This avoids double-firing when the dashboard is open.
 
 **Tests: `packages/codev/src/agent-farm/__tests__/gate-watcher.test.ts`**
 - Test: New gate triggers notification (mock execFile)
@@ -312,8 +314,9 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | `af send` fails from Tower process context | Medium | Low | Dashboard is primary channel; log warn and swallow |
-| CSS banner breaks existing layout | Low | Medium | Scoped class names; test in Playwright |
+| CSS banner breaks existing layout | Low | Medium | Scoped class names; test in Playwright E2E |
 | `timestamp` field removal breaks consumers | Low | High | Search confirms field is never populated or read |
+| Three parallel `GateStatus` type definitions drift | Low | Medium | gate-status.ts is source of truth; tower-client.ts and dashboard api.ts must match. Document in code comments. |
 
 ## Validation Checkpoints
 1. **After Phase 1**: `curl /api/state` returns `gateStatus` with `requestedAt`
@@ -323,3 +326,18 @@ Phases 2, 3, and 4 can be worked on concurrently after Phase 1, but will be done
 
 ## Documentation Updates Required
 - [ ] `codev/resources/arch.md` with new modules (gate-watcher)
+
+## Consultation Log
+
+### Iteration 1 (2026-02-12)
+
+**Gemini**: APPROVE (HIGH confidence). No issues.
+
+**Claude**: APPROVE (HIGH confidence). Minor notes:
+- `getGateStatusForProject` scans all project dirs; should clarify filtering. Response: acceptable — Tower serves one project per dashboard instance; the function returns first pending gate which is correct for single-project view.
+- Three parallel `GateStatus` type definitions need synchronization. Response: added as a risk with mitigation.
+
+**Codex**: REQUEST_CHANGES (MEDIUM confidence). Three issues:
+1. Sanitization in `getGateStatusForProject` suppresses gate data system-wide — spec only requires suppressing `af send`. **Fixed**: moved sanitization to `GateWatcher` only. Data layer returns raw values; React JSX auto-escapes for dashboard.
+2. Architect notifications depend on dashboard polling — if dashboard is closed, `af send` never fires. **Fixed**: added background `setInterval` (10s) in Tower that polls gate status independently of dashboard requests.
+3. Playwright testing required for UI changes but absent from plan. **Fixed**: added explicit Playwright E2E tests in Phase 2 test plan.
