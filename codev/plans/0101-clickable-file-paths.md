@@ -35,13 +35,15 @@ Wire the existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js vi
 
 #### Objectives
 - Create a custom `ILinkProvider` implementation that detects file paths in terminal buffer lines using `FILE_PATH_REGEX`
-- Return `ILink` objects with decoration and Cmd/Ctrl+Click activation
+- Return `ILink` objects with decoration and platform-aware Cmd/Ctrl+Click activation
+- Extract line/col directly from regex capture groups (not from link text via `parseFilePath`)
 
 #### Deliverables
 - [ ] New file `packages/codev/dashboard/src/lib/filePathLinkProvider.ts`
 - [ ] `FilePathLinkProvider` class implementing xterm.js `ILinkProvider`
-- [ ] Modifier key detection (Cmd on macOS, Ctrl on others) in `activate` callback
+- [ ] Platform-aware modifier key detection (Cmd-only on macOS, Ctrl-only on others)
 - [ ] Regex `/g` flag handling (reset `lastIndex` per `provideLinks` call)
+- [ ] Line/col extracted from regex groups and passed via closure (not via `parseFilePath` on link text)
 
 #### Implementation Details
 
@@ -49,9 +51,11 @@ Wire the existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js vi
 
 ```typescript
 import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm';
-import { FILE_PATH_REGEX, parseFilePath, looksLikeFilePath } from './filePaths.js';
+import { FILE_PATH_REGEX, looksLikeFilePath } from './filePaths.js';
 
 type FileOpenCallback = (path: string, line?: number, column?: number, terminalId?: string) => void;
+
+const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
 
 export class FilePathLinkProvider implements ILinkProvider {
   constructor(
@@ -62,9 +66,9 @@ export class FilePathLinkProvider implements ILinkProvider {
 
   provideLinks(lineNumber: number, callback: (links: ILink[] | undefined) => void): void {
     // Get line text from the terminal buffer
-    const line = this.terminal.buffer.active.getLine(lineNumber - 1);
-    if (!line) { callback(undefined); return; }
-    const text = line.translateToString();
+    const bufferLine = this.terminal.buffer.active.getLine(lineNumber - 1);
+    if (!bufferLine) { callback(undefined); return; }
+    const text = bufferLine.translateToString();
 
     // Create fresh regex to avoid /g lastIndex issues
     const regex = new RegExp(FILE_PATH_REGEX.source, FILE_PATH_REGEX.flags);
@@ -72,27 +76,37 @@ export class FilePathLinkProvider implements ILinkProvider {
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(text)) !== null) {
-      const captured = match[1]; // Group 1 is the file path
-      const fullMatch = match[0];
-      if (!captured || !looksLikeFilePath(captured)) continue;
+      const filePath = match[1]; // Group 1: file path (without line/col)
+      if (!filePath || !looksLikeFilePath(filePath)) continue;
 
-      // Calculate the start position of the captured group within the full match
-      const matchStart = match.index;
-      const capturedOffset = fullMatch.indexOf(captured);
-      const startCol = matchStart + capturedOffset;
+      // Extract line/col directly from regex groups:
+      // Groups 2,3 = colon format (:line:col), Groups 4,5 = paren format (line,col)
+      const line = match[2] ? parseInt(match[2], 10)
+                 : match[4] ? parseInt(match[4], 10)
+                 : undefined;
+      const column = match[3] ? parseInt(match[3], 10)
+                   : match[5] ? parseInt(match[5], 10)
+                   : undefined;
+
+      // Calculate link range: covers the full match (path + line/col suffix)
+      // but excludes the leading delimiter character (space, quote, bracket, etc.)
+      const fullMatch = match[0];
+      const capturedOffset = fullMatch.indexOf(filePath);
+      const linkStart = match.index + capturedOffset; // Start at the file path
+      const linkEnd = match.index + fullMatch.length; // End includes :line:col
 
       links.push({
         range: {
-          start: { x: startCol + 1, y: lineNumber },
-          end: { x: startCol + captured.length + 1, y: lineNumber },
+          start: { x: linkStart + 1, y: lineNumber },
+          end: { x: linkEnd + 1, y: lineNumber },
         },
-        text: captured,
+        text: fullMatch.substring(capturedOffset), // "src/foo.ts:42:15"
         decorations: { pointerCursor: true, underline: true },
-        activate: (event: MouseEvent, linkText: string) => {
-          // Require modifier key: Cmd on macOS, Ctrl on others
-          if (!event.metaKey && !event.ctrlKey) return;
-          const parsed = parseFilePath(linkText);
-          this.onFileOpen(parsed.path, parsed.line, parsed.column, this.terminalId);
+        activate: (_event: MouseEvent, _linkText: string) => {
+          // Platform-aware modifier key: Cmd on macOS, Ctrl on others
+          // isMac → require metaKey; !isMac → require ctrlKey
+          if (isMac ? !_event.metaKey : !_event.ctrlKey) return;
+          this.onFileOpen(filePath, line, column, this.terminalId);
         },
       });
     }
@@ -104,14 +118,17 @@ export class FilePathLinkProvider implements ILinkProvider {
 
 Key decisions:
 - **Constructor accepts `Terminal` instance** for buffer access via `terminal.buffer.active.getLine()`. The Terminal instance is available at registration time in `Terminal.tsx`.
+- **Line/col from regex groups, not `parseFilePath`**: `FILE_PATH_REGEX` captures the path in group 1 (without line/col), and line/col in groups 2-5. We extract them directly from the match groups and pass via closure in the `activate` callback. This avoids the bug where `parseFilePath(match[1])` would miss line/col info since `match[1]` is the bare path. The `text` property includes the full visible match (path + line/col suffix) for correct link range display.
+- **Platform-aware modifier**: `isMac` checks `navigator.platform` once at module load. On macOS, `activate` requires `metaKey` (Cmd); on other platforms, it requires `ctrlKey` (Ctrl). This prevents Ctrl+Click on macOS from triggering file open (which would interfere with standard macOS Ctrl+Click → context menu behavior).
 - Create a new `RegExp` from `FILE_PATH_REGEX.source` + `.flags` each call to avoid `/g` stateful `lastIndex`
 - `looksLikeFilePath()` filters false positives before creating links
 - `ILink.decorations` sets `{ pointerCursor: true, underline: true }` — CSS overrides make it dotted (see Phase 3)
-- `ILink.activate` checks `event.metaKey || event.ctrlKey` before calling `onFileOpen`
 
 #### Acceptance Criteria
 - [ ] `FilePathLinkProvider` detects all pattern types from spec's pattern table
-- [ ] Modifier key check prevents activation on plain click
+- [ ] On macOS: only Cmd+Click activates; Ctrl+Click does NOT activate
+- [ ] On Linux/Windows: only Ctrl+Click activates; Cmd+Click does NOT activate
+- [ ] Line/col info from `src/foo.ts:42:15` is correctly extracted and passed to `onFileOpen`
 - [ ] No interference with existing `WebLinksAddon` URL detection
 - [ ] Regex `/g` flag is handled correctly (no alternating match/miss)
 
@@ -213,7 +230,7 @@ Changes to `POST /api/tabs/file` handler:
 #### Objectives
 - Wire `FilePathLinkProvider` into `Terminal.tsx`
 - Pass `terminalId` through `onFileOpen` → `createFileTab` → Tower API
-- Add CSS for dotted underline decoration with hover color shift
+- Add CSS for dotted underline decoration with hover color shift (file-path links only, not URL links)
 - Remove dead `looksLikeFilePath` code path from WebLinksAddon handler
 
 #### Deliverables
@@ -223,7 +240,8 @@ Changes to `POST /api/tabs/file` handler:
 - [ ] Updated `TerminalProps` — add `terminalId` to `onFileOpen` callback signature
 - [ ] Updated `App.tsx` — pass `terminalId` to `handleFileOpen` → `createFileTab`
 - [ ] Updated `api.ts` — `createFileTab` accepts and sends `terminalId`
-- [ ] CSS for dotted underline + hover color on file path links
+- [ ] CSS for dotted underline + hover color on file path links (distinct from URL links)
+- [ ] **DOM discovery task**: Inspect xterm.js rendered DOM to determine correct CSS selectors
 
 #### Implementation Details
 
@@ -279,43 +297,65 @@ Changes to `POST /api/tabs/file` handler:
    ```
 2. Include `terminalId` in request body: `JSON.stringify({ path: filePath, line, terminalId })`
 
-**File**: `packages/codev/dashboard/src/index.css` (or the existing dashboard CSS file)
+**CSS Styling — DOM Discovery and Approach**:
 
-xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCursor: boolean` — it does NOT support underline style (solid vs dotted). The dotted underline requires CSS targeting xterm's link decoration elements. xterm.js applies a `xterm-link` class to link spans rendered by `ILinkProvider`.
+xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCursor: boolean` — it does NOT support underline style. The dotted underline requires CSS targeting xterm's decoration DOM elements.
+
+**Critical discovery task**: Before writing CSS, the builder must:
+1. Register the `FilePathLinkProvider` and a `WebLinksAddon` on a test terminal
+2. Output both a file path and a URL to the terminal
+3. Inspect the rendered DOM (via browser DevTools) to determine:
+   - What HTML elements xterm.js creates for `ILinkProvider` links vs `WebLinksAddon` links
+   - What CSS classes or attributes distinguish them
+   - Whether they share the same selector or have different ones
+
+**Strategy for distinguishing file-path links from URL links**:
+
+In xterm.js 5.x, `ILinkProvider` links and `WebLinksAddon` links may render using different DOM mechanisms:
+- `WebLinksAddon` renders links as inline `<a>` tags with the `xterm-link` class
+- `ILinkProvider` links render as overlay `<div>` elements with decoration classes
+
+If they use **different DOM structures** (likely), CSS selectors can target each independently. File path links get dotted underline; URL links keep their default solid underline.
+
+If they share the **same DOM structure**, the builder must apply a CSS class to distinguish them. Approach: in `FilePathLinkProvider`, use a `MutationObserver` on the xterm container to detect newly-added link decoration elements and add a `data-link-type="file"` attribute, or use the `ILink.decorations` mechanism with a custom class if the API supports it.
+
+**CSS rules** (selectors to be finalized after DOM discovery):
 
 ```css
-/* File path links in terminal — dotted underline (distinct from URL solid underline) */
-.xterm .xterm-screen a.xterm-link {
-  text-decoration: underline dotted;
+/* File path links — dotted underline (distinct from URL solid underline) */
+/* Selector TBD after DOM inspection; placeholder using overlay div approach */
+.xterm .xterm-screen [data-link-type="file"],
+.xterm .xterm-link-layer .file-path-link {
+  text-decoration: underline dotted !important;
   text-decoration-color: rgba(255, 255, 255, 0.4);
   text-underline-offset: 2px;
 }
 
 /* Hover state: subtle brightness shift + pointer cursor */
-.xterm .xterm-screen a.xterm-link:hover {
+.xterm .xterm-screen [data-link-type="file"]:hover,
+.xterm .xterm-link-layer .file-path-link:hover {
   text-decoration-color: rgba(255, 255, 255, 0.8);
   filter: brightness(1.15);
   cursor: pointer;
 }
 ```
 
-**Note**: If xterm.js doesn't use `<a>` tags or a `.xterm-link` class, we inspect the actual DOM structure at implementation time and target the correct selectors. The WebLinksAddon and ILinkProvider may render decorations differently — we verify during Phase 3 and adjust selectors accordingly.
-
-**URL links** (from WebLinksAddon) will have a solid underline by default (browser default for `<a>` tags or xterm's own styling). File path links get dotted underline via the CSS above. If both share the same selector, we use JavaScript to add a distinguishing CSS class (e.g., `data-link-type="file"`) in the link provider's hover handler.
+The final selectors will be determined during implementation based on the DOM discovery. The CSS variables used (`rgba(255, 255, 255, 0.4)` / `0.8`) match the terminal's light-on-dark theme.
 
 #### Acceptance Criteria
 - [ ] File paths in terminal output show dotted underline
+- [ ] URL links show solid underline (different from file path links)
 - [ ] Hover over file path shows brightness shift and pointer cursor
-- [ ] Cmd+Click opens file in viewer
+- [ ] Cmd+Click (macOS) / Ctrl+Click (others) opens file in viewer
 - [ ] Plain click does not trigger file open
-- [ ] URLs still open in new browser tab (WebLinksAddon unchanged, solid underline)
+- [ ] URLs still open in new browser tab (WebLinksAddon unchanged)
 - [ ] `terminalId` is passed through the full chain to the Tower API
 - [ ] Builder terminal paths resolve relative to builder's worktree cwd
 - [ ] Dead `looksLikeFilePath` branch removed from WebLinksAddon handler
 
 #### Risks
-- **Risk**: xterm.js link decoration DOM structure may differ from expected selectors
-  - **Mitigation**: Inspect DOM at implementation time; adjust CSS selectors to match actual structure
+- **Risk**: xterm.js `ILinkProvider` and `WebLinksAddon` share the same DOM structure, making CSS distinction difficult
+  - **Mitigation**: Use `MutationObserver` or custom attribute to tag file-path link elements; worst case, both link types get dotted underline (acceptable degradation since visual distinction is a nice-to-have, not a blocker)
 
 ---
 
@@ -325,6 +365,7 @@ xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCurso
 #### Objectives
 - Write comprehensive unit tests for all new and modified code
 - Write E2E tests for the click-to-open flow, including builder worktree scenario
+- Write visual regression tests for link styling (spec scenarios 17-19)
 
 #### Deliverables
 - [ ] Unit tests: `packages/codev/tests/unit/file-path-link-provider.test.ts`
@@ -339,6 +380,7 @@ xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCurso
 - Test `looksLikeFilePath` filtering (URLs, domains → reject; valid paths → accept)
 - Test multiple paths in one line produce multiple links
 - Test regex `/g` flag doesn't cause alternating matches
+- Test line/col extraction from regex groups (colon format and paren format)
 
 **Unit Tests**: `file-tab-resolution.test.ts`
 - Test path containment: within project → allowed; escaping → 403
@@ -353,22 +395,28 @@ xterm.js `ILinkDecorations` only supports `underline: boolean` and `pointerCurso
 - Test path with line number scrolls to line
 - Test URL still works (opens in new tab)
 - Test plain click does not open file
-- **Test builder terminal worktree resolution**: Spawn or simulate a builder terminal session with a worktree cwd. Output a relative file path. Cmd+Click the path and verify the file viewer opens the correct file resolved relative to the worktree, not the project root. This can be done by:
-  1. Creating a known file in a subdirectory that simulates a worktree
-  2. Setting up a terminal session with that subdirectory as cwd
-  3. Echoing a relative path to that file
-  4. Cmd+Clicking and verifying the correct file opens
+- **Test builder terminal worktree resolution**: Spawn or simulate a builder terminal session with a worktree cwd. Output a relative file path. Cmd+Click the path and verify the file viewer opens the correct file resolved relative to the worktree, not the project root.
+
+**Visual/Screenshot Tests** (spec scenarios 17-19):
+- Test dotted underline: Screenshot comparison showing file paths have dotted underline decoration
+- Test hover cursor: Verify pointer cursor on hover over file path (via Playwright `page.mouse.move()` + screenshot)
+- Test no visual noise: Screenshot showing that plain text with dots (sentences, config values) is NOT underlined
+
+These use Playwright's `toHaveScreenshot()` for visual regression. Baseline screenshots are committed and compared on subsequent runs.
 
 #### Acceptance Criteria
 - [ ] All unit tests pass
 - [ ] All E2E tests pass
 - [ ] Existing tests not broken
-- [ ] Coverage for all spec test scenarios 1-19
+- [ ] Coverage for all spec test scenarios 1-19 (including visual tests 17-19)
 - [ ] Builder worktree resolution tested in E2E
+- [ ] Visual regression baselines committed
 
 #### Risks
 - **Risk**: E2E tests need a running Tower + terminal to test click behavior
   - **Mitigation**: Use existing Playwright test infrastructure that starts a dev server
+- **Risk**: Visual regression tests may be flaky due to rendering differences
+  - **Mitigation**: Use appropriate `maxDiffPixelRatio` threshold in `toHaveScreenshot()`
 
 ---
 
@@ -386,17 +434,19 @@ Phases 1 and 2 can be implemented in parallel.
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | `ILink.activate` doesn't receive MouseEvent | Low | Medium | Track modifier key state globally via keydown/keyup |
-| xterm.js link DOM doesn't support dotted CSS | Low | Medium | Inspect DOM, adjust selectors; worst case use JS class |
+| File-path and URL links share same DOM structure | Medium | Medium | MutationObserver + custom attribute; acceptable fallback: both dotted |
 | `session.config.cwd` not directly accessible | Confirmed | Low | Add `get cwd()` getter to PtySession (one-line fix) |
 | Regex false positives in terminal output | Low | Low | `looksLikeFilePath()` filter already handles common cases |
+| Visual regression test flakiness | Low | Low | Appropriate pixel diff threshold |
 
 ## Validation Checkpoints
-1. **After Phase 1**: File paths are detected in terminal buffer lines (verify with console.log in `provideLinks`)
+1. **After Phase 1**: File paths are detected in terminal buffer lines (verify with console.log in `provideLinks`); line/col correctly extracted from `src/foo.ts:42:15`
 2. **After Phase 2**: `curl` test: POST to `/api/tabs/file` with `terminalId` resolves correctly for both project-root and worktree scenarios
-3. **After Phase 3**: End-to-end: type a file path in terminal, Cmd+Click opens viewer; builder terminal paths resolve correctly
-4. **After Phase 4**: All tests green, no regressions
+3. **After Phase 3**: End-to-end: type a file path in terminal, Cmd+Click opens viewer; builder terminal paths resolve correctly; file-path links have dotted underline, URL links have solid underline
+4. **After Phase 4**: All tests green, no regressions, visual baselines committed
 
 ## Notes
 - The existing `WebLinksAddon` handler in `Terminal.tsx` (lines 82-99) checks `looksLikeFilePath` but is never triggered for file paths. After this implementation, that dead code branch is **removed** — the WebLinksAddon handler becomes URL-only. The new `FilePathLinkProvider` handles file paths separately.
 - The `Terminal` component's `onFileOpen` callback signature changes to include `terminalId` — this is a backward-compatible addition (optional parameter).
 - `PtySession.config` is `private readonly` — the plan adds a `get cwd()` public getter rather than making `config` public, preserving encapsulation.
+- Line/col extraction uses regex capture groups directly (groups 2-5) rather than `parseFilePath` on the link text. This avoids the bug where `match[1]` (bare path without line/col) would produce a `parseFilePath` result with no line info.
