@@ -249,6 +249,33 @@ function ensureLocalDatabase(): Database.Database {
     db.prepare('INSERT INTO _migrations (version) VALUES (4)').run();
   }
 
+  // Migration v5: Remove UNIQUE constraint from annotations.port (all annotations use port=0)
+  const v5 = db.prepare('SELECT version FROM _migrations WHERE version = 5').get();
+  if (!v5) {
+    const tableInfo = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='annotations'")
+      .get() as { sql: string } | undefined;
+
+    if (tableInfo?.sql?.includes('port INTEGER NOT NULL UNIQUE')) {
+      db.exec(`
+        CREATE TABLE annotations_new (
+          id TEXT PRIMARY KEY,
+          file TEXT NOT NULL,
+          port INTEGER NOT NULL DEFAULT 0,
+          pid INTEGER NOT NULL DEFAULT 0,
+          parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
+          parent_id TEXT,
+          started_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO annotations_new SELECT id, file, port, pid, parent_type, parent_id, started_at FROM annotations;
+        DROP TABLE annotations;
+        ALTER TABLE annotations_new RENAME TO annotations;
+      `);
+      console.log('[info] Migrated annotations table: removed UNIQUE constraint from port');
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (5)').run();
+  }
+
   return db;
 }
 

@@ -61,12 +61,12 @@ export async function stop(): Promise<void> {
     logger.debug(`Tower deactivation failed: ${result.error}, trying legacy cleanup`);
   }
 
-  // Legacy cleanup for processes not managed by tower (tmux session names only)
+  // Legacy cleanup for processes not managed by tower
   const state = loadState();
 
   let stopped = 0;
 
-  // Stop architect — kill tmux session by name
+  // Stop architect — kill tmux session by name, then Tower terminal
   if (state.architect?.tmuxSession) {
     logger.info('Stopping architect...');
     try {
@@ -76,8 +76,13 @@ export async function stop(): Promise<void> {
       // Session may already be gone
     }
   }
+  if (towerRunning && state.architect?.terminalId) {
+    try {
+      await client.killTerminal(state.architect.terminalId);
+    } catch { /* best-effort */ }
+  }
 
-  // Stop all builders — kill tmux sessions by name
+  // Stop all builders — kill tmux sessions, then Tower terminals
   for (const builder of state.builders) {
     if (builder.tmuxSession) {
       logger.info(`Stopping builder ${builder.id}...`);
@@ -88,9 +93,15 @@ export async function stop(): Promise<void> {
         // Session may already be gone
       }
     }
+    if (towerRunning && builder.terminalId) {
+      try {
+        await client.killTerminal(builder.terminalId);
+        if (!builder.tmuxSession) stopped++;
+      } catch { /* best-effort */ }
+    }
   }
 
-  // Stop all utils — kill tmux sessions by name
+  // Stop all utils — kill tmux sessions, then Tower terminals
   for (const util of state.utils) {
     if (util.tmuxSession) {
       logger.info(`Stopping util ${util.id}...`);
@@ -100,6 +111,12 @@ export async function stop(): Promise<void> {
       } catch {
         // Session may already be gone
       }
+    }
+    if (towerRunning && util.terminalId) {
+      try {
+        await client.killTerminal(util.terminalId);
+        if (!util.tmuxSession) stopped++;
+      } catch { /* best-effort */ }
     }
   }
 

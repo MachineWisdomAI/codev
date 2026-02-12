@@ -22,6 +22,22 @@ vi.mock('../utils/shell.js', () => ({
   openBrowser: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock config
+vi.mock('../utils/config.js', () => ({
+  getConfig: () => ({
+    projectRoot: '/test/project',
+  }),
+}));
+
+// Mock TowerClient (constructor reads local-key file)
+vi.mock('../lib/tower-client.js', () => ({
+  TowerClient: class {
+    getProjectUrl(path: string) {
+      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    }
+  },
+}));
+
 // Mock logger
 vi.mock('../utils/logger.js', () => ({
   logger: {
@@ -70,7 +86,7 @@ describe('attach command', () => {
       // Attach with --browser opens Tower dashboard
       await attach({ issue: 42, browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4100');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should error when issue not found', async () => {
@@ -100,7 +116,7 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4100');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should find builder by prefix match', async () => {
@@ -122,7 +138,7 @@ describe('attach command', () => {
       // Use partial match
       await attach({ project: 'bugfix-173', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4100');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
 
     it('should error when builder not found', async () => {
@@ -186,7 +202,7 @@ describe('attach command', () => {
 
       await attach({ project: '0073', browser: true });
 
-      expect(openBrowser).toHaveBeenCalledWith('http://localhost:4100');
+      expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
     });
   });
 });

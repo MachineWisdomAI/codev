@@ -10,6 +10,7 @@ import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { loadState, removeBuilder } from '../state.js';
+import { TowerClient } from '../lib/tower-client.js';
 
 /**
  * Remove porch state for a project from codev/projects/
@@ -171,6 +172,19 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
     logger.info('Killed tmux session');
   } catch {
     // Session may not exist
+  }
+
+  // Kill Tower terminal if exists (node-pty terminals without tmux)
+  if (builder.terminalId) {
+    try {
+      const client = new TowerClient();
+      const killed = await client.killTerminal(builder.terminalId);
+      if (killed) {
+        logger.info('Killed Tower terminal');
+      }
+    } catch {
+      // Tower may not be running
+    }
   }
 
   // For bugfix mode: actually remove worktree and delete remote branch

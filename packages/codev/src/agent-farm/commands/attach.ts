@@ -6,6 +6,8 @@ import type { Builder } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { run, openBrowser } from '../utils/shell.js';
 import { loadState, getBuilder, getBuilders } from '../state.js';
+import { getConfig } from '../utils/config.js';
+import { TowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
 
 export interface AttachOptions {
@@ -164,7 +166,9 @@ export async function attach(options: AttachOptions): Promise<void> {
 
   // Option 1: Open in browser (via Tower dashboard)
   if (options.browser) {
-    const url = 'http://localhost:4100';
+    const config = getConfig();
+    const client = new TowerClient();
+    const url = client.getProjectUrl(config.projectRoot);
     logger.info(`Opening Tower dashboard at ${url}...`);
     await openBrowser(url);
     logger.success('Opened Tower dashboard in browser');

@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS utils (
 CREATE TABLE IF NOT EXISTS annotations (
   id TEXT PRIMARY KEY,
   file TEXT NOT NULL,
-  port INTEGER NOT NULL UNIQUE,
-  pid INTEGER NOT NULL,
+  port INTEGER NOT NULL DEFAULT 0,
+  pid INTEGER NOT NULL DEFAULT 0,
   parent_type TEXT NOT NULL CHECK(parent_type IN ('architect', 'builder', 'util')),
   parent_id TEXT,
   started_at TEXT NOT NULL DEFAULT (datetime('now'))

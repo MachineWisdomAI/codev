@@ -23,6 +23,22 @@ vi.mock('../utils/shell.js', () => ({
   openBrowser: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock config
+vi.mock('../utils/config.js', () => ({
+  getConfig: () => ({
+    projectRoot: '/test/project',
+  }),
+}));
+
+// Mock TowerClient (constructor reads local-key file)
+vi.mock('../lib/tower-client.js', () => ({
+  TowerClient: class {
+    getProjectUrl(path: string) {
+      return `http://localhost:4100/project/${Buffer.from(path).toString('base64url')}/`;
+    }
+  },
+}));
+
 const mockFatal = vi.fn((msg: string) => { throw new Error(msg || 'Fatal error'); });
 vi.mock('../utils/logger.js', () => ({
   logger: {
@@ -92,7 +108,7 @@ describe('Bugfix #195: attach command handles PTY-backed builders', () => {
     await attach({ project: 'task-AAAA', browser: true });
 
     // Should open Tower dashboard, not a per-builder port
-    expect(openBrowser).toHaveBeenCalledWith('http://localhost:4100');
+    expect(openBrowser).toHaveBeenCalledWith(expect.stringContaining('localhost:4100/project/'));
   });
 
   it('should attach via tmux for PTY-backed builders', async () => {
