@@ -2507,7 +2507,7 @@ const server = http.createServer(async (req, res) => {
             // Security: ensure path is within project or is absolute path user provided
             const normalizedFull = path.normalize(fullPath);
             const normalizedProject = path.normalize(projectPath);
-            if (!normalizedFull.startsWith(normalizedProject) && !path.isAbsolute(filePath)) {
+            if (!path.isAbsolute(filePath) && !normalizedFull.startsWith(normalizedProject + path.sep) && normalizedFull !== normalizedProject) {
               res.writeHead(403, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Path outside project' }));
               return;
