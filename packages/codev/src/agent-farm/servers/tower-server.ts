@@ -1436,7 +1436,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         // TICK-001: Save to SQLite for persistence (with tmux session name)
         saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
 
-        // Auto-restart architect on exit (restored from pre-Phase 4 dashboard-server.ts)
+        // Auto-restart architect on exit
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
           const startedAt = Date.now();
@@ -1586,7 +1586,6 @@ const templatePath = findTemplatePath();
 // WebSocket server for terminal connections (Phase 2 - Spec 0090)
 let terminalWss: WebSocketServer | null = null;
 
-// React dashboard dist path (for serving directly from tower)
 // React dashboard dist path (for serving directly from tower)
 // Phase 4 (Spec 0090): Tower serves everything directly, no dashboard-server
 const reactDashboardPath = path.resolve(__dirname, '../../../dashboard/dist');

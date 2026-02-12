@@ -34,7 +34,7 @@ export async function consult(
 ): Promise<void> {
   const client = new TowerClient(DEFAULT_TOWER_PORT);
   if (!(await client.isRunning())) {
-    fatal('Tower not running. Start with: af dash start');
+    fatal('Tower not running. Start with: af tower start');
   }
 
   const config = getConfig();
