@@ -10,6 +10,7 @@ import { Terminal } from './Terminal.js';
 import { StatusPanel } from './StatusPanel.js';
 import { MobileLayout } from './MobileLayout.js';
 import { FileViewer } from './FileViewer.js';
+import { GateBanner } from './GateBanner.js';
 import { CloudStatus } from './CloudStatus.js';
 
 export function App() {
@@ -138,6 +139,7 @@ export function App() {
         <div className="mobile-header">
           <CloudStatus tunnelStatus={tunnelStatus} onRefresh={refresh} />
         </div>
+        <GateBanner gateStatus={state?.gateStatus} />
         <MobileLayout
           tabs={tabs}
           activeTabId={activeTabId}
@@ -167,6 +169,7 @@ export function App() {
           </span>
         </div>
       </header>
+      <GateBanner gateStatus={state?.gateStatus} />
       <div className="app-body">
         <SplitPane
           left={leftPane}

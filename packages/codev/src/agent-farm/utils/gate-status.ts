@@ -10,7 +10,7 @@ export interface GateStatus {
   hasGate: boolean;
   gateName?: string;
   builderId?: string;
-  timestamp?: number;
+  requestedAt?: string; // ISO 8601 from status.yaml gates.<name>.requested_at
 }
 
 /**
@@ -60,10 +60,25 @@ export function getGateStatusForProject(projectPath: string): GateStatus {
           if (statusMatch[1] === 'pending') {
             // Extract builder ID from directory name (e.g., "0099-tower-hygiene" -> "0099")
             const builderId = entry.name.match(/^(\d+)/)?.[1] || entry.name;
+
+            // Look ahead for requested_at in remaining lines under this gate
+            let requestedAt: string | undefined;
+            const remaining = lines.slice(lines.indexOf(line) + 1);
+            for (const nextLine of remaining) {
+              // Stop at next gate name or top-level key
+              if (/^\s{2}\S/.test(nextLine) || /^\S/.test(nextLine)) break;
+              const reqMatch = nextLine.match(/^\s{4}requested_at:\s*'?([^'\n]+)'?/);
+              if (reqMatch) {
+                requestedAt = reqMatch[1].trim();
+                break;
+              }
+            }
+
             return {
               hasGate: true,
               gateName: currentGate,
               builderId,
+              requestedAt,
             };
           }
         }

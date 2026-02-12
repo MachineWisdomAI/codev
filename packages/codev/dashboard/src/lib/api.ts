@@ -39,12 +39,21 @@ export interface ArchitectState {
   terminalId?: string;
 }
 
+// Mirrors GateStatus from packages/codev/src/agent-farm/utils/gate-status.ts
+export interface GateStatus {
+  hasGate: boolean;
+  gateName?: string;
+  builderId?: string;
+  requestedAt?: string;
+}
+
 export interface DashboardState {
   architect: ArchitectState | null;
   builders: Builder[];
   utils: UtilTerminal[];
   annotations: Annotation[];
   projectName?: string;
+  gateStatus?: GateStatus;
 }
 
 export interface FileEntry {

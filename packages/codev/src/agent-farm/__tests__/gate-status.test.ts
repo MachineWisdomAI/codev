@@ -123,4 +123,63 @@ phase: specify
     const result = getGateStatusForProject(testDir);
     expect(result.hasGate).toBe(false);
   });
+
+  // Spec 0100: requestedAt parsing
+  it('should return requestedAt when requested_at is present in YAML', () => {
+    const projectDir = path.join(testDir, 'codev', 'projects', '0100-gate-notify');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'status.yaml'), `id: '0100'
+title: gate-notify
+protocol: spir
+phase: plan
+gates:
+  spec-approval:
+    status: approved
+    requested_at: '2026-02-12T17:02:27.484Z'
+    approved_at: '2026-02-12T17:14:18.550Z'
+  plan-approval:
+    status: pending
+    requested_at: '2026-02-12T18:00:00.000Z'
+`);
+
+    const result = getGateStatusForProject(testDir);
+    expect(result.hasGate).toBe(true);
+    expect(result.gateName).toBe('plan-approval');
+    expect(result.requestedAt).toBe('2026-02-12T18:00:00.000Z');
+  });
+
+  it('should return requestedAt as undefined when not present in YAML', () => {
+    const projectDir = path.join(testDir, 'codev', 'projects', '0100-no-timestamp');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'status.yaml'), `id: '0100'
+title: no-timestamp
+protocol: spir
+phase: plan
+gates:
+  plan-approval:
+    status: pending
+`);
+
+    const result = getGateStatusForProject(testDir);
+    expect(result.hasGate).toBe(true);
+    expect(result.gateName).toBe('plan-approval');
+    expect(result.requestedAt).toBeUndefined();
+  });
+
+  it('should return gate name as-is without sanitization', () => {
+    const projectDir = path.join(testDir, 'codev', 'projects', '0100-raw-name');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'status.yaml'), `id: '0100'
+title: raw-name
+protocol: spir
+phase: specify
+gates:
+  spec-approval:
+    status: pending
+    requested_at: '2026-02-12T18:00:00.000Z'
+`);
+
+    const result = getGateStatusForProject(testDir);
+    expect(result.gateName).toBe('spec-approval');
+  });
 });
