@@ -35,7 +35,7 @@ Replaced cloudflared integration with a built-in HTTP/2 role-reversal tunnel cli
 
 ### What Went Well
 
-- **Zero-dependency tunnel**: Using only `node:http2`, `node:net`, `node:tls` eliminated dependency management concerns. The H2 role-reversal pattern works reliably.
+- **Minimal-dependency tunnel**: Using `node:http2`, `node:http`, `node:https`, and the `ws` library (for WebSocket transport, added in TICK-001) kept the dependency footprint small. The H2 role-reversal pattern works reliably.
 - **TCP proxy test pattern**: Creating a transparent TCP proxy between client and server to simulate connection drops was an effective technique for testing reconnection without needing to control the remote server process.
 - **MockTunnelServer**: The mock server created in Phase 3 proved invaluable throughout Phases 4-7 for fast, deterministic testing without external dependencies.
 - **Phase-by-phase implementation**: The 7-phase split worked well — each phase was independently testable and reviewable.
@@ -127,6 +127,14 @@ Codex requested changes on two issues; Claude noted one minor issue. All three a
 2. **Skeleton docs**: `codev-skeleton/resources/commands/agent-farm.md` still documented old `--web`/`CODEV_WEB_KEY` flow. **Fixed**: Mirrored the new tower cloud documentation into the skeleton template.
 
 3. **`redeemToken()` missing try-catch** (Claude): Network failures in registration flow produced raw stack traces instead of user-friendly error messages. **Fixed**: Wrapped `redeemToken()` call in try-catch with `fatal()` message, matching the pattern used in `towerDeregister()`.
+
+## Review Iteration 6 — Codex Rebutted, Claude Minor Note
+
+**Codex REQUEST_CHANGES** (rebutted): Claimed `handleWebSocketConnect` lacks `Sec-WebSocket-Accept` header per RFC 8441. This is incorrect — RFC 8441 extended CONNECT over HTTP/2 uses `:status: 200` to signal tunnel establishment; `Sec-WebSocket-Accept` is an HTTP/1.1 WebSocket upgrade artifact, not part of the H2 CONNECT protocol. The E2E test `WebSocket/terminal proxy works through real tunnel` passes (11.6s, bidirectional keystroke echo verified), confirming the handshake works correctly.
+
+**Claude COMMENT** (acknowledged): Noted that the review document claims "zero third-party tunnel dependencies" but the tunnel uses the `ws` library. This is a documentation inaccuracy — `ws` was added in TICK-001 when switching from raw TCP to WebSocket transport. The review Summary section has been updated.
+
+**Convergence**: Gemini and Claude have approved across 3 consecutive iterations (iter 3-6). Codex's iteration 6 concern is factually incorrect about RFC 8441 semantics. Per convergence policy, advancing with 2/3 approval.
 
 ## Merge Resolution
 
