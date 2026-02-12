@@ -2267,8 +2267,8 @@ const server = http.createServer(async (req, res) => {
       const subPath = pathParts.slice(3).join('/');
 
       if (!encodedPath) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Missing project path');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing project path' }));
         return;
       }
 
@@ -2283,8 +2283,8 @@ const server = http.createServer(async (req, res) => {
         // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
         projectPath = normalizeProjectPath(projectPath);
       } catch {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Invalid project path encoding');
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
         return;
       }
 
@@ -3042,8 +3042,8 @@ const server = http.createServer(async (req, res) => {
     res.end('Not found');
   } catch (err) {
     log('ERROR', `Request error: ${(err as Error).message}`);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Internal server error: ' + (err as Error).message);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
   }
 });
 

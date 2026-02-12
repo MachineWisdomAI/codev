@@ -14,10 +14,14 @@ interface UtilOptions {
 }
 
 /**
- * Try to create a shell tab via the Tower API
- * Returns true if successful, false if Tower not available
+ * Try to create a shell tab via the Tower API.
+ * Returns { ok: true } on success, or { ok: false, connectionRefused, error } on failure.
  */
-async function tryTowerApi(client: TowerClient, projectPath: string, name?: string): Promise<boolean> {
+async function tryTowerApi(
+  client: TowerClient,
+  projectPath: string,
+  name?: string,
+): Promise<{ ok: boolean; connectionRefused: boolean; error?: string }> {
   const encodedPath = encodeProjectPath(projectPath);
 
   const result = await client.request<{ id: string; name: string; terminalId: string }>(
@@ -31,14 +35,12 @@ async function tryTowerApi(client: TowerClient, projectPath: string, name?: stri
   if (result.ok && result.data) {
     logger.success('Shell opened in dashboard tab');
     logger.kv('Name', result.data.name);
-    return true;
+    return { ok: true, connectionRefused: false };
   }
 
-  if (result.error) {
-    logger.error(`Tower API error: ${result.error}`);
-  }
-
-  return false;
+  // status=0 means the request never reached the server (ECONNREFUSED, timeout, etc.)
+  const connectionRefused = result.status === 0;
+  return { ok: false, connectionRefused, error: result.error };
 }
 
 /**
@@ -47,16 +49,19 @@ async function tryTowerApi(client: TowerClient, projectPath: string, name?: stri
 export async function shell(options: UtilOptions = {}): Promise<void> {
   const config = getConfig();
 
-  // Create shell tab via Tower API
   const client = new TowerClient();
-  const opened = await tryTowerApi(client, config.projectRoot, options.name);
-  if (opened) {
+  const result = await tryTowerApi(client, config.projectRoot, options.name);
+  if (result.ok) {
     return;
   }
 
-  // Tower not available - tell user to start it
-  logger.error('Tower is not running.');
-  logger.info('Start it with: af tower start');
-  logger.info('Then try again: af shell');
+  if (result.connectionRefused) {
+    logger.error('Tower is not running.');
+    logger.info('Start it with: af tower start');
+    logger.info('Then try again: af shell');
+  } else {
+    logger.error(`Tower returned an error: ${result.error || 'unknown'}`);
+    logger.info('Check Tower logs: af tower log');
+  }
   process.exit(1);
 }
