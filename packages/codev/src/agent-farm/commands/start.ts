@@ -53,7 +53,7 @@ export function parseRemote(remote: string): ParsedRemote {
   if (!match) {
     throw new Error(`Invalid remote format: ${remote}. Use user@host or user@host:/path`);
   }
-  // Strip trailing slash to avoid duplicate port allocations (e.g., /path/ vs /path)
+  // Strip trailing slash to normalize path (e.g., /path/ vs /path)
   const remotePath = match[3]?.replace(/\/$/, '');
   return { user: match[1], host: match[2], remotePath };
 }
@@ -182,8 +182,17 @@ async function startRemote(options: StartOptions): Promise<void> {
   const config = getConfig();
   const { user, host, remotePath } = parseRemote(options.remote!);
 
-  // Use specified port or Tower default port
-  const localPort = options.port ? Number(options.port) : DEFAULT_TOWER_PORT;
+  // Use specified port or find a free local port for the SSH tunnel
+  let localPort = options.port ? Number(options.port) : DEFAULT_TOWER_PORT;
+  if (!options.port && !(await isPortAvailable(localPort))) {
+    // Local Tower likely running on 4100, find an alternative port for the tunnel
+    for (let p = localPort + 1; p < localPort + 100; p++) {
+      if (await isPortAvailable(p)) {
+        localPort = p;
+        break;
+      }
+    }
+  }
 
   logger.header('Starting Remote Agent Farm');
   logger.kv('Host', `${user}@${host}`);
