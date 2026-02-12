@@ -1125,9 +1125,31 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
       integrated_at: null
     notes: "Port registry is 220 lines of dead code. consult.ts is broken (hits dead port). Builder roles get wrong port."
 
+  - id: "0099"
+    title: "Tower Codebase Hygiene"
+    summary: "Dead code removal, naming drift fixes, CLI consolidation onto TowerClient, state management fixes, error handling, dedup"
+    status: specified
+    priority: medium
+    release: v2.0.0
+    files:
+      spec: codev/specs/0099-tower-codebase-hygiene.md
+      plan: null
+      review: null
+    dependencies: ["0098"]
+    tags: [architecture, cleanup, agent-farm, maintenance]
+    timestamps:
+      conceived_at: "2026-02-11T00:00:00-08:00"
+      specified_at: "2026-02-11T00:00:00-08:00"
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Based on Codex codebase health survey. Covers everything non-port (0098 handles ports). Five phases: dead code, naming, CLI consolidation, state fixes, dedup."
+
 ## Next Available Number
 
-**0099** - Reserve this number for your next project
+**0100** - Reserve this number for your next project
 
 ---
 
