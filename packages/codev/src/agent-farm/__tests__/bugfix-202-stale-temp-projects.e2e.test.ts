@@ -12,10 +12,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
+import { spawn, ChildProcess, execSync } from 'node:child_process';
+import { resolve, basename } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
 import { removeAllocation } from '../utils/port-registry.js';
 
@@ -53,7 +53,7 @@ async function startTower(port: number): Promise<ChildProcess> {
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, NODE_ENV: 'test' },
+    env: { ...process.env, NODE_ENV: 'test', AF_TEST_DB: `test-${port}.db` },
   });
 
   let stderr = '';
@@ -89,6 +89,9 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
   afterAll(async () => {
     await stopServer(towerProcess);
     towerProcess = null;
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-wal`), { force: true }); } catch { /* ignore */ }
+    try { rmSync(resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}.db-shm`), { force: true }); } catch { /* ignore */ }
   });
 
   it('does not list projects whose directories have been deleted', async () => {
@@ -122,7 +125,8 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     // Step 4: Deactivate the project (stops terminals but keeps port_allocations entry)
     await fetch(`${base}/api/projects/${encodedPath}/deactivate`, { method: 'POST' });
 
-    // Step 5: Delete the temp directory from disk (simulating E2E test teardown)
+    // Step 5: Kill tmux session and delete the temp directory from disk (simulating E2E test teardown)
+    try { execSync(`tmux kill-session -t "architect-${basename(tempProjectDir)}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
     rmSync(tempProjectDir, { recursive: true, force: true });
 
     // Step 6: Verify it NO LONGER appears in the project list
@@ -168,6 +172,7 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
       );
       expect(found).toBeUndefined();
     } finally {
+      try { execSync(`tmux kill-session -t "architect-${basename(tempProjectDir)}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
       removeAllocation(tempProjectDir);
       rmSync(tempProjectDir, { recursive: true, force: true });
     }

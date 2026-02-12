@@ -105,10 +105,18 @@ export function getDbPath(): string {
 }
 
 /**
- * Get the path to the global database
+ * Get the path to the global database.
+ * Uses per-test isolation when NODE_ENV=test:
+ *   - AF_TEST_DB env var → custom DB name (e.g., "test-14500.db")
+ *   - NODE_ENV=test without AF_TEST_DB → "test.db"
+ *   - Production → "global.db"
  */
 export function getGlobalDbPath(): string {
-  return resolve(homedir(), '.agent-farm', 'global.db');
+  let dbName = 'global.db';
+  if (process.env.NODE_ENV === 'test') {
+    dbName = process.env.AF_TEST_DB || 'test.db';
+  }
+  return resolve(homedir(), '.agent-farm', dbName);
 }
 
 /**
@@ -248,8 +256,8 @@ function ensureLocalDatabase(): Database.Database {
  * Initialize the global database (global.db)
  */
 function ensureGlobalDatabase(): Database.Database {
-  const globalDir = resolve(homedir(), '.agent-farm');
-  const dbPath = resolve(globalDir, 'global.db');
+  const dbPath = getGlobalDbPath();
+  const globalDir = dirname(dbPath);
   const jsonPath = resolve(globalDir, 'ports.json');
 
   // Ensure directory exists

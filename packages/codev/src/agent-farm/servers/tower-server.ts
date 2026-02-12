@@ -329,11 +329,13 @@ function createTmuxSession(
       return null;
     }
 
-    // Hide tmux status bar (dashboard has its own tabs), enable mouse, and
-    // use aggressive-resize so tmux sizes to the largest client (not smallest)
+    // Hide tmux status bar (dashboard has its own tabs) and enable mouse.
+    // NOTE: aggressive-resize was removed — it caused resize bouncing and
+    // visual flashing (dots/redraws) when the dashboard sent multiple resize
+    // events during layout settling. Default tmux behavior (size to smallest
+    // client) is more stable since we only have one client per session.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'aggressive-resize', 'on'], { stdio: 'ignore' });
 
     return sessionName;
   } catch (err) {
@@ -543,6 +545,22 @@ async function reconcileTerminalSessions(): Promise<void> {
 
     if (!projectPath) {
       log('WARN', `Cannot resolve project path for tmux session "${tmuxName}" (basename: ${parsed.projectBasename}) — skipping`);
+      continue;
+    }
+
+    // Skip sessions whose project path doesn't exist on disk or is in a
+    // temp directory (left over from E2E tests that share global.db/tmux).
+    if (!fs.existsSync(projectPath)) {
+      log('INFO', `Skipping tmux "${tmuxName}" — project path no longer exists: ${projectPath}`);
+      killTmuxSession(tmuxName);
+      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
+      continue;
+    }
+    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+    if (tmpDirs.some(d => projectPath.startsWith(d))) {
+      log('INFO', `Skipping tmux "${tmuxName}" — project is in temp directory: ${projectPath}`);
+      killTmuxSession(tmuxName);
+      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
       continue;
     }
 
@@ -1536,15 +1554,26 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
 
         // Wrap in tmux for session persistence across Tower restarts
         const tmuxName = `architect-${path.basename(projectPath)}`;
+        const sanitizedTmuxName = sanitizeTmuxSessionName(tmuxName);
         let activeTmuxSession: string | null = null;
 
         if (tmuxAvailable) {
-          const sanitizedName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
-          if (sanitizedName) {
+          // Reuse existing tmux session if it's still alive (e.g., after
+          // disconnect timeout killed the `tmux attach` process but the
+          // architect process inside tmux kept running).
+          if (tmuxSessionExists(sanitizedTmuxName)) {
             cmd = 'tmux';
-            cmdArgs = ['attach-session', '-t', sanitizedName];
-            activeTmuxSession = sanitizedName;
-            log('INFO', `Created tmux session "${sanitizedName}" for architect`);
+            cmdArgs = ['attach-session', '-t', sanitizedTmuxName];
+            activeTmuxSession = sanitizedTmuxName;
+            log('INFO', `Reconnecting to existing tmux session "${sanitizedTmuxName}" for architect`);
+          } else {
+            const createdName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
+            if (createdName) {
+              cmd = 'tmux';
+              cmdArgs = ['attach-session', '-t', createdName];
+              activeTmuxSession = createdName;
+              log('INFO', `Created tmux session "${createdName}" for architect`);
+            }
           }
         }
 
@@ -1569,11 +1598,16 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
             entry.architect = undefined;
             deleteTerminalSession(session.id);
 
-            // Kill stale tmux session so restart can create a fresh one
-            if (activeTmuxSession) {
-              try {
-                execSync(`tmux kill-session -t "${activeTmuxSession}" 2>/dev/null`, { stdio: 'ignore' });
-              } catch { /* already gone */ }
+            // Check if the tmux session's inner process is still alive.
+            // The node-pty process is `tmux attach` — it exits on disconnect
+            // timeout, but the tmux session (and the architect process inside
+            // it) may still be running. Only kill tmux if the inner process
+            // has also exited (e.g., user typed "exit" or process crashed).
+            const tmuxAlive = activeTmuxSession && tmuxSessionExists(activeTmuxSession);
+            if (activeTmuxSession && !tmuxAlive) {
+              log('INFO', `Tmux session "${activeTmuxSession}" already gone for ${projectPath}`);
+            } else if (tmuxAlive) {
+              log('INFO', `Tmux session "${activeTmuxSession}" still alive for ${projectPath}, preserving for reconnect`);
             }
 
             // Only restart if the architect ran for at least 5s (prevents crash loops)
