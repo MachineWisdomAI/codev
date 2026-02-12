@@ -142,6 +142,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--use-protocol <name>', 'Override default protocol (e.g., --use-protocol tick)')
     .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
     .option('--strict', 'Use strict mode (porch orchestrates)')
+    .option('--resume', 'Resume builder in existing worktree (skip worktree creation)')
     .option('--no-role', 'Skip loading role prompt')
     .action(async (options) => {
       const { spawn } = await import('./commands/spawn.js');
@@ -161,6 +162,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
           useProtocol: options.useProtocol,
           soft: options.soft,
           strict: options.strict,
+          resume: options.resume,
           noRole: !options.role,
         });
       } catch (error) {
