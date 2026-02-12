@@ -19,7 +19,7 @@ Three specific gaps:
 ## Current State
 
 - `getGateStatusForProject()` in `gate-status.ts` reads `status.yaml` and returns `{ hasGate, gateName, builderId }`. The current `GateStatus` interface also has `timestamp?: number` but this field is **never populated** by the implementation.
-- The Tower calls `getGateStatusForProject()` internally but does **not** include `gateStatus` in the `/api/state` JSON response. Gate status is available via the separate `/api/projects/:id/status` endpoint.
+- The Tower's `/api/state` handler does **not** call `getGateStatusForProject()` and does **not** include `gateStatus` in the response. Gate status is computed and returned by the separate `/api/projects/:id/status` endpoint.
 - The dashboard's `DashboardState` interface does **not** have a `gateStatus` field — it neither receives nor renders gate information.
 - `af send <target> "message"` can inject formatted messages into any tmux session (architect or builder) using file-based tmux buffer paste (writes to temp file, loads into buffer, pastes to session).
 - Porch writes `requested_at` (ISO 8601 timestamp) to `status.yaml` gates when a gate transitions to `pending` — this is the data source for "how long has it been waiting."
@@ -37,9 +37,9 @@ When any builder has a pending gate, the dashboard shows a **banner above the te
 - How long it's been waiting (e.g., "3m ago"), or no time indicator if `requested_at` is missing
 - A clear call-to-action (e.g., "Run: `porch approve 0100 spec-approval`")
 
-Multiple pending gates produce multiple banners, stacked vertically. Each banner is independent and auto-clears when its gate is resolved.
+**Data model**: Each project has exactly one builder, and each builder can have at most one pending gate at a time (porch enforces sequential gate flow — a builder must clear one gate before the next can fire). The `gateStatus` field is therefore a single object per project, not an array. The dashboard renders zero or one banner for the active project.
 
-The dashboard always shows a single project at a time. Notifications are scoped to the active project's builders — no cross-project filtering is needed.
+The dashboard always shows a single project at a time. Notifications are scoped to the active project — no cross-project filtering is needed.
 
 ### (ii) Architect Terminal Message
 
@@ -60,11 +60,14 @@ When the gate is approved and the builder resumes:
 
 ### (iv) Enhanced `af status` Output
 
-`af status` already shows a basic "Gate pending" warning. Enhance it to include wait time and the approval command:
+`af status` already shows a basic "Gate pending" warning. Enhance it to include wait time and the approval command. Example with two active projects:
 
 ```
-Builder 0100  blocked  spec-approval (waiting 3m)  → porch approve 0100 spec-approval
-Builder 0101  running  implement:phase_2
+Project 0100 (porch-gate-notifications)
+  Builder 0100  blocked  spec-approval (waiting 3m)  → porch approve 0100 spec-approval
+
+Project 0101 (clickable-file-paths)
+  Builder 0101  running  implement:phase_2
 ```
 
 The gate info comes from the Tower's `/api/projects/:id/status` endpoint (same data source already used by `af status`).
@@ -126,7 +129,7 @@ Update the implementation to parse `requested_at` from the gate entry in `status
 
 ### Step 2: Include `gateStatus` in `/api/state` Response
 
-The Tower's `/api/state` handler already calls `getGateStatusForProject()` internally. Add the result to the JSON response:
+Add a call to `getGateStatusForProject()` in the Tower's `/api/state` handler and include the result in the JSON response:
 
 ```typescript
 const state = {
@@ -172,12 +175,17 @@ The key includes `builderId` so that two builders hitting the same gate type (e.
 Gate names and builder IDs originate from `status.yaml` file content. Before interpolating into `af send` messages, sanitize:
 
 - Strip ANSI escape sequences from gate names and builder IDs
-- Reject values containing tmux control characters (`;`, `\n`, `\r`)
+- Reject values containing tmux control characters (`;`, `\n`, `\r`) — if rejected, log a warning and skip the `af send` notification (dashboard still shows the banner)
 - Use `af send`'s existing file-based message delivery (writes to temp file, loads into tmux buffer) which avoids shell injection
+- If `gateName` or `builderId` is missing/empty in `status.yaml`, treat as `hasGate: false` (no notification)
 
-### Multiple Gates
+On the dashboard side, React's JSX auto-escapes string content, preventing HTML injection. No additional escaping is needed for `gateName` or `builderId` in the `GateBanner` component.
 
-Each pending gate produces its own notification — both in the dashboard (one banner per gate) and via `af send` (one message per gate transition). If multiple builders hit gates simultaneously, each gets a separate `af send` call. Since gate transitions are infrequent (at most a few per hour), flooding is not a concern. If `af send` fails for one gate, the error is logged at warn level and execution continues — the dashboard notification is the primary channel.
+### Simultaneous Gates Across Projects
+
+Each project has exactly one builder with at most one pending gate. The Tower may manage multiple projects concurrently, each with its own pending gate. Each gate transition produces its own `af send` notification. Since gate transitions are infrequent (at most a few per hour across all projects), flooding is not a concern. If `af send` fails for one gate, the error is logged at warn level and execution continues — the dashboard notification is the primary channel.
+
+Note: A builder cannot have two gates pending simultaneously. Porch enforces sequential gate flow within a project.
 
 ## Test Scenarios
 
@@ -206,7 +214,7 @@ Each pending gate produces its own notification — both in the dashboard (one b
 
 13. **Gate appears in dashboard**: Start Tower, activate project, write pending gate to `status.yaml`, verify dashboard shows notification banner
 14. **Gate disappears on approval**: Change gate to `approved` in `status.yaml`, verify banner disappears on next poll
-15. **Multiple builders blocked**: Two projects with pending gates, both banners visible
+15. **Gate banner with missing requestedAt**: Write pending gate to `status.yaml` without `requested_at`, verify banner renders without time indicator
 
 ### Edge Cases
 
@@ -214,6 +222,8 @@ Each pending gate produces its own notification — both in the dashboard (one b
 2. **Gate approved between polls**: Notification never shows (correct — transient state)
 3. **Tower restart**: In-memory dedup state is lost; re-sends notification for any existing pending gates (acceptable — better to re-notify than miss)
 4. **Missing `requested_at` in status.yaml**: Wait time is omitted from banner and `af status` output; no error
+5. **Malformed `gateName` or `builderId`**: Values with ANSI escapes are sanitized; empty/missing values cause `hasGate: false`
+6. **Tower restart with pending gate**: After restart, in-memory dedup is lost; existing pending gate triggers a new `af send` notification (acceptable — better to re-notify than miss)
 
 ## Risks and Mitigation
 
@@ -234,7 +244,7 @@ Each pending gate produces its own notification — both in the dashboard (one b
 ## Notes
 
 This is a relatively small feature. The main work is:
-1. Adding `gateStatus` to the `/api/state` response (it's computed but not returned)
+1. Adding a `getGateStatusForProject()` call and `gateStatus` field to the `/api/state` response
 2. Building the `GateBanner` React component
 3. Adding tower-side gate transition detection for `af send` notifications
 4. Enhancing the `af status` output format
