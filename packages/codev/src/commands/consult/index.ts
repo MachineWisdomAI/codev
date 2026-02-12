@@ -516,17 +516,28 @@ function buildImplQuery(projectNumber: number, projectRoot: string, planPhase?: 
   const specPath = findSpec(projectRoot, projectNumber);
   const planPath = findPlan(projectRoot, projectNumber);
 
+  // Compute diff against base branch for focused review
+  let diff = '';
+  try {
+    // Find merge base with main to get only this branch's changes
+    const mergeBase = execSync('git merge-base HEAD main', { cwd: projectRoot, encoding: 'utf-8' }).trim();
+    diff = execSync(`git diff ${mergeBase}..HEAD`, { cwd: projectRoot, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 });
+    // Truncate large diffs
+    const maxDiffSize = 80000;
+    if (diff.length > maxDiffSize) {
+      diff = diff.substring(0, maxDiffSize) + `\n\n... (diff truncated, ${diff.length} chars total)`;
+    }
+  } catch {
+    // If git diff fails, fall back to filesystem exploration
+    diff = '';
+  }
+
   let query = `Review Implementation for Project ${projectNumber}`;
   if (planPhase) {
     query += ` — Phase: ${planPhase}`;
   }
 
-  query += `
-
-You are in the project working directory. Read the files directly from the filesystem to review the implementation.
-
-## Context Files
-`;
+  query += `\n\n## Context Files\n`;
 
   if (specPath) {
     query += `- Spec: ${specPath}\n`;
@@ -538,20 +549,16 @@ You are in the project working directory. Read the files directly from the files
   if (planPhase) {
     query += `\n## REVIEW SCOPE — CURRENT PLAN PHASE ONLY\n`;
     query += `You are reviewing **plan phase "${planPhase}" ONLY**.\n`;
-    query += `The plan file contains multiple phases. Read the plan, find the section for "${planPhase}", and scope your review to ONLY the work described in that phase.\n\n`;
+    query += `Read the plan, find the section for "${planPhase}", and scope your review to ONLY the work described in that phase.\n\n`;
     query += `**DO NOT** request changes for work that belongs to other plan phases.\n`;
     query += `**DO NOT** flag missing functionality that is scheduled for a later phase.\n`;
     query += `**DO** verify that this phase's deliverables are complete and correct.\n`;
   }
 
-  query += `
-## Instructions
-
-Read the spec and plan files above, then explore the source code to review the implementation. You have full filesystem access — read whatever files you need.
-`;
-
-  if (planPhase) {
-    query += `\n**IMPORTANT**: Only review work relevant to plan phase "${planPhase}". Other phases will be reviewed separately.\n`;
+  if (diff) {
+    query += `\n## Diff (branch changes vs main)\n\nReview the following diff. This is the ONLY code that changed — focus your review on these changes. You may read the spec and plan files for context, but do NOT explore the broader codebase.\n\n\`\`\`diff\n${diff}\n\`\`\`\n`;
+  } else {
+    query += `\n## Instructions\n\nRead the spec and plan files above, then review the implementation changes.\n`;
   }
 
   query += `

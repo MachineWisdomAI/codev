@@ -34,7 +34,7 @@ import {
   allPlanPhasesComplete,
 } from './plan.js';
 import { buildPhasePrompt } from './prompts.js';
-import { parseVerdict, allApprove } from './verdict.js';
+import { parseVerdict, allApprove, majorityApprove, MAJORITY_ITERATION_THRESHOLD } from './verdict.js';
 import type {
   ProjectState,
   Protocol,
@@ -377,9 +377,15 @@ async function handleBuildVerify(
       return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
     }
 
-    // Some request changes
+    // After MAJORITY_ITERATION_THRESHOLD iterations, accept 2-of-3 supermajority
+    // to prevent a single model from blocking progress with repeated impractical requests.
+    if (state.iteration >= MAJORITY_ITERATION_THRESHOLD && majorityApprove(reviews)) {
+      return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
+    }
+
+    // Some request changes — check max iterations escape
     if (state.iteration >= maxIterations) {
-      // Max iterations — proceed to gate anyway
+      // Max iterations — proceed to gate if one exists, otherwise force-advance
       const gateName = getPhaseGate(protocol, state.phase);
       if (gateName && state.gates[gateName]?.status !== 'approved') {
         state.gates[gateName] = { status: 'pending', requested_at: new Date().toISOString() };
@@ -401,6 +407,10 @@ async function handleBuildVerify(
           }],
         };
       }
+
+      // No gate for this phase (e.g., per_plan_phase implement) — force-advance
+      // to prevent infinite loops when one model keeps blocking.
+      return await handleVerifyApproved(projectRoot, projectId, state, protocol, statusPath, reviews);
     }
 
     // Increment iteration and emit fix tasks

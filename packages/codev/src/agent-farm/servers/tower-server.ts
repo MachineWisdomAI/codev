@@ -1341,9 +1341,14 @@ async function getTerminalsForProject(
       (parsed.type === 'shell' && parsed.roleId && freshEntry.shells.has(parsed.roleId));
     if (alreadyRegistered) continue;
 
-    // Orphaned tmux session — reconnect it
+    // Orphaned tmux session — reconnect it.
+    // Skip architect sessions: launchInstance handles architect creation/reconnection
+    // and has its own exit handler for auto-restart. Reconnecting here races with
+    // the restart logic and can attach to a dead tmux session.
+    if (parsed.type === 'architect') continue;
+
     try {
-      const label = parsed.type === 'architect' ? 'Architect' : `${parsed.type} ${parsed.roleId || 'unknown'}`;
+      const label = `${parsed.type} ${parsed.roleId || 'unknown'}`;
       const newSession = await manager.createSession({
         command: 'tmux',
         args: ['attach-session', '-t', tmuxName],
@@ -1352,10 +1357,7 @@ async function getTerminalsForProject(
       });
 
       const roleId = parsed.roleId;
-      if (parsed.type === 'architect') {
-        freshEntry.architect = newSession.id;
-        terminals.push({ type: 'architect', id: 'architect', label: 'Architect', url: `${proxyUrl}?tab=architect`, active: true });
-      } else if (parsed.type === 'builder' && roleId) {
+      if (parsed.type === 'builder' && roleId) {
         freshEntry.builders.set(roleId, newSession.id);
         terminals.push({ type: 'builder', id: roleId, label: `Builder ${roleId}`, url: `${proxyUrl}?tab=builder-${roleId}`, active: true });
       } else if (parsed.type === 'shell' && roleId) {
@@ -1666,6 +1668,12 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
             if (uptime < 5000) {
               log('INFO', `Architect exited after ${uptime}ms for ${projectPath}, not restarting (too short)`);
               return;
+            }
+            // Kill the stale tmux session so launchInstance creates a fresh one
+            // instead of reconnecting to the dead session.
+            if (activeTmuxSession && tmuxSessionExists(activeTmuxSession)) {
+              killTmuxSession(activeTmuxSession);
+              log('INFO', `Killed stale tmux session "${activeTmuxSession}" before restart`);
             }
             log('INFO', `Architect exited for ${projectPath}, restarting in 2s...`);
             setTimeout(() => {
