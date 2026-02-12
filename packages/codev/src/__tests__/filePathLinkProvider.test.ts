@@ -276,23 +276,14 @@ describe('FilePathLinkProvider', () => {
   describe('false positive rejection', () => {
     it('does not match package specifiers like @xterm/xterm', async () => {
       const links = await getLinks('using @xterm/xterm package');
-      // @xterm/xterm should not produce a link since looksLikeFilePath rejects domains
-      if (links) {
-        // If any links are found, none should be for the package specifier
-        for (const link of links) {
-          expect(link.text).not.toContain('@xterm/xterm');
-        }
-      }
+      // @xterm/xterm should not produce any links — the @ prefix prevents matching
+      expect(links).toBeUndefined();
     });
 
     it('does not match version strings like v2.0.0', async () => {
       const links = await getLinks('version v2.0.0-rc.62 released');
-      // v2.0.0-rc.62 could partially match; any matches should be filtered
-      if (links) {
-        for (const link of links) {
-          expect(link.text).not.toContain('v2.0.0');
-        }
-      }
+      // v2.0.0-rc.62 has no valid file extension (digits after dots), so no links
+      expect(links).toBeUndefined();
     });
   });
 

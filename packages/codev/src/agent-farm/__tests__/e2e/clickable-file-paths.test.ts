@@ -10,6 +10,11 @@
  *   6. URL still works via WebLinksAddon (not decorated as file path)
  *   7. Path resolution via API with terminalId
  *   8. Path traversal returns 403
+ *   9. Path with line number: API returns line for scroll-to-line
+ *  10. Builder worktree resolution via shell tab with specific cwd
+ *  11. Visual regression: dotted underline on file paths (screenshot)
+ *  12. Visual regression: no decoration noise on plain text (screenshot)
+ *  13. Visual regression: hover pointer cursor on file path (screenshot)
  *
  * Prerequisites:
  *   - Tower running: `af tower start`
@@ -71,6 +76,22 @@ async function getFileTabCount(request: import('@playwright/test').APIRequestCon
   return (state.annotations ?? []).length;
 }
 
+/**
+ * Get the architect's terminalId from the dashboard state (with polling).
+ */
+async function getArchitectTerminalId(request: import('@playwright/test').APIRequestContext): Promise<string> {
+  let terminalId: string | undefined;
+  for (let i = 0; i < 20; i++) {
+    const stateResp = await request.get(`${BASE_URL}/api/state`);
+    const state = await stateResp.json();
+    terminalId = state.architect?.terminalId;
+    if (terminalId) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  expect(terminalId).toBeTruthy();
+  return terminalId!;
+}
+
 test.describe('Clickable File Paths (Spec 0101)', () => {
   test.describe('Decorations', () => {
     test('file path decorations appear for terminal output', async ({ page }) => {
@@ -103,6 +124,21 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(borderBottom).toBe('dotted');
     });
 
+    test('decorations have pointer-events:none (click passes through to xterm)', async ({ page }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      await typeAndWait(page, terminal, 'echo "src/index.ts:42"');
+
+      const decoration = page.locator('.file-path-decoration').first();
+      await expect(decoration).toBeVisible({ timeout: 5_000 });
+
+      const pointerEvents = await decoration.evaluate(el => {
+        return window.getComputedStyle(el).pointerEvents;
+      });
+      expect(pointerEvents).toBe('none');
+    });
+
     test('plain text without file paths has no decorations', async ({ page }) => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
@@ -114,18 +150,14 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       await typeAndWait(page, terminal, 'echo "hello world no files here"');
 
       // No new decorations should appear for the plain text
-      // (The command line itself "echo ..." has no file-like tokens)
       const afterCount = await page.locator('.file-path-decoration').count();
-      // Allow for decorations from any prior terminal output (prompt, etc.),
-      // but the "hello world" line itself should not add any
-      expect(afterCount).toBeLessThanOrEqual(beforeCount + 0);
+      expect(afterCount).toBeLessThanOrEqual(beforeCount);
     });
 
     test('URL text does not get file-path-decoration', async ({ page }) => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
 
-      // Clear any existing decorations reference
       const beforeCount = await page.locator('.file-path-decoration').count();
 
       // Output a URL — should be handled by WebLinksAddon, not FilePathLinkProvider
@@ -142,7 +174,6 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
 
-      // Count existing file tabs
       const beforeTabCount = await getFileTabCount(request);
 
       // Output a real file path that exists in the project
@@ -154,8 +185,8 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       const box = await decoration.boundingBox();
       expect(box).not.toBeNull();
 
-      // Cmd+Click (macOS) / Ctrl+Click (Linux) at the decoration position
-      // pointer-events:none on decoration means the click passes through to xterm canvas
+      // Cmd+Click (macOS) / Ctrl+Click (Linux) at the decoration position.
+      // pointer-events:none on decoration means the click passes through to xterm canvas.
       const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
       await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2, {
         modifiers: [modifier],
@@ -173,12 +204,10 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
 
-      // Output a file path
       await typeAndWait(page, terminal, 'echo "package.json"');
 
       const beforeTabCount = await getFileTabCount(request);
 
-      // Find a decoration and plain click (no modifier key)
       const decoration = page.locator('.file-path-decoration').last();
       await expect(decoration).toBeVisible({ timeout: 5_000 });
       const box = await decoration.boundingBox();
@@ -194,30 +223,19 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
   });
 
   test.describe('API path resolution', () => {
-    test('POST /api/tabs/file resolves relative path within project', async ({ request }) => {
+    test('resolves relative path within project', async ({ request }) => {
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json' },
       });
       expect(response.ok()).toBe(true);
       const body = await response.json();
       expect(body.id).toBeTruthy();
-      // notFound should be false for an existing file
       expect(body.notFound).toBeFalsy();
     });
 
-    test('POST /api/tabs/file with terminalId resolves using terminal cwd', async ({ request }) => {
-      // Get the architect's terminalId from the state
-      let terminalId: string | undefined;
-      for (let i = 0; i < 20; i++) {
-        const stateResp = await request.get(`${BASE_URL}/api/state`);
-        const state = await stateResp.json();
-        terminalId = state.architect?.terminalId;
-        if (terminalId) break;
-        await new Promise(r => setTimeout(r, 500));
-      }
-      expect(terminalId).toBeTruthy();
+    test('resolves with terminalId using terminal cwd', async ({ request }) => {
+      const terminalId = await getArchitectTerminalId(request);
 
-      // Use terminalId to resolve a relative path
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json', terminalId },
       });
@@ -226,20 +244,117 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(body.id).toBeTruthy();
     });
 
-    test('POST /api/tabs/file rejects path traversal (403)', async ({ request }) => {
+    test('rejects path traversal with 403', async ({ request }) => {
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: '../../../etc/passwd' },
       });
       expect(response.status()).toBe(403);
     });
 
-    test('POST /api/tabs/file with line number returns line', async ({ request }) => {
+    test('returns line number for scroll-to-line', async ({ request }) => {
       const response = await request.post(`${BASE_URL}/api/tabs/file`, {
         data: { path: 'package.json', line: 42 },
       });
       expect(response.ok()).toBe(true);
       const body = await response.json();
       expect(body.line).toBe(42);
+    });
+
+    test('builder worktree resolution via shell tab cwd', async ({ request }) => {
+      // Create a shell tab — its terminal session will have a cwd in the project
+      const shellResp = await request.post(`${BASE_URL}/api/tabs/shell`, {
+        data: { name: 'e2e-worktree-test' },
+      });
+      expect(shellResp.ok()).toBe(true);
+      const shell = await shellResp.json();
+      expect(shell.terminalId).toBeTruthy();
+
+      // Use the shell's terminalId to resolve a relative path.
+      // The shell's cwd is the project root, so resolving "package.json"
+      // should find the file within the project tree.
+      const fileResp = await request.post(`${BASE_URL}/api/tabs/file`, {
+        data: { path: 'package.json', terminalId: shell.terminalId },
+      });
+      expect(fileResp.ok()).toBe(true);
+      const fileBody = await fileResp.json();
+      expect(fileBody.id).toBeTruthy();
+      expect(fileBody.notFound).toBeFalsy();
+    });
+
+    test('builder worktree path traversal via terminalId returns 403', async ({ request }) => {
+      const terminalId = await getArchitectTerminalId(request);
+
+      // Even with a valid terminalId, traversal outside the project returns 403
+      const response = await request.post(`${BASE_URL}/api/tabs/file`, {
+        data: { path: '../../../../etc/passwd', terminalId },
+      });
+      expect(response.status()).toBe(403);
+    });
+
+    test('non-existent file creates tab with notFound indicator', async ({ request }) => {
+      const response = await request.post(`${BASE_URL}/api/tabs/file`, {
+        data: { path: 'src/nonexistent-file-for-testing.ts' },
+      });
+      expect(response.ok()).toBe(true);
+      const body = await response.json();
+      expect(body.id).toBeTruthy();
+      expect(body.notFound).toBe(true);
+    });
+  });
+
+  test.describe('Visual regression (Spec scenarios 17-19)', () => {
+    test('dotted underline on file paths', async ({ page }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      // Output file paths for screenshot baseline
+      await typeAndWait(page, terminal, 'echo "src/index.ts:42 and src/lib/foo.ts:10"');
+
+      // Wait for decorations to render
+      const decoration = page.locator('.file-path-decoration').first();
+      await expect(decoration).toBeVisible({ timeout: 5_000 });
+
+      // Screenshot the terminal area containing the decorated file paths
+      await expect(terminal).toHaveScreenshot('file-path-dotted-underline.png', {
+        maxDiffPixelRatio: 0.05,
+      });
+    });
+
+    test('no visual noise on plain text', async ({ page }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      // Output text that looks like it might be a file path but isn't
+      await typeAndWait(page, terminal, 'echo "This is a sentence. Nothing special v2.0.0"');
+
+      // Wait for any rendering to settle
+      await page.waitForTimeout(500);
+
+      // Screenshot should show no dotted underline decorations on plain text
+      await expect(terminal).toHaveScreenshot('no-visual-noise-plain-text.png', {
+        maxDiffPixelRatio: 0.05,
+      });
+    });
+
+    test('hover pointer cursor on file path', async ({ page }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      await typeAndWait(page, terminal, 'echo "src/index.ts:42"');
+
+      const decoration = page.locator('.file-path-decoration').first();
+      await expect(decoration).toBeVisible({ timeout: 5_000 });
+      const box = await decoration.boundingBox();
+      expect(box).not.toBeNull();
+
+      // Move mouse over the file path to trigger hover state
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await page.waitForTimeout(500);
+
+      // Screenshot with hover state active
+      await expect(terminal).toHaveScreenshot('file-path-hover-cursor.png', {
+        maxDiffPixelRatio: 0.05,
+      });
     });
   });
 });
