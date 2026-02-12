@@ -27,7 +27,7 @@ Systematic cleanup of post-migration debt across the Tower codebase, addressing 
 
 ## Key Metrics
 
-- **19 commits** on the branch
+- **23 commits** on the branch
 - **585 tests** passing (582 existing + 3 new)
 - **46 test files** (45 existing + 1 new)
 - **Files created**: `utils/gate-status.ts`, `utils/file-tabs.ts`, `utils/session.ts`, `__tests__/gate-status.test.ts`, `__tests__/file-tab-persistence.test.ts`, `__tests__/session-utils.test.ts`
@@ -59,4 +59,4 @@ Systematic cleanup of post-migration debt across the Tower codebase, addressing 
 
 ## Follow-up Items
 
-- None required. All spec items are addressed.
+- Documentation referencing the removed `--remote` flag (`codev/resources/commands/agent-farm.md`, `codev/resources/arch.md`, `codev/resources/cloud-instances.md`) should be updated or removed. These docs describe the Spec 0062 remote access feature that was deprecated when `--remote` was removed from `start.ts`. This is outside the scope of this code hygiene spec but should be addressed in a documentation pass.
