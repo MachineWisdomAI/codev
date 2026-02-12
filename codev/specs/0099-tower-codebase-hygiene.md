@@ -41,7 +41,7 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 ### Phase 3: CLI Consolidation onto TowerClient
 
-1. **Route `consult.ts` through TowerClient** — Replace raw fetch to `localhost:${dashboardPort}/api/tabs/shell` with `TowerClient` call to `/project/<encoded>/api/tabs/shell` on port 4100. TowerClient already has `request()` for arbitrary paths; add a `createShellTab(projectPath, command)` convenience method.
+1. **Fix `consult.ts` Tower dependency** — `consult.ts` currently does a raw fetch to `localhost:${dashboardPort}/api/tabs/shell`. Keep `consult` as a standalone CLI tool that works with or without Tower. Remove the raw fetch to the dashboard port entirely — `consult` should just spawn its process directly without opening a Tower shell tab. If Tower is running, the shell tab is a nice-to-have but not required for consult to function.
 
 2. **Route `shell.ts` and `open.ts` through TowerClient** — Both reimplement `encodeProjectPath` and Tower URL construction. Use `TowerClient`'s existing `encodeProjectPath()` export and `getProjectUrl()` method, which include proper auth headers (`codev-web-key`).
 
@@ -49,7 +49,7 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 4. **Fix `getGateStatusForProject()`** — `tower-server.ts:1051-1056` fetches `localhost:${basePort}/api/status` (dead port). Decision: query Tower's own in-memory state directly. Tower already tracks project terminals and can read porch status files (`codev/projects/<id>/status.yaml`) from the project path. Replace the dead HTTP fetch with a direct file read of the porch status YAML.
 
-5. **Fix `af start --remote`** — `start.ts:200-268` runs `af dash start` on remote host. Update to use `af tower start` command over SSH (same transport, just fix the command string). Authentication uses the existing SSH + local-key flow — no new auth mechanism needed.
+5. **Remove `af start --remote`** — `start.ts:200-268` implements remote orchestration over SSH. Remove the `--remote` flag and all associated code. Users who want remote access should run a Tower server on the remote host directly. This eliminates a complex, under-tested code path.
 
 ### Phase 4: State Management Fixes
 
@@ -67,24 +67,28 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 4. **Deduplicate `getSessionName`** — Exists in both `spawn.ts:189` and `cleanup.ts:42`. Extract to `utils/session.ts` (new file) and import from both locations.
 
+5. **Improve Tower error handling and logging** — Tower server (`tower-server.ts`) has inconsistent error handling: some routes swallow errors silently, others return bare strings. Standardize error responses to include structured JSON (`{ error: string }`) and add `console.error` logging for unexpected failures in route handlers. Focus on the activation, terminal creation, and file tab API routes.
+
 ## Out of Scope
 
 - Port registry removal (Spec 0098)
 - Cloud Tower (Spec 0097)
-- Adding major new features to TowerClient (minor convenience methods like `createShellTab` are in scope)
+- Adding new features to TowerClient
 - Spec 0098 merge conflict resolution (0098 should land first if possible; otherwise resolve conflicts at merge time)
 
 ## Acceptance Criteria
 
 1. `orphan-handler.ts` deleted
 2. All user-facing messages reference Tower, not dashboard-server
-3. `consult.ts`, `shell.ts`, `open.ts` use TowerClient (with auth headers)
+3. `shell.ts`, `open.ts` use TowerClient (with auth headers); `consult.ts` works standalone without Tower dependency
 4. `attach.ts` generates correct Tower URLs
 5. File tabs survive Tower restart (persisted to SQLite via `file_tabs` table)
 6. No duplicate `getSessionName` or `encodeProjectPath` implementations
 7. All existing tests pass (updated as needed); new tests for file tab persistence
 8. Builder/UtilTerminal types no longer carry `port`/`pid` fields
 9. `getGateStatusForProject()` reads porch status from filesystem, not dead HTTP port
+10. `--remote` flag removed from `af start`
+11. Tower error responses are structured JSON with `console.error` logging
 
 ## Consultation Log
 
