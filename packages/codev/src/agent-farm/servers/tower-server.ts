@@ -1136,7 +1136,7 @@ async function getTerminalsForProject(
   if (existingEntry) {
     if (existingEntry.architect && !freshEntry.architect) {
       const session = manager.getSession(existingEntry.architect);
-      if (session) {
+      if (session && session.status === 'running') {
         freshEntry.architect = existingEntry.architect;
         terminals.push({
           type: 'architect',
@@ -1150,7 +1150,7 @@ async function getTerminalsForProject(
     for (const [builderId, terminalId] of existingEntry.builders) {
       if (!freshEntry.builders.has(builderId)) {
         const session = manager.getSession(terminalId);
-        if (session) {
+        if (session && session.status === 'running') {
           freshEntry.builders.set(builderId, terminalId);
           terminals.push({
             type: 'builder',
@@ -1165,7 +1165,7 @@ async function getTerminalsForProject(
     for (const [shellId, terminalId] of existingEntry.shells) {
       if (!freshEntry.shells.has(shellId)) {
         const session = manager.getSession(terminalId);
-        if (session) {
+        if (session && session.status === 'running') {
           freshEntry.shells.set(shellId, terminalId);
           terminals.push({
             type: 'shell',
@@ -1495,7 +1495,13 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         if (ptySession) {
           const startedAt = Date.now();
           ptySession.on('exit', () => {
-            entry.architect = undefined;
+            // Re-read entry from the Map — getTerminalsForProject() periodically
+            // replaces the Map entry with a fresh object, so the `entry` captured
+            // in the closure may be stale.
+            const currentEntry = getProjectTerminalsEntry(resolvedPath);
+            if (currentEntry.architect === session.id) {
+              currentEntry.architect = undefined;
+            }
             deleteTerminalSession(session.id);
 
             // Check if the tmux session's inner process is still alive.
