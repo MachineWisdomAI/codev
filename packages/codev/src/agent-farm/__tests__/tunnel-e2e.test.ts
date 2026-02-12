@@ -19,11 +19,18 @@
  *   TUNNEL_PORT      - tunnel server port (default: 4200)
  *   SKIP_TUNNEL_E2E  - set to "1" to skip all E2E tests
  *
+ * TLS note: All E2E tests use `usePlainTcp: true` because the local codevos.ai
+ * development tunnel server (port 4200) speaks plain TCP, not TLS. Production
+ * codevos.ai uses TLS, but testing against production is not feasible in CI.
+ * TLS handshake/certificate behavior is tested at the transport layer by the
+ * Node.js TLS implementation; the tunnel client's TLS code path is exercised
+ * in tunnel-client.test.ts unit tests. Only the `usePlainTcp` flag differs.
+ *
  * Skip: Set SKIP_TUNNEL_E2E=1 to skip these tests when codevos.ai is not available.
  * Run: npx vitest run tunnel-e2e
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, type TestContext } from 'vitest';
 import http from 'node:http';
 import net from 'node:net';
 import { TunnelClient, type TunnelState } from '../lib/tunnel-client.js';
@@ -284,14 +291,14 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('codevos.ai health check responds', async () => {
-    if (!available) return;
+  it('codevos.ai health check responds', async (ctx) => {
+    if (!available) ctx.skip();
     const res = await httpRequest(`${CODEVOS_URL}/api/health`);
     expect(res.status).toBe(200);
   });
 
-  it('tunnel server port is reachable', async () => {
-    if (!available) return;
+  it('tunnel server port is reachable', async (ctx) => {
+    if (!available) ctx.skip();
     const connected = await new Promise<boolean>((resolve) => {
       const socket = new net.Socket();
       socket.setTimeout(3000);
@@ -310,8 +317,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     expect(connected).toBe(true);
   });
 
-  it('register -> connect -> proxy -> verify (full lifecycle)', async () => {
-    if (!available) return;
+  it('register -> connect -> proxy -> verify (full lifecycle)', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -353,8 +360,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('transitions to auth_failed with invalid API key', async () => {
-    if (!available) return;
+  it('transitions to auth_failed with invalid API key', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -378,8 +385,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('reconnects after disconnect', async () => {
-    if (!available) return;
+  it('reconnects after disconnect', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -407,8 +414,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('auto-reconnects after server-side connection drop (simulates server restart)', async () => {
-    if (!available) return;
+  it('auto-reconnects after server-side connection drop (simulates server restart)', async (ctx) => {
+    if (!available) ctx.skip();
 
     // TCP proxy between client and the real tunnel server.
     // Allows us to forcibly sever all connections to simulate a server restart.
@@ -473,8 +480,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('handles rapid reconnection cycles without crash (rate limit path)', async () => {
-    if (!available) return;
+  it('handles rapid reconnection cycles without crash (rate limit path)', async (ctx) => {
+    if (!available) ctx.skip();
 
     // This test exercises the reconnection code path E2E — the same path
     // that handles ERR rate_limited responses from the server.
@@ -518,8 +525,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('metadata is delivered during handshake', async () => {
-    if (!available) return;
+  it('metadata is delivered during handshake', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -546,8 +553,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('proxied HTTP request returns correct echo body', async () => {
-    if (!available) return;
+  it('proxied HTTP request returns correct echo body', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -576,8 +583,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('deregister -> tunnel disconnects', async () => {
-    if (!available) return;
+  it('deregister -> tunnel disconnects', async (ctx) => {
+    if (!available) ctx.skip();
 
     // Register a separate tower for this test (so we don't break other tests)
     const reg = await registerTower(sessionCookie!, 'e2e-deregister-test');
@@ -619,8 +626,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('streaming response (SSE) flows correctly through tunnel', async () => {
-    if (!available) return;
+  it('streaming response (SSE) flows correctly through tunnel', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
@@ -650,10 +657,12 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('WebSocket/terminal proxy works through real tunnel', async () => {
-    if (!available) return;
+  it('WebSocket/terminal proxy works through real tunnel', async (ctx) => {
+    if (!available) ctx.skip();
 
-    // Start a WebSocket echo server (simulates terminal pty)
+    // Start a WebSocket echo server (simulates terminal pty).
+    // Uses raw TCP echo after upgrade — no WebSocket framing, since the
+    // tunnel just passes raw bytes between codevos.ai and the local server.
     const upgradeSockets: net.Socket[] = [];
     const wsServer = http.createServer();
     wsServer.on('upgrade', (req, socket) => {
@@ -688,10 +697,68 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
 
     try {
       await waitFor(() => client.getState() === 'connected', 15000);
-      // Tunnel is operational — WebSocket CONNECT requests are proxied
-      // by codevos.ai's H2 client session. Bidirectional WebSocket validation
-      // is exercised in tunnel-edge-cases.test.ts via the mock server.
       expect(client.getState()).toBe('connected');
+
+      // Attempt a WebSocket upgrade request through the codevos.ai tunnel proxy.
+      // codevos.ai converts browser WebSocket upgrades to H2 CONNECT (:protocol: websocket)
+      // which the tunnel client proxies to the local WS echo server.
+      const urlObj = new URL(CODEVOS_URL);
+      const upgradeResult = await new Promise<{ upgraded: boolean; echoData?: string }>((resolve) => {
+        const req = http.request({
+          hostname: urlObj.hostname,
+          port: urlObj.port,
+          path: `/tower/${towerId}/ws-echo`,
+          method: 'GET',
+          timeout: 10000,
+          headers: {
+            'Connection': 'Upgrade',
+            'Upgrade': 'websocket',
+            'Sec-WebSocket-Version': '13',
+            'Sec-WebSocket-Key': Buffer.from('e2e-test-ws-key!').toString('base64'),
+          },
+        });
+
+        req.on('upgrade', (_res, socket) => {
+          // Upgrade succeeded — send test payload and check for echo
+          const payload = Buffer.from('e2e-ws-ping');
+          socket.write(payload);
+          const timeout = setTimeout(() => {
+            resolve({ upgraded: true });
+            socket.destroy();
+          }, 3000);
+          socket.once('data', (data) => {
+            clearTimeout(timeout);
+            resolve({ upgraded: true, echoData: data.toString() });
+            socket.destroy();
+          });
+          socket.on('error', () => {
+            clearTimeout(timeout);
+            resolve({ upgraded: true });
+          });
+        });
+
+        req.on('response', () => {
+          // Non-101 response — proxy reached the tunnel but upgrade wasn't supported
+          // (depends on codevos.ai's WebSocket proxy implementation for tower paths)
+          resolve({ upgraded: false });
+        });
+
+        req.on('error', () => resolve({ upgraded: false }));
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ upgraded: false });
+        });
+        req.end();
+      });
+
+      // Tunnel must be connected and reachable. If codevos.ai supports
+      // WebSocket proxy on tower paths, verify bidirectional echo.
+      // Full bidirectional WebSocket validation is also covered in
+      // tunnel-edge-cases.test.ts via mock server sendConnect().
+      expect(client.getState()).toBe('connected');
+      if (upgradeResult.upgraded && upgradeResult.echoData) {
+        expect(upgradeResult.echoData).toContain('e2e-ws-ping');
+      }
     } finally {
       client.disconnect();
       for (const s of upgradeSockets) {
@@ -701,8 +768,8 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
     }
   });
 
-  it('tunnel latency is within acceptable range (E2E)', async () => {
-    if (!available) return;
+  it('tunnel latency is within acceptable range (E2E)', async (ctx) => {
+    if (!available) ctx.skip();
 
     const client = new TunnelClient({
       serverUrl: CODEVOS_URL,
