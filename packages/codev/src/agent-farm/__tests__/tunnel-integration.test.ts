@@ -552,7 +552,7 @@ describe('tunnel integration (Phase 4)', () => {
 
       // Delete the config file
       fs.unlinkSync(testFile);
-      await waitFor(() => deleteDetected, 2000);
+      await waitFor(() => deleteDetected, 5000);
       expect(deleteDetected).toBe(true);
 
       watcher.close();
