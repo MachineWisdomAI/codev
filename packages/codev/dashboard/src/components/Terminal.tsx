@@ -116,6 +116,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
 
       // Paste: Cmd+V (Mac) or Ctrl+Shift+V (Linux/Windows)
       if (event.key === 'v' || event.key === 'V') {
+        // preventDefault stops the browser from ALSO firing a native paste
+        // event on xterm's hidden textarea, which would double-paste.
+        event.preventDefault();
         navigator.clipboard.readText().then((text) => {
           if (text) term.paste(text);
         }).catch(() => {
