@@ -4,14 +4,15 @@
  * Detects and handles orphaned tmux sessions from previous agent-farm runs.
  * This prevents resource leaks and ensures clean startup.
  *
- * IMPORTANT: Only cleans up architect sessions matching the af-architect naming pattern.
- * Other tmux sessions are left alone.
+ * IMPORTANT: Only cleans up architect sessions for THIS project (by project basename).
+ * Sessions from other projects are left alone.
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, basename } from 'node:path';
 import { logger } from './logger.js';
 import { run } from './shell.js';
+import { getConfig } from './config.js';
 import { loadState, setArchitect } from '../state.js';
 
 /**
@@ -32,15 +33,21 @@ interface OrphanedSession {
 }
 
 /**
- * Find tmux sessions that match agent-farm architect patterns.
- * Matches current naming (af-architect) and legacy port-based (af-architect-XXXX).
+ * Find tmux sessions that match THIS project's agent-farm architect patterns.
+ * Matches Tower naming (architect-<basename>), CLI naming (af-architect),
+ * and legacy port-based (af-architect-XXXX).
  * PID liveness check prevents killing active sessions.
  */
 async function findOrphanedSessions(): Promise<OrphanedSession[]> {
+  const config = getConfig();
   const state = loadState();
+  const projectBasename = basename(config.projectRoot);
 
-  // Match architect sessions — current naming (af-architect) and legacy port-based (af-architect-XXXX)
-  const architectPattern = /^af-architect(-\d+)?$/;
+  // Match architect sessions scoped to THIS project:
+  // - Tower-managed: architect-<basename> (e.g., architect-codev-public)
+  // - Legacy CLI: af-architect (no project scope — single session)
+  // - Legacy port-based: af-architect-XXXX (e.g., af-architect-4201)
+  const architectPattern = new RegExp(`^(architect-${projectBasename}|af-architect(-\\d+)?)$`);
 
   try {
     const result = await run('tmux list-sessions -F "#{session_name}" 2>/dev/null');
