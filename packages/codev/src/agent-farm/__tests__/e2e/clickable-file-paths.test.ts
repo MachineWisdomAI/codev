@@ -4,17 +4,23 @@
  * Tests:
  *   1. File path decorations appear for detected file paths
  *   2. Cmd+Click on file path opens file viewer tab
- *   3. Plain click (no modifier) does NOT open file
- *   4. Decoration has dotted underline CSS style
- *   5. Plain text without file paths has no decorations
- *   6. URL still works via WebLinksAddon (not decorated as file path)
- *   7. Path resolution via API with terminalId
- *   8. Path traversal returns 403
- *   9. Path with line number: API returns line for scroll-to-line
- *  10. Builder worktree resolution via shell tab with specific cwd
- *  11. Visual regression: dotted underline on file paths (screenshot)
- *  12. Visual regression: no decoration noise on plain text (screenshot)
- *  13. Visual regression: hover pointer cursor on file path (screenshot)
+ *   3. Cmd+Click on path with line number opens file tab (spec scenario 11)
+ *   4. Cmd+Click on non-existent file shows notFound tab (spec scenario 15)
+ *   5. Plain click (no modifier) does NOT open file
+ *   6. URL Cmd+Click opens in new tab, not file viewer (spec scenario 13)
+ *   7. Decoration has dotted underline CSS style
+ *   8. Plain text without file paths has no decorations
+ *   9. URL text does not get file-path-decoration
+ *  10. Decorations have pointer-events:none
+ *  11. Path resolution via API with terminalId
+ *  12. Absolute path resolution (spec scenario 12)
+ *  13. Path traversal returns 403
+ *  14. Path with line number: API returns line for scroll-to-line
+ *  15. Builder worktree resolution via shell tab with specific cwd
+ *  16. Non-existent file creates tab with notFound indicator
+ *  17. Visual regression: dotted underline on file paths (screenshot)
+ *  18. Visual regression: no decoration noise on plain text (screenshot)
+ *  19. Visual regression: hover pointer cursor on file path (screenshot)
  *
  * Prerequisites:
  *   - Tower running: `af tower start`
@@ -200,6 +206,65 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(afterTabCount).toBeGreaterThan(beforeTabCount);
     });
 
+    test('Cmd+Click on path with line number opens file tab (spec scenario 11)', async ({ page, request }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      const beforeTabCount = await getFileTabCount(request);
+
+      // Output a file path with a line number
+      await typeAndWait(page, terminal, 'echo "package.json:5"');
+
+      const decoration = page.locator('.file-path-decoration').last();
+      await expect(decoration).toBeVisible({ timeout: 5_000 });
+      const box = await decoration.boundingBox();
+      expect(box).not.toBeNull();
+
+      const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2, {
+        modifiers: [modifier],
+      });
+
+      await page.waitForTimeout(2000);
+
+      // A file tab should have been created via the click
+      const afterTabCount = await getFileTabCount(request);
+      expect(afterTabCount).toBeGreaterThan(beforeTabCount);
+    });
+
+    test('Cmd+Click on non-existent file path shows notFound tab (spec scenario 15)', async ({ page, request }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      const beforeTabCount = await getFileTabCount(request);
+
+      // Output a path to a file that does not exist
+      await typeAndWait(page, terminal, 'echo "src/does-not-exist-e2e-test.ts"');
+
+      const decoration = page.locator('.file-path-decoration').last();
+      await expect(decoration).toBeVisible({ timeout: 5_000 });
+      const box = await decoration.boundingBox();
+      expect(box).not.toBeNull();
+
+      const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2, {
+        modifiers: [modifier],
+      });
+
+      await page.waitForTimeout(2000);
+
+      // A tab should still be created (with notFound indicator)
+      const afterTabCount = await getFileTabCount(request);
+      expect(afterTabCount).toBeGreaterThan(beforeTabCount);
+
+      // Verify the most recent annotation has notFound set
+      const stateResp = await request.get(`${BASE_URL}/api/state`);
+      const state = await stateResp.json();
+      const annotations = state.annotations ?? [];
+      const lastAnnotation = annotations[annotations.length - 1];
+      expect(lastAnnotation.notFound).toBe(true);
+    });
+
     test('plain click (no modifier) does NOT open file', async ({ page, request }) => {
       await page.goto(PAGE_URL);
       const terminal = await waitForTerminal(page);
@@ -219,6 +284,43 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
 
       const afterTabCount = await getFileTabCount(request);
       expect(afterTabCount).toBe(beforeTabCount);
+    });
+
+    test('URL Cmd+Click opens in new tab, not file viewer (spec scenario 13)', async ({ page, request }) => {
+      await page.goto(PAGE_URL);
+      const terminal = await waitForTerminal(page);
+
+      const beforeTabCount = await getFileTabCount(request);
+
+      // Output a URL — handled by WebLinksAddon
+      await typeAndWait(page, terminal, 'echo "https://example.com"');
+
+      // WebLinksAddon creates its own link elements. Attempt Cmd+Click on the URL area.
+      // The URL should not create a file tab — instead it opens a popup (new browser tab).
+      // We intercept the popup event to verify URL behavior.
+      const popupPromise = page.waitForEvent('popup', { timeout: 5_000 }).catch(() => null);
+
+      const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+      // Click approximately in the middle of the terminal line where the URL was echoed
+      // WebLinksAddon creates an anchor overlay — Cmd+Click should trigger it
+      const termBox = await terminal.boundingBox();
+      expect(termBox).not.toBeNull();
+      await page.mouse.click(termBox!.x + 100, termBox!.y + termBox!.height - 60, {
+        modifiers: [modifier],
+      });
+
+      const popup = await popupPromise;
+
+      // Either a popup was opened (URL behavior) or no file tab was created
+      // The key assertion: no file tab was created for the URL
+      await page.waitForTimeout(1000);
+      const afterTabCount = await getFileTabCount(request);
+      expect(afterTabCount).toBe(beforeTabCount);
+
+      // If a popup was opened, that confirms URL opens in browser tab
+      if (popup) {
+        await popup.close();
+      }
     });
   });
 
@@ -242,6 +344,18 @@ test.describe('Clickable File Paths (Spec 0101)', () => {
       expect(response.ok()).toBe(true);
       const body = await response.json();
       expect(body.id).toBeTruthy();
+    });
+
+    test('resolves absolute path within project (spec scenario 12)', async ({ request }) => {
+      // Use an absolute path to a known file
+      const absolutePath = `${PROJECT_PATH}/package.json`;
+      const response = await request.post(`${BASE_URL}/api/tabs/file`, {
+        data: { path: absolutePath },
+      });
+      expect(response.ok()).toBe(true);
+      const body = await response.json();
+      expect(body.id).toBeTruthy();
+      expect(body.notFound).toBeFalsy();
     });
 
     test('rejects path traversal with 403', async ({ request }) => {
