@@ -176,7 +176,8 @@ Changes to `POST /api/tabs/file` handler:
    - Look up session: `const session = getTerminalManager().getSession(terminalId)`
    - If session found: `fullPath = path.join(session.cwd, filePath)`
    - If session NOT found: log warning, fall back to `path.join(projectPath, filePath)`
-3. Replace existing containment check with symlink-aware version that allows both project root and `.builders/` worktrees:
+3. **Soften the file-exists check**: The current endpoint returns 404 if the file doesn't exist (tower-server.ts line ~2522). The spec requires that non-existent files are still clickable — the file viewer should show a "File not found" indicator rather than the API rejecting the request. Change the 404 early return to instead create the file tab with a `notFound: true` flag, allowing the viewer to display the error. The containment check still runs (non-existent paths are still validated for directory traversal).
+4. Replace existing containment check with symlink-aware version that allows both project root and `.builders/` worktrees:
    ```typescript
    let resolvedPath: string;
    try {
@@ -217,6 +218,7 @@ Changes to `POST /api/tabs/file` handler:
 - [ ] Path traversal (`../../.ssh/id_rsa`) returns 403
 - [ ] Builder worktree paths (e.g., `.builders/0099/src/foo.ts`) pass containment check
 - [ ] Paths escaping project tree (e.g., `../../etc/passwd`) fail containment check
+- [ ] Non-existent files pass containment check and create a tab (no 404 early return)
 
 #### Risks
 - **Risk**: `session.config` is `private readonly` on `PtySession`
@@ -241,6 +243,7 @@ Changes to `POST /api/tabs/file` handler:
 - [ ] Updated `App.tsx` — pass `terminalId` to `handleFileOpen` → `createFileTab`
 - [ ] Updated `api.ts` — `createFileTab` accepts and sends `terminalId`
 - [ ] CSS for dotted underline + hover color on file path links (distinct from URL links)
+- [ ] Lifecycle disposal: `linkProviderDisposable.dispose()` + MutationObserver disconnect in cleanup
 - [ ] **DOM discovery task**: Inspect xterm.js rendered DOM to determine correct CSS selectors
 
 #### Implementation Details
@@ -261,7 +264,17 @@ Changes to `POST /api/tabs/file` handler:
      },
      terminalId,
    );
-   term.registerLinkProvider(filePathProvider);
+   const linkProviderDisposable = term.registerLinkProvider(filePathProvider);
+   ```
+
+   **Lifecycle disposal**: `registerLinkProvider` returns an `IDisposable`. Store it and call `linkProviderDisposable.dispose()` in the component cleanup function (the `useEffect` return callback), alongside `term.dispose()`, `ws.close()`, and other cleanup. If a `MutationObserver` is used for CSS tagging, it must also be disconnected in cleanup. This prevents stacking duplicate providers and memory leaks when Terminal components are unmounted/remounted on tab switches.
+
+   ```typescript
+   // In the useEffect cleanup:
+   return () => {
+     linkProviderDisposable.dispose();
+     // ... existing cleanup (ws.close(), term.dispose(), etc.)
+   };
    ```
 4. **Remove dead file-path branch** from WebLinksAddon handler. The `looksLikeFilePath` check in the WebLinksAddon callback (lines 86-88) is never triggered because WebLinksAddon only matches URLs. After the new `FilePathLinkProvider` handles file paths, this dead code should be removed. The WebLinksAddon handler becomes URL-only:
    ```typescript
@@ -355,7 +368,7 @@ The final selectors will be determined during implementation based on the DOM di
 
 #### Risks
 - **Risk**: xterm.js `ILinkProvider` and `WebLinksAddon` share the same DOM structure, making CSS distinction difficult
-  - **Mitigation**: Use `MutationObserver` or custom attribute to tag file-path link elements; worst case, both link types get dotted underline (acceptable degradation since visual distinction is a nice-to-have, not a blocker)
+  - **Mitigation**: Use a deterministic tagging strategy to guarantee distinct styling. Primary: `MutationObserver` on the xterm container that detects newly-added link decoration elements and adds a `data-link-type="file"` attribute to file-path links (identified by matching against the currently-hovered link provider instance). Fallback: if `ILinkProvider` renders links as overlay divs (separate from `WebLinksAddon` inline `<a>` tags), target each with different CSS selectors directly. The spec requires dotted underline for files and solid for URLs — this is a hard requirement, not optional.
 
 ---
 
@@ -434,7 +447,7 @@ Phases 1 and 2 can be implemented in parallel.
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | `ILink.activate` doesn't receive MouseEvent | Low | Medium | Track modifier key state globally via keydown/keyup |
-| File-path and URL links share same DOM structure | Medium | Medium | MutationObserver + custom attribute; acceptable fallback: both dotted |
+| File-path and URL links share same DOM structure | Medium | Medium | Deterministic tagging via MutationObserver + data attribute; or target different DOM structures with separate CSS selectors |
 | `session.config.cwd` not directly accessible | Confirmed | Low | Add `get cwd()` getter to PtySession (one-line fix) |
 | Regex false positives in terminal output | Low | Low | `looksLikeFilePath()` filter already handles common cases |
 | Visual regression test flakiness | Low | Low | Appropriate pixel diff threshold |
