@@ -18,7 +18,7 @@ import {
   type CloudConfig,
 } from '../lib/cloud-config.js';
 
-const CODEVOS_URL = 'https://codevos.ai';
+const CODEVOS_URL = process.env.CODEVOS_URL || 'https://codevos.ai';
 const DEFAULT_TOWER_PORT = 4100;
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 

@@ -106,6 +106,14 @@ Codex requested changes on two issues. Both valid and now addressed:
 
 Gemini and Claude also noted the plan document still referenced TCP/TLS transport from pre-TICK-001. **Fixed**: Updated plan Phase 3 connection flow, metadata protocol, reconnection, and mock server descriptions to reflect WebSocket transport.
 
+## Review Iteration 4 — Codex Feedback (Fixed)
+
+Codex requested changes on two issues. Both valid and now addressed:
+
+1. **CLI hard-codes `CODEVOS_URL`**: `tower-cloud.ts` had `const CODEVOS_URL = 'https://codevos.ai'` with no env override. The E2E tests already used `process.env.CODEVOS_URL`, but the CLI didn't. **Fixed**: Changed to `process.env.CODEVOS_URL || 'https://codevos.ai'` so CLI can target local/staging instances.
+
+2. **Documentation regression**: `agent-farm.md` still documented the old `--web`/`CODEV_WEB_KEY` flow and didn't mention `af tower register`, `deregister`, or `status`. **Fixed**: Replaced the outdated `af tower` section with full documentation for all tower subcommands including `register`, `deregister`, `status`, and the `CODEVOS_URL` env var.
+
 ## Merge Resolution
 
 The merge from `main` into the builder branch re-introduced cloudflared code that was removed in Phase 2, along with a dead `getBasePortForProject` function (removed by Spec 0098 on main). Both were cleaned up in the review phase.
