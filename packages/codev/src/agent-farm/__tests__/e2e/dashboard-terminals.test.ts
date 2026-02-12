@@ -10,9 +10,10 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { resolve } from 'node:path';
 
 const TOWER_URL = 'http://localhost:4100';
-const PROJECT_PATH = '/Users/mwk/Development/cluesmith/codev-public';
+const PROJECT_PATH = resolve(import.meta.dirname, '../../../../../');
 const ENCODED_PATH = Buffer.from(PROJECT_PATH).toString('base64url');
 // BASE_URL without trailing slash for API calls
 const BASE_URL = `${TOWER_URL}/project/${ENCODED_PATH}`;
@@ -128,7 +129,7 @@ test.describe('Dashboard Terminals E2E', () => {
   test('npm pack includes dashboard/dist', async () => {
     const { execSync } = await import('node:child_process');
     const output = execSync('npm pack --dry-run 2>&1', {
-      cwd: '/Users/mwk/Development/cluesmith/codev-public/packages/codev',
+      cwd: resolve(PROJECT_PATH, 'packages/codev'),
       encoding: 'utf-8',
     });
     expect(output).toContain('dashboard/dist/index.html');

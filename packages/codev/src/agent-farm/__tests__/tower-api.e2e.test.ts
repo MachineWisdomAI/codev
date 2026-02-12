@@ -286,16 +286,18 @@ describe('Tower API (Phase 1)', () => {
       const activateData = await activateRes.json();
       expect(activateData.success).toBe(true);
 
-      // Give time for terminal to be created and saved to SQLite
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Verify project now appears in the projects list with terminals
-      const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
-      expect(listRes.ok).toBe(true);
-      const listData = await listRes.json();
-      const project = listData.projects.find((p: { path: string }) =>
-        p.path === testProjectDir || p.path.includes('tower-sqlite-test')
-      );
+      // Poll for project to appear in the projects list with terminals
+      let project: any;
+      for (let i = 0; i < 20; i++) {
+        const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
+        expect(listRes.ok).toBe(true);
+        const listData = await listRes.json();
+        project = listData.projects.find((p: { path: string }) =>
+          p.path === testProjectDir || p.path.includes('tower-sqlite-test')
+        );
+        if (project?.terminals > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
       expect(project).toBeDefined();
       expect(project.terminals).toBeGreaterThan(0);
 
@@ -313,7 +315,7 @@ describe('Tower API (Phase 1)', () => {
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
 
       // Deactivate project
       const deactivateRes = await fetch(
@@ -351,7 +353,7 @@ describe('Tower API (Phase 1)', () => {
         { method: 'POST' }
       );
       expect(activateRes.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 1000));
     });
 
     afterEach(async () => {

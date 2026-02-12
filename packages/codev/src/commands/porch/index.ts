@@ -649,7 +649,7 @@ export async function cli(args: string[]): Promise<void> {
         console.log('');
         console.log('Project ID is auto-detected when exactly one project exists.');
         console.log('');
-        process.exit(command ? 1 : 0);
+        process.exit(command && command !== '--help' && command !== '-h' ? 1 : 0);
     }
   } catch (err) {
     console.error(chalk.red(`Error: ${(err as Error).message}`));

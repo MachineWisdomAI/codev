@@ -369,12 +369,14 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       // Activate project
       await activateProject(towerPort, testProjectPath);
 
-      // Wait a bit for registration
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Get tower status to see if project appears
-      const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
-      const status = await statusRes.json();
+      // Poll for project to appear in tower status
+      let status: any;
+      for (let i = 0; i < 20; i++) {
+        const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
+        status = await statusRes.json();
+        if (status.instances?.length > 0) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
 
       // Project should appear in instances
       expect(status.instances).toBeDefined();

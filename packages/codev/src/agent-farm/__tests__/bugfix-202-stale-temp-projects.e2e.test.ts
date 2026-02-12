@@ -114,11 +114,16 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     });
     expect(activateRes.ok).toBe(true);
 
-    // Step 3: Verify it appears in the project list while the directory exists
-    const listRes1 = await fetch(`${base}/api/projects`);
-    expect(listRes1.ok).toBe(true);
-    const data1 = await listRes1.json();
-    const found1 = data1.projects.find((p: { path: string }) => p.path === tempProjectDir);
+    // Step 3: Poll for project to appear in the project list
+    let found1: any;
+    for (let i = 0; i < 20; i++) {
+      const listRes1 = await fetch(`${base}/api/projects`);
+      expect(listRes1.ok).toBe(true);
+      const data1 = await listRes1.json();
+      found1 = data1.projects.find((p: { path: string }) => p.path === tempProjectDir);
+      if (found1) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
     expect(found1).toBeDefined();
 
     // Step 4: Deactivate the project (stops terminals)
