@@ -828,6 +828,7 @@ async function reconcileTerminalSessions(): Promise<void> {
         db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
       }
       saveTerminalSession(newSession.id, projectPath, type, roleId, newSession.pid, tmuxName);
+      registerKnownProject(projectPath);
 
       if (dbRow) {
         log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);
@@ -1107,12 +1108,40 @@ interface InstanceStatus {
 }
 
 /**
- * Get all known project paths from terminal_sessions and in-memory cache
+ * Register a project in the known_projects table so it persists across restarts
+ * even when all terminal sessions are gone.
+ */
+function registerKnownProject(projectPath: string): void {
+  try {
+    const db = getGlobalDb();
+    db.prepare(`
+      INSERT INTO known_projects (project_path, name, last_launched_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(project_path) DO UPDATE SET last_launched_at = datetime('now')
+    `).run(projectPath, path.basename(projectPath));
+  } catch {
+    // Table may not exist yet (pre-migration)
+  }
+}
+
+/**
+ * Get all known project paths from known_projects, terminal_sessions, and in-memory cache
  */
 function getKnownProjectPaths(): string[] {
   const projectPaths = new Set<string>();
 
-  // From terminal_sessions table (persists across Tower restarts)
+  // From known_projects table (persists even after all terminals are killed)
+  try {
+    const db = getGlobalDb();
+    const projects = db.prepare('SELECT project_path FROM known_projects').all() as { project_path: string }[];
+    for (const p of projects) {
+      projectPaths.add(p.project_path);
+    }
+  } catch {
+    // Table may not exist yet
+  }
+
+  // From terminal_sessions table (catches any missed by known_projects)
   try {
     const db = getGlobalDb();
     const sessions = db.prepare('SELECT DISTINCT project_path FROM terminal_sessions').all() as { project_path: string }[];
@@ -1573,6 +1602,9 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   try {
     // Ensure project has port allocation
     const resolvedPath = fs.realpathSync(projectPath);
+
+    // Persist in known_projects so the project survives terminal cleanup
+    registerKnownProject(resolvedPath);
 
     // Initialize project terminal entry
     const entry = getProjectTerminalsEntry(resolvedPath);

@@ -348,6 +348,25 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Created file_tabs table (Spec 0099 Phase 4)');
   }
 
+  // Migration v5: Add known_projects table for persistent project registry
+  const v5 = db.prepare('SELECT version FROM _migrations WHERE version = 5').get();
+  if (!v5) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS known_projects (
+        project_path TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    // Seed from existing terminal_sessions so current projects appear immediately
+    db.exec(`
+      INSERT OR IGNORE INTO known_projects (project_path, name, last_launched_at)
+      SELECT DISTINCT project_path, '', datetime('now') FROM terminal_sessions;
+    `);
+    db.prepare('INSERT INTO _migrations (version) VALUES (5)').run();
+    console.log('[info] Created known_projects table');
+  }
+
   return db;
 }
 
