@@ -1,6 +1,6 @@
 ---
 approved: 2026-02-11
-validated: [codex]
+validated: [gemini, codex, claude]
 ---
 
 # Spec 0099: Tower Codebase Hygiene
@@ -23,13 +23,13 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 2. **Remove `state.json` deletion from Tower** — `tower-server.ts:1486-1497` still deletes `.agent-farm/state.json` on project launch. SQLite migration is complete; this is vestigial.
 
-3. **Remove `dashboard-server.js` process scanning from `stop.ts`** — `stop.ts:54-102` pattern-matches `dashboard-server.js` which doesn't exist. Replace with Tower terminal cleanup via `DELETE /api/terminals/:id`.
+3. **Remove `dashboard-server.js` process scanning from `stop.ts`** — `stop.ts:54-102` pattern-matches `dashboard-server.js` which doesn't exist. Remove this dead scanning code. Note: `stop.ts` runs when shutting down the entire stack, so it cannot rely on Tower API calls (Tower may already be stopping). Terminal cleanup during stop should use direct tmux/process cleanup, not Tower API. Tower's own shutdown handler already cleans up its node-pty terminals.
 
-4. **Remove Builder `port`/`pid` fields** — `startBuilderSession` always returns `{ port: 0, pid: 0 }`. Remove `port` and `pid` from the `Builder` and `UtilTerminal` interfaces in `types.ts`. Update all consumers (`cleanup.ts`, `attach.ts`, `status.ts`, `spawn.ts`) to use `terminalId` instead. Remove PID-based kill logic in cleanup/stop — use Tower terminal deletion.
+4. **Remove Builder `port`/`pid` fields** — `startBuilderSession` always returns `{ port: 0, pid: 0 }`. Remove `port` and `pid` from the `Builder` and `UtilTerminal` interfaces in `types.ts`. Also update `Annotation` and `ArchitectState` interfaces which carry `port`/`pid`. Update `startBuilderSession` return type. Update all consumers (`cleanup.ts`, `attach.ts`, `status.ts`, `spawn.ts`) to use `terminalId` instead. Remove PID-based kill logic in cleanup/stop — use Tower terminal deletion. Note: the SQLite `builders` table schema may need column adjustments; verify and update as needed.
 
 ### Phase 2: Naming & Terminology Fix
 
-1. **Align tmux session naming** — `af architect` (`architect.ts:16`) creates `af-architect`. Tower creates `architect-{basename}`. Standardize on Tower's convention (`architect-{basename}`) everywhere.
+1. **Align tmux session naming** — `af architect` (`architect.ts:16`) creates `af-architect`. Tower creates `architect-{basename}`. Standardize on Tower's convention (`architect-{basename}`) everywhere. Migration: existing sessions with the old name won't be found after upgrade. Users must restart their architect session. No backward-compat shim — the old name was only used by the legacy `af architect` path which is being updated.
 
 2. **Update user-facing messages** — Replace all "Start with: af dash start" with "Start with: af tower start" in:
    - `consult.ts:28`
@@ -41,19 +41,19 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 ### Phase 3: CLI Consolidation onto TowerClient
 
-1. **Route `consult.ts` through TowerClient** — Replace raw fetch to `localhost:${dashboardPort}/api/tabs/shell` with `TowerClient` call to `/project/<encoded>/api/tabs/shell` on port 4100.
+1. **Route `consult.ts` through TowerClient** — Replace raw fetch to `localhost:${dashboardPort}/api/tabs/shell` with `TowerClient` call to `/project/<encoded>/api/tabs/shell` on port 4100. TowerClient already has `request()` for arbitrary paths; add a `createShellTab(projectPath, command)` convenience method.
 
-2. **Route `shell.ts` and `open.ts` through TowerClient** — Both reimplement `encodeProjectPath` and Tower URL construction. Use `TowerClient` methods instead, which includes proper auth headers (`codev-web-key`).
+2. **Route `shell.ts` and `open.ts` through TowerClient** — Both reimplement `encodeProjectPath` and Tower URL construction. Use `TowerClient`'s existing `encodeProjectPath()` export and `getProjectUrl()` method, which include proper auth headers (`codev-web-key`).
 
-3. **Fix `attach.ts`** — Remove `http://localhost:${builder.port}` URL construction. Generate proper Tower dashboard URL via `TowerClient.getProjectUrl()`.
+3. **Fix `attach.ts`** — Remove `http://localhost:${builder.port}` URL construction. Use `TowerClient.getProjectUrl()` (already exists) to generate the correct Tower dashboard URL.
 
-4. **Fix `getGateStatusForProject()`** — `tower-server.ts:1051-1056` fetches `localhost:${basePort}/api/status` (dead port). Either query Tower's own state directly (it has the data in-memory) or remove gate status from the overview page.
+4. **Fix `getGateStatusForProject()`** — `tower-server.ts:1051-1056` fetches `localhost:${basePort}/api/status` (dead port). Decision: query Tower's own in-memory state directly. Tower already tracks project terminals and can read porch status files (`codev/projects/<id>/status.yaml`) from the project path. Replace the dead HTTP fetch with a direct file read of the porch status YAML.
 
-5. **Fix `af start --remote`** — `start.ts:200-268` runs `af dash start` on remote host. Update to activate via Tower API.
+5. **Fix `af start --remote`** — `start.ts:200-268` runs `af dash start` on remote host. Update to use `af tower start` command over SSH (same transport, just fix the command string). Authentication uses the existing SSH + local-key flow — no new auth mechanism needed.
 
 ### Phase 4: State Management Fixes
 
-1. **Persist file tabs to SQLite** — `POST /api/tabs/file` currently stores tabs only in the in-memory `fileTabs` Map. Add a `file_tabs` table to SQLite so they survive Tower restarts.
+1. **Persist file tabs to SQLite** — `POST /api/tabs/file` currently stores tabs only in the in-memory `fileTabs` Map. Add a `file_tabs` table to SQLite so they survive Tower restarts. Schema: `file_tabs(id TEXT PRIMARY KEY, project_path TEXT NOT NULL, file_path TEXT NOT NULL, created_at INTEGER NOT NULL)`. On Tower startup, load persisted tabs into the in-memory `fileTabs` Map for each known project. On tab create/delete, write through to SQLite. No migration needed — this is a new table added via `CREATE TABLE IF NOT EXISTS`.
 
 2. **Document the tmux/SQLite relationship** — `reconcileTerminalSessions()` uses tmux as source of truth for *existence* and SQLite for *metadata*. This is intentional (tmux processes survive Tower restarts, SQLite rows don't track process liveness). Add a clear comment block explaining this dual-source strategy rather than claiming "SQLite is authoritative" when it isn't for liveness.
 
@@ -63,15 +63,16 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 
 2. **Improve `shell.ts` error handling** — Currently all errors become "Tower is not running". Log the actual error and differentiate connection failures from server errors.
 
-3. **Deduplicate `architect.ts`** — Extract shared logic from `createAndAttach` and `createLayoutAndAttach` into a helper. The two functions are ~80 lines each with only the tmux pane layout differing.
+3. **Deduplicate `architect.ts`** — Extract shared logic from `createAndAttach` and `createLayoutAndAttach` into a private helper within `architect.ts` itself. The two functions are ~80 lines each with only the tmux pane layout differing.
 
-4. **Deduplicate `getSessionName`** — Exists in both `spawn.ts:189` and `cleanup.ts:42`. Extract to a shared utility.
+4. **Deduplicate `getSessionName`** — Exists in both `spawn.ts:189` and `cleanup.ts:42`. Extract to `utils/session.ts` (new file) and import from both locations.
 
 ## Out of Scope
 
 - Port registry removal (Spec 0098)
 - Cloud Tower (Spec 0097)
-- Adding new features to TowerClient
+- Adding major new features to TowerClient (minor convenience methods like `createShellTab` are in scope)
+- Spec 0098 merge conflict resolution (0098 should land first if possible; otherwise resolve conflicts at merge time)
 
 ## Acceptance Criteria
 
@@ -79,7 +80,20 @@ After the Tower Single Daemon migration (Spec 0090), multiple layers of the code
 2. All user-facing messages reference Tower, not dashboard-server
 3. `consult.ts`, `shell.ts`, `open.ts` use TowerClient (with auth headers)
 4. `attach.ts` generates correct Tower URLs
-5. File tabs survive Tower restart (persisted to SQLite)
+5. File tabs survive Tower restart (persisted to SQLite via `file_tabs` table)
 6. No duplicate `getSessionName` or `encodeProjectPath` implementations
-7. All existing tests pass (updated as needed)
+7. All existing tests pass (updated as needed); new tests for file tab persistence
 8. Builder/UtilTerminal types no longer carry `port`/`pid` fields
+9. `getGateStatusForProject()` reads porch status from filesystem, not dead HTTP port
+
+## Consultation Log
+
+### Iteration 1 (Gemini, Codex, Claude)
+
+**Key feedback addressed:**
+
+- **Gemini**: Resolve `getGateStatusForProject()` either/or → decided: query Tower's own state via porch YAML files. Add tests for file tab persistence. Note tmux naming transition.
+- **Codex**: Add SQLite schema for file tabs (`file_tabs` table). Clarify TowerClient method availability. Resolve gate status ambiguity. Clarify `af start --remote` approach (SSH + command fix). Specify dedup destination modules.
+- **Claude**: Clarify `stop.ts` ordering (can't call Tower API during shutdown). Note `startBuilderSession` return type needs updating. Note potential Spec 0098 conflicts. Acknowledge file tab persistence is a small feature within hygiene scope.
+
+All feedback incorporated into spec body above.
