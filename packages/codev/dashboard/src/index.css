@@ -178,19 +178,19 @@ body {
   height: 100%;
 }
 
-/* Spec 0101: Dotted underline for file-path links (distinct from URL solid underline).
- * xterm.js applies inline text-decoration:underline on link hover cells.
- * FilePathLinkProvider toggles .file-path-link-hover on the xterm element
- * via ILink.hover/leave, letting CSS override only file-path link underlines. */
-.file-path-link-hover .xterm-rows span[style*="text-decoration"] {
-  text-decoration: underline dotted !important;
-  text-decoration-color: rgba(255, 255, 255, 0.5) !important;
-  text-underline-offset: 2px !important;
+/* Spec 0101: Persistent dotted underline for file-path links (distinct from URL solid underline).
+ * FilePathDecorationManager creates overlay elements via xterm.js registerDecoration API
+ * for each detected file path. Underline is always visible (not just on hover).
+ * FilePathLinkProvider toggles .file-path-link-hover on hover for brightness shift. */
+.file-path-decoration {
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.3) !important;
+  background: transparent !important;
+  pointer-events: none;
 }
 
-/* Hover brightness shift for file-path links */
-.file-path-link-hover .xterm-rows span[style*="text-decoration"]:hover {
-  text-decoration-color: rgba(255, 255, 255, 0.8) !important;
+/* Hover brightness shift for file-path link decorations */
+.file-path-link-hover .file-path-decoration {
+  border-bottom-color: rgba(255, 255, 255, 0.7) !important;
 }
 
 /* Terminal iframe */

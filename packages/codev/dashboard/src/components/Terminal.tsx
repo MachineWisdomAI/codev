@@ -5,7 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { FilePathLinkProvider } from '../lib/filePathLinkProvider.js';
+import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePathLinkProvider.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -84,10 +84,12 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     });
     term.loadAddon(webLinksAddon);
 
-    // Spec 0101: File path links — register custom ILinkProvider for dotted underline + Cmd/Ctrl+Click
+    // Spec 0101: File path links — register custom ILinkProvider for Cmd/Ctrl+Click activation
+    // and FilePathDecorationManager for persistent dotted underline decoration.
     // Extract terminalId from wsPath: "/base/ws/terminal/<id>" → "<id>"
     const terminalId = wsPath.split('/').pop();
     let linkProviderDisposable: { dispose(): void } | null = null;
+    let decorationManager: FilePathDecorationManager | null = null;
     if (onFileOpen) {
       const filePathProvider = new FilePathLinkProvider(
         term,
@@ -97,6 +99,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
         terminalId,
       );
       linkProviderDisposable = term.registerLinkProvider(filePathProvider);
+      decorationManager = new FilePathDecorationManager(term);
     }
 
     // Clipboard handling
@@ -273,6 +276,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
+      decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       selectionDisposable.dispose();
       container.removeEventListener('mouseup', handleMouseUp);

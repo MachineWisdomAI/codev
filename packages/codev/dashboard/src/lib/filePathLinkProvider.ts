@@ -3,9 +3,13 @@
  *
  * Detects file paths using FILE_PATH_REGEX and creates clickable links
  * with Cmd+Click (macOS) / Ctrl+Click (others) activation.
+ *
+ * FilePathDecorationManager provides persistent dotted underline decoration
+ * via xterm.js registerDecoration API, so file paths are always visually
+ * distinguished from surrounding text (not just on hover).
  */
 
-import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm';
+import type { IDisposable, ILink, ILinkProvider, Terminal } from '@xterm/xterm';
 import { FILE_PATH_REGEX, looksLikeFilePath } from './filePaths.js';
 
 type FileOpenCallback = (path: string, line?: number, column?: number, terminalId?: string) => void;
@@ -53,21 +57,22 @@ export class FilePathLinkProvider implements ILinkProvider {
       const linkStart = match.index + capturedOffset;
       const linkEnd = match.index + fullMatch.length;
 
-      // xterm.js ILink.range uses 1-based inclusive coordinates
+      // xterm.js ILink.range uses 1-based inclusive coordinates.
+      // underline: false — persistent dotted underline is handled by FilePathDecorationManager
+      // overlay elements, not xterm's built-in hover underline.
       links.push({
         range: {
           start: { x: linkStart + 1, y: lineNumber },
           end: { x: linkEnd, y: lineNumber },
         },
         text: fullMatch.substring(capturedOffset),
-        decorations: { pointerCursor: true, underline: true },
+        decorations: { pointerCursor: true, underline: false },
         activate: (event: MouseEvent, _linkText: string) => {
           // Platform-aware modifier: Cmd on macOS, Ctrl on others
           if (isMac ? !event.metaKey : !event.ctrlKey) return;
           this.onFileOpen(filePath, line, column, this.terminalId);
         },
-        // Toggle CSS class on hover for dotted underline styling (distinct from URL solid underline).
-        // xterm.js applies inline text-decoration:underline; CSS overrides to dotted when class is present.
+        // Toggle CSS class on hover for brightness shift on dotted underline overlays.
         hover: () => {
           this.terminal.element?.classList.add('file-path-link-hover');
         },
@@ -78,5 +83,80 @@ export class FilePathLinkProvider implements ILinkProvider {
     }
 
     callback(links.length > 0 ? links : undefined);
+  }
+}
+
+/**
+ * Creates persistent dotted underline decorations for file paths in terminal output.
+ *
+ * Uses xterm.js registerDecoration API to overlay styled elements on detected file paths.
+ * Listens for term.onWriteParsed to scan new lines as content arrives.
+ * Decorations persist in the terminal (visible without hover), satisfying the spec's
+ * requirement that file paths are "visually indicated as clickable."
+ */
+export class FilePathDecorationManager {
+  private disposables: IDisposable[] = [];
+  private lastScannedLine = -1;
+
+  constructor(private terminal: Terminal) {
+    this.disposables.push(
+      terminal.onWriteParsed(() => this.scanNewLines()),
+    );
+  }
+
+  private scanNewLines(): void {
+    const buffer = this.terminal.buffer.active;
+    const currentLine = buffer.baseY + buffer.cursorY;
+
+    for (let i = this.lastScannedLine + 1; i <= currentLine; i++) {
+      this.decorateLine(i);
+    }
+    this.lastScannedLine = currentLine;
+  }
+
+  private decorateLine(absoluteLine: number): void {
+    const buffer = this.terminal.buffer.active;
+    const line = buffer.getLine(absoluteLine);
+    if (!line) return;
+
+    const text = line.translateToString();
+    const regex = new RegExp(FILE_PATH_REGEX.source, FILE_PATH_REGEX.flags);
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(text)) !== null) {
+      const filePath = match[1];
+      if (!filePath || !looksLikeFilePath(filePath)) continue;
+
+      const fullMatch = match[0];
+      const capturedOffset = fullMatch.indexOf(filePath);
+      const linkStart = match.index + capturedOffset;
+      const linkWidth = fullMatch.length - capturedOffset;
+
+      // Create marker at the buffer line position
+      const cursorLine = buffer.baseY + buffer.cursorY;
+      const offset = absoluteLine - cursorLine;
+      const marker = this.terminal.registerMarker(offset);
+      if (!marker || marker.line === -1) continue;
+
+      const decoration = this.terminal.registerDecoration({
+        marker,
+        x: linkStart,
+        width: linkWidth,
+      });
+
+      if (decoration) {
+        decoration.onRender(el => {
+          el.classList.add('file-path-decoration');
+        });
+        this.disposables.push(decoration);
+      }
+      this.disposables.push(marker);
+    }
+  }
+
+  dispose(): void {
+    for (const d of this.disposables) d.dispose();
+    this.disposables = [];
+    this.lastScannedLine = -1;
   }
 }

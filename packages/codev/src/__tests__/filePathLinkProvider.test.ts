@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FILE_PATH_REGEX, parseFilePath, looksLikeFilePath } from '../../dashboard/src/lib/filePaths.js';
-import { FilePathLinkProvider } from '../../dashboard/src/lib/filePathLinkProvider.js';
+import { FilePathLinkProvider, FilePathDecorationManager } from '../../dashboard/src/lib/filePathLinkProvider.js';
 import type { ILink } from '@xterm/xterm';
 
 // ──────────────────────────────────────────────────────────────
@@ -435,12 +435,12 @@ describe('FilePathLinkProvider', () => {
   });
 
   describe('ILink.decorations', () => {
-    it('sets pointerCursor and underline', async () => {
+    it('sets pointerCursor true and underline false (overlay handles underline)', async () => {
       const links = await getLinks('error in src/foo.ts here');
       expect(links).toBeDefined();
       expect(links![0].decorations).toEqual({
         pointerCursor: true,
-        underline: true,
+        underline: false,
       });
     });
   });
@@ -492,5 +492,191 @@ describe('FilePathLinkProvider', () => {
       expect(() => links![0].hover!({} as MouseEvent, links![0].text)).not.toThrow();
       expect(() => links![0].leave!({} as MouseEvent, links![0].text)).not.toThrow();
     });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────
+// FilePathDecorationManager tests
+// ──────────────────────────────────────────────────────────────
+
+describe('FilePathDecorationManager', () => {
+  let onWriteParsedCallback: (() => void) | null;
+
+  function createMockTerminalForDecoration(lines: string[]) {
+    onWriteParsedCallback = null;
+    const markers: Array<{ dispose: ReturnType<typeof vi.fn>; line: number }> = [];
+    const decorations: Array<{
+      dispose: ReturnType<typeof vi.fn>;
+      onRender: ReturnType<typeof vi.fn>;
+      element: HTMLElement | undefined;
+    }> = [];
+
+    const terminal = {
+      buffer: {
+        active: {
+          getLine: vi.fn((lineIndex: number) => {
+            if (lineIndex >= 0 && lineIndex < lines.length) {
+              return { translateToString: () => lines[lineIndex] };
+            }
+            return null;
+          }),
+          baseY: 0,
+          cursorY: Math.max(0, lines.length - 1),
+        },
+      },
+      onWriteParsed: vi.fn((cb: () => void) => {
+        onWriteParsedCallback = cb;
+        return { dispose: vi.fn() };
+      }),
+      registerMarker: vi.fn((offset: number) => {
+        const cursorLine = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
+        const line = cursorLine + offset;
+        const marker = { dispose: vi.fn(), line, isDisposed: false, onDispose: vi.fn() };
+        markers.push(marker);
+        return marker;
+      }),
+      registerDecoration: vi.fn((opts: { marker: { line: number }; x: number; width: number }) => {
+        const decoration = {
+          dispose: vi.fn(),
+          onRender: vi.fn((cb: (el: HTMLElement) => void) => {
+            // Minimal mock element (no jsdom needed)
+            const classSet = new Set<string>();
+            const el = {
+              classList: {
+                add: (cls: string) => classSet.add(cls),
+                remove: (cls: string) => classSet.delete(cls),
+                contains: (cls: string) => classSet.has(cls),
+              },
+              style: {},
+            } as unknown as HTMLElement;
+            cb(el);
+            decoration.element = el;
+            return { dispose: vi.fn() };
+          }),
+          element: undefined as HTMLElement | undefined,
+          marker: opts.marker,
+          options: {},
+          isDisposed: false,
+          onDispose: vi.fn(),
+        };
+        decorations.push(decoration);
+        return decoration;
+      }),
+    } as unknown as import('@xterm/xterm').Terminal;
+
+    return { terminal, markers, decorations };
+  }
+
+  it('creates decorations for file paths on onWriteParsed', () => {
+    const { terminal, decorations } = createMockTerminalForDecoration([
+      'error in src/foo.ts:42 here',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    expect(onWriteParsedCallback).toBeDefined();
+
+    // Simulate data written
+    onWriteParsedCallback!();
+
+    expect(terminal.registerMarker).toHaveBeenCalled();
+    expect(terminal.registerDecoration).toHaveBeenCalled();
+    expect(decorations.length).toBe(1);
+
+    manager.dispose();
+  });
+
+  it('does not create decorations for lines without file paths', () => {
+    const { terminal, decorations } = createMockTerminalForDecoration([
+      'just some regular text',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+
+    expect(decorations.length).toBe(0);
+
+    manager.dispose();
+  });
+
+  it('creates multiple decorations for multiple file paths', () => {
+    const { terminal, decorations } = createMockTerminalForDecoration([
+      'error in src/a.ts:1 and src/b.ts:2',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+
+    expect(decorations.length).toBe(2);
+
+    manager.dispose();
+  });
+
+  it('adds file-path-decoration class via onRender', () => {
+    const { terminal, decorations } = createMockTerminalForDecoration([
+      'error in src/foo.ts here',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+
+    expect(decorations.length).toBe(1);
+    expect(decorations[0].element).toBeDefined();
+    expect(decorations[0].element!.classList.contains('file-path-decoration')).toBe(true);
+
+    manager.dispose();
+  });
+
+  it('does not re-scan already scanned lines', () => {
+    const { terminal, decorations } = createMockTerminalForDecoration([
+      'error in src/foo.ts here',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+    expect(decorations.length).toBe(1);
+
+    // Trigger again without cursor moving — no new decorations
+    onWriteParsedCallback!();
+    expect(decorations.length).toBe(1);
+
+    manager.dispose();
+  });
+
+  it('scans new lines when cursor advances', () => {
+    const lines = [
+      'error in src/a.ts here',
+      'error in src/b.ts here',
+    ];
+    const { terminal, decorations } = createMockTerminalForDecoration(lines);
+
+    // Start with cursor at line 0
+    (terminal.buffer.active as unknown as { cursorY: number }).cursorY = 0;
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+    expect(decorations.length).toBe(1);
+
+    // Cursor advances to line 1
+    (terminal.buffer.active as unknown as { cursorY: number }).cursorY = 1;
+    onWriteParsedCallback!();
+    expect(decorations.length).toBe(2);
+
+    manager.dispose();
+  });
+
+  it('disposes all markers and decorations on dispose', () => {
+    const { terminal, markers, decorations } = createMockTerminalForDecoration([
+      'error in src/foo.ts here',
+    ]);
+
+    const manager = new FilePathDecorationManager(terminal);
+    onWriteParsedCallback!();
+
+    expect(markers.length).toBeGreaterThan(0);
+    expect(decorations.length).toBeGreaterThan(0);
+
+    manager.dispose();
+
+    for (const m of markers) expect(m.dispose).toHaveBeenCalled();
+    for (const d of decorations) expect(d.dispose).toHaveBeenCalled();
   });
 });
