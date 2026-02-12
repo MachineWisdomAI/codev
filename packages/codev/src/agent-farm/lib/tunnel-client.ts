@@ -456,19 +456,30 @@ export class TunnelClient {
     const authority = headers[':authority'] as string || `localhost:${this.options.localPort}`;
     const path = headers[':path'] as string || '/';
 
+    // Forward non-hop-by-hop headers from the H2 CONNECT to the local WS upgrade
+    const forwardHeaders: Record<string, string | string[]> = {
+      'Upgrade': 'websocket',
+      'Connection': 'Upgrade',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Key': Buffer.from(Math.random().toString()).toString('base64'),
+      'Host': authority,
+    };
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.startsWith(':')) continue;
+      if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
+      if (key.toLowerCase() === 'host') continue; // Already set
+      if (value !== undefined) {
+        forwardHeaders[key] = value as string | string[];
+      }
+    }
+
     // Make HTTP/1.1 WebSocket upgrade request to localhost
     const wsReq = http.request({
       hostname: 'localhost',
       port: this.options.localPort,
       path,
       method: 'GET',
-      headers: {
-        'Upgrade': 'websocket',
-        'Connection': 'Upgrade',
-        'Sec-WebSocket-Version': '13',
-        'Sec-WebSocket-Key': Buffer.from(Math.random().toString()).toString('base64'),
-        'Host': authority,
-      },
+      headers: forwardHeaders,
     });
 
     wsReq.on('upgrade', (_res, socket, head) => {
@@ -488,6 +499,14 @@ export class TunnelClient {
       stream.on('error', () => socket.destroy());
       socket.on('close', () => { if (!stream.destroyed) stream.destroy(); });
       stream.on('close', () => { if (!socket.destroyed) socket.destroy(); });
+    });
+
+    // Handle non-upgrade responses (e.g. 404 for missing terminal)
+    wsReq.on('response', (res) => {
+      if (!stream.destroyed) {
+        stream.respond({ ':status': res.statusCode || 502 });
+        res.pipe(stream);
+      }
     });
 
     wsReq.on('error', () => {

@@ -204,7 +204,8 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   }
 
   // Exchange token for API key
-  const serverUrl = existing?.server_url || CODEVOS_URL;
+  // Explicit CODEVOS_URL env var takes priority over existing config (allows migration)
+  const serverUrl = process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
   logger.info('Exchanging token...');
 
   let towerId: string;

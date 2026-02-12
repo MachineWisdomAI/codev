@@ -11,6 +11,7 @@ import {
   unlinkSync,
   existsSync,
   mkdirSync,
+  chmodSync,
   statSync,
 } from 'node:fs';
 import { resolve } from 'node:path';
@@ -108,6 +109,8 @@ export function writeCloudConfig(config: CloudConfig): void {
   const configPath = getCloudConfigPath();
   const json = JSON.stringify(config, null, 2) + '\n';
   writeFileSync(configPath, json, { mode: 0o600 });
+  // Enforce 0600 even if the file already existed with different permissions
+  chmodSync(configPath, 0o600);
 }
 
 /**

@@ -218,6 +218,20 @@ describe('cloud-config', () => {
       expect(existsSync(CONFIG_PATH)).toBe(true);
     });
 
+    it('enforces 0600 on pre-existing files with wrong permissions', () => {
+      // Create file with world-readable permissions (0644)
+      mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
+      writeFileSync(CONFIG_PATH, '{}', { mode: 0o644 });
+      const beforeMode = statSync(CONFIG_PATH).mode & 0o777;
+      expect(beforeMode).toBe(0o644);
+
+      // writeCloudConfig should fix permissions
+      writeCloudConfig(VALID_CONFIG);
+
+      const afterMode = statSync(CONFIG_PATH).mode & 0o777;
+      expect(afterMode).toBe(0o600);
+    });
+
     it('overwrites existing config file', () => {
       writeCloudConfig(VALID_CONFIG);
 

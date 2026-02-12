@@ -114,6 +114,10 @@ Codex requested changes on two issues. Both valid and now addressed:
 
 2. **Documentation regression**: `agent-farm.md` still documented the old `--web`/`CODEV_WEB_KEY` flow and didn't mention `af tower register`, `deregister`, or `status`. **Fixed**: Replaced the outdated `af tower` section with full documentation for all tower subcommands including `register`, `deregister`, `status`, and the `CODEVOS_URL` env var.
 
+## Review Iteration 6 — Codex Feedback (Fixed)
+
+Codex identified a security regression: `writeCloudConfig()` passes `{ mode: 0o600 }` to `writeFileSync`, but Node only applies mode on file creation — pre-existing files keep their old permissions. **Fixed**: Added `chmodSync(configPath, 0o600)` after `writeFileSync` to enforce permissions regardless. Added regression test that creates a 0644 file first and verifies permissions are corrected to 0600.
+
 ## Review Iteration 5 — Codex + Claude Feedback (Fixed)
 
 Codex requested changes on two issues; Claude noted one minor issue. All three addressed:

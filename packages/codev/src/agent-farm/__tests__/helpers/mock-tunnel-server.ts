@@ -177,7 +177,7 @@ export class MockTunnelServer {
    * Send a WebSocket CONNECT request through the tunnel.
    * Returns the raw H2 stream for bidirectional communication.
    */
-  sendConnect(path: string): http2.ClientHttp2Stream {
+  sendConnect(path: string, extraHeaders?: Record<string, string>): http2.ClientHttp2Stream {
     const session = this.h2Sessions[this.h2Sessions.length - 1];
     if (!session || session.destroyed) {
       throw new Error('No active H2 session. Is the tunnel connected?');
@@ -187,6 +187,7 @@ export class MockTunnelServer {
       ':method': 'CONNECT',
       ':path': path,
       ':protocol': 'websocket',
+      ...extraHeaders,
     });
   }
 

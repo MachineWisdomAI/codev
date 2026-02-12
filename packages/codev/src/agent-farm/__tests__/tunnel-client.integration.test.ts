@@ -555,5 +555,98 @@ describe('tunnel-client integration', () => {
       expect(echoed).toBe('hello tunnel');
       stream.destroy();
     });
+
+    it('returns 404 when WebSocket upgrade is refused by local server', async () => {
+      // Create a server that does NOT handle upgrades — just returns 404
+      const noUpgradeServer = http.createServer((req, res) => {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not found');
+      });
+      const noUpgradePort = await startServer(noUpgradeServer);
+
+      try {
+        mockServer = new MockTunnelServer();
+        const port = await mockServer.start();
+
+        client = new TunnelClient({
+          serverUrl: `http://127.0.0.1:${port}`,
+          apiKey: 'ctk_test_key',
+          towerId: '',
+          localPort: noUpgradePort,
+        });
+
+        client.connect();
+        await waitFor(() => client.getState() === 'connected');
+
+        const stream = mockServer.sendConnect('/ws/terminal/nonexistent');
+
+        const status = await new Promise<number>((resolve, reject) => {
+          stream.on('response', (headers) => {
+            resolve(headers[':status'] as number);
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('Response timeout')), 5000);
+        });
+
+        expect(status).toBe(404);
+        stream.destroy();
+      } finally {
+        await stopServer(noUpgradeServer);
+      }
+    });
+
+    it('forwards custom headers through WebSocket CONNECT proxy', async () => {
+      // Track headers received by the local server
+      let receivedHeaders: http.IncomingHttpHeaders = {};
+      const headerServer = http.createServer();
+      headerServer.on('upgrade', (req, socket) => {
+        receivedHeaders = req.headers;
+        upgradeSockets.push(socket);
+        socket.write(
+          'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          '\r\n',
+        );
+      });
+      const headerPort = await startServer(headerServer);
+
+      try {
+        mockServer = new MockTunnelServer();
+        const port = await mockServer.start();
+
+        client = new TunnelClient({
+          serverUrl: `http://127.0.0.1:${port}`,
+          apiKey: 'ctk_test_key',
+          towerId: '',
+          localPort: headerPort,
+        });
+
+        client.connect();
+        await waitFor(() => client.getState() === 'connected');
+
+        // Send CONNECT with custom headers (e.g. X-Session-Resume)
+        const stream = mockServer.sendConnect('/ws/terminal/test', {
+          'x-session-resume': '42',
+          'x-custom-header': 'test-value',
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          stream.on('response', (headers) => {
+            expect(headers[':status']).toBe(200);
+            resolve();
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('CONNECT timeout')), 5000);
+        });
+
+        // Verify custom headers were forwarded
+        expect(receivedHeaders['x-session-resume']).toBe('42');
+        expect(receivedHeaders['x-custom-header']).toBe('test-value');
+        stream.destroy();
+      } finally {
+        await stopServer(headerServer);
+      }
+    });
   });
 });
