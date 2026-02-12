@@ -4,15 +4,14 @@
  * Detects and handles orphaned tmux sessions from previous agent-farm runs.
  * This prevents resource leaks and ensures clean startup.
  *
- * IMPORTANT: Only cleans up sessions for THIS project (based on port).
- * Sessions from other projects are left alone.
+ * IMPORTANT: Only cleans up architect sessions matching the af-architect naming pattern.
+ * Other tmux sessions are left alone.
  */
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { logger } from './logger.js';
 import { run } from './shell.js';
-import { getConfig } from './config.js';
 import { loadState, setArchitect } from '../state.js';
 
 /**
@@ -37,13 +36,10 @@ interface OrphanedSession {
  * Only matches sessions with this project's port to avoid killing other projects
  */
 async function findOrphanedSessions(): Promise<OrphanedSession[]> {
-  const config = getConfig();
-  const architectPort = config.architectPort;
   const state = loadState();
 
-  // Project-specific patterns - only match THIS project's architect session
-  const architectPattern = new RegExp(`^af-architect-${architectPort}$`);
-  const legacyArchitectPattern = /^af-architect$/;
+  // Match architect sessions — current naming (af-architect) and legacy port-based (af-architect-XXXX)
+  const architectPattern = /^af-architect(-\d+)?$/;
 
   try {
     const result = await run('tmux list-sessions -F "#{session_name}" 2>/dev/null');
@@ -52,7 +48,7 @@ async function findOrphanedSessions(): Promise<OrphanedSession[]> {
 
     for (const name of sessions) {
       // Check architect sessions - only orphaned if PID is dead
-      if (architectPattern.test(name) || legacyArchitectPattern.test(name)) {
+      if (architectPattern.test(name)) {
         // If we have state for this architect, check if PID is still alive
         if (state.architect) {
           if (!isProcessAlive(state.architect.pid)) {
