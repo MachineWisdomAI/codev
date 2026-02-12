@@ -1106,24 +1106,24 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
   - id: "0098"
     title: "Per-Project Port Registry Removal"
     summary: "Remove vestigial per-project port allocation system. Tower at 4100 is the only server; port blocks are dead code."
-    status: specified
+    status: integrated
     priority: medium
     release: v2.0.0
     files:
       spec: codev/specs/0098-port-registry-removal.md
-      plan: null
-      review: null
+      plan: codev/plans/0098-port-registry-removal.md
+      review: codev/reviews/0098-port-registry-removal.md
     dependencies: ["0090"]
     tags: [architecture, cleanup, agent-farm]
     timestamps:
       conceived_at: "2026-02-11T00:00:00-08:00"
       specified_at: "2026-02-11T00:00:00-08:00"
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
-    notes: "Port registry is 220 lines of dead code. consult.ts is broken (hits dead port). Builder roles get wrong port."
+      planned_at: "2026-02-12T00:00:00-08:00"
+      implementing_at: "2026-02-12T00:00:00-08:00"
+      implemented_at: "2026-02-12T00:00:00-08:00"
+      committed_at: "2026-02-12T00:00:00-08:00"
+      integrated_at: "2026-02-12T00:00:00-08:00"
+    notes: "Removed 220 lines of dead port-registry code. Fixed broken consult routing. PR #211 merged."
 
   - id: "0099"
     title: "Tower Codebase Hygiene"
