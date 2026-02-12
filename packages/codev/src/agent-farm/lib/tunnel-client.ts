@@ -67,10 +67,21 @@ export function calculateBackoff(attempt: number, randomFn: () => number = Math.
 
 /**
  * Check if a request path should be blocked from tunnel proxying.
+ * Normalizes percent-encoding and collapses dot segments before checking,
+ * preventing bypass via encoded slashes (%2F), double dots, etc.
  * Exported for unit testing.
  */
 export function isBlockedPath(path: string): boolean {
-  return path.startsWith(BLOCKED_PATH_PREFIX);
+  try {
+    // Decode percent-encoding, then resolve dot segments via URL normalization
+    const decoded = decodeURIComponent(path);
+    // Collapse duplicate slashes and resolve . / .. segments
+    const normalized = new URL(decoded, 'http://localhost').pathname;
+    return normalized.startsWith(BLOCKED_PATH_PREFIX);
+  } catch {
+    // If decoding fails, check the raw path as a fallback (fail closed)
+    return path.startsWith(BLOCKED_PATH_PREFIX);
+  }
 }
 
 /**

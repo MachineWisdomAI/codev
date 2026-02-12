@@ -202,6 +202,11 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
   tunnelClient = client;
   client.connect();
 
+  // Ensure config watcher is running — the config directory now exists.
+  // Handles the case where Tower booted before registration (directory didn't
+  // exist, so startConfigWatcher() silently failed at boot time).
+  startConfigWatcher();
+
   return client;
 }
 

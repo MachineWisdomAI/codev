@@ -100,6 +100,27 @@ describe('tunnel-client unit tests', () => {
       // Only paths starting with /api/tunnel/ are blocked
       expect(isBlockedPath('/api/tunnel')).toBe(false);
     });
+
+    it('blocks percent-encoded slash bypass: /api%2Ftunnel/status', () => {
+      expect(isBlockedPath('/api%2Ftunnel/status')).toBe(true);
+    });
+
+    it('blocks percent-encoded slash bypass: /api%2Ftunnel/connect', () => {
+      expect(isBlockedPath('/api%2Ftunnel/connect')).toBe(true);
+    });
+
+    it('blocks case-variant encoding: /api%2ftunnel/status', () => {
+      expect(isBlockedPath('/api%2ftunnel/status')).toBe(true);
+    });
+
+    it('blocks path with dot segments: /api/tunnel/../tunnel/status', () => {
+      expect(isBlockedPath('/api/tunnel/../tunnel/status')).toBe(true);
+    });
+
+    it('blocks encoded tunnel path: /%61pi/tunnel/status', () => {
+      // %61 = 'a', so /%61pi/tunnel/status decodes to /api/tunnel/status
+      expect(isBlockedPath('/%61pi/tunnel/status')).toBe(true);
+    });
   });
 
   describe('filterHopByHopHeaders', () => {
