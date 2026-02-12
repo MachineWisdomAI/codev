@@ -2532,7 +2532,7 @@ const server = http.createServer(async (req, res) => {
             }
 
             // Create new file tab (write-through: in-memory + SQLite)
-            const id = `file-${Date.now().toString(36)}`;
+            const id = `file-${crypto.randomUUID()}`;
             const createdAt = Date.now();
             entry.fileTabs.set(id, { id, path: fullPath, createdAt });
             saveFileTab(id, projectPath, fullPath, createdAt);
