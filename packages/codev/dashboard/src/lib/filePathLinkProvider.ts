@@ -71,7 +71,7 @@ export class FilePathLinkProvider implements ILinkProvider {
           end: { x: linkEnd, y: lineNumber },
         },
         text: fullMatch.substring(capturedOffset),
-        decorations: { pointerCursor: true, underline: false },
+        decorations: { pointerCursor: true, underline: true },
         activate: (event: MouseEvent, _linkText: string) => {
           // Platform-aware modifier: Cmd on macOS, Ctrl on others
           if (isMac ? !event.metaKey : !event.ctrlKey) return;

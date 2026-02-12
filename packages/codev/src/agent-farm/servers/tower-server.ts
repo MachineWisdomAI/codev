@@ -567,7 +567,9 @@ function createTmuxSession(
     // events during layout settling. Default tmux behavior (size to smallest
     // client) is more stable since we only have one client per session.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'on'], { stdio: 'ignore' });
+    // Mouse OFF — xterm.js in the browser handles selection, scrolling,
+    // and Cmd+C/Cmd+V clipboard. tmux mouse mode conflicts with this.
+    spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'off'], { stdio: 'ignore' });
 
     return sessionName;
   } catch (err) {
