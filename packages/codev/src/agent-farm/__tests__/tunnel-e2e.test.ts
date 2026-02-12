@@ -766,12 +766,81 @@ describeE2E('tunnel E2E against codevos.ai (Phase 7)', () => {
       });
 
       // Tunnel must be connected and reachable. If codevos.ai supports
-      // WebSocket proxy on tower paths, verify bidirectional echo.
-      // Full bidirectional WebSocket validation is also covered in
-      // tunnel-edge-cases.test.ts via mock server sendConnect().
+      // WebSocket proxy on tower paths, verify bidirectional echo and
+      // measure keystroke latency per plan requirement (line 480):
+      // "Terminal keystroke-to-echo overhead (target: <50ms p95) — measured during WebSocket E2E test"
       expect(client.getState()).toBe('connected');
       if (upgradeResult.upgraded && upgradeResult.echoData) {
         expect(upgradeResult.echoData).toContain('e2e-ws-ping');
+      }
+
+      // Measure keystroke round-trip latency through the real tunnel (when upgrade succeeded)
+      if (upgradeResult.upgraded) {
+        const urlObj2 = new URL(CODEVOS_URL);
+        const latencyResult = await new Promise<{ latencies: number[] }>((resolve) => {
+          const req = http.request({
+            hostname: urlObj2.hostname,
+            port: urlObj2.port,
+            path: `/tower/${towerId}/ws-echo`,
+            method: 'GET',
+            timeout: 15000,
+            headers: {
+              'Connection': 'Upgrade',
+              'Upgrade': 'websocket',
+              'Sec-WebSocket-Version': '13',
+              'Sec-WebSocket-Key': Buffer.from('e2e-ws-latency!!').toString('base64'),
+            },
+          });
+
+          req.on('upgrade', (_res, socket) => {
+            const latencies: number[] = [];
+            let sent = 0;
+            const total = 20;
+
+            const sendNext = () => {
+              if (sent >= total) {
+                socket.destroy();
+                resolve({ latencies });
+                return;
+              }
+              const keystroke = String.fromCharCode(97 + (sent % 26));
+              const start = performance.now();
+              const onData = (chunk: Buffer) => {
+                latencies.push(performance.now() - start);
+                socket.removeListener('data', onData);
+                sent++;
+                sendNext();
+              };
+              socket.on('data', onData);
+              socket.write(keystroke);
+            };
+
+            sendNext();
+            setTimeout(() => {
+              socket.destroy();
+              resolve({ latencies });
+            }, 10000);
+          });
+
+          req.on('response', () => resolve({ latencies: [] }));
+          req.on('error', () => resolve({ latencies: [] }));
+          req.on('timeout', () => { req.destroy(); resolve({ latencies: [] }); });
+          req.end();
+        });
+
+        if (latencyResult.latencies.length > 0) {
+          const lats = latencyResult.latencies.sort((a, b) => a - b);
+          const p50 = lats[Math.floor(lats.length * 0.5)];
+          const p95 = lats[Math.floor(lats.length * 0.95)];
+          const p99 = lats[Math.floor(lats.length * 0.99)];
+
+          console.log(
+            `E2E WebSocket keystroke latency — p50: ${p50.toFixed(1)}ms, p95: ${p95.toFixed(1)}ms, p99: ${p99.toFixed(1)}ms`,
+          );
+
+          // Spec target: <50ms p95 keystroke overhead
+          expect(p95).toBeLessThan(50);
+        }
       }
     } finally {
       client.disconnect();
