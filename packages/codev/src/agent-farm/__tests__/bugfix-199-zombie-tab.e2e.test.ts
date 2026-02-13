@@ -87,6 +87,12 @@ describe('Bugfix #199: Zombie builder tab removal', () => {
     // Create minimal git repo structure so tower can activate
     mkdirSync(resolve(testProjectDir, '.git'), { recursive: true });
     writeFileSync(resolve(testProjectDir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    // Create codev dir and af-config so launchInstance doesn't need npx codev adopt
+    mkdirSync(resolve(testProjectDir, 'codev'), { recursive: true });
+    writeFileSync(
+      resolve(testProjectDir, 'af-config.json'),
+      JSON.stringify({ shell: { architect: 'bash', builder: 'bash', shell: 'bash' } })
+    );
 
     towerProcess = await startTower(TEST_TOWER_PORT);
   }, 30_000);

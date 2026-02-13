@@ -101,14 +101,11 @@ exec claude --append-system-prompt "$(cat '${roleFile}')"${argsStr}
     `tmux new-session -d -s "${sessionName}" -x 200 -y 50 -c "${config.projectRoot}" "${launchScript}"`
   );
 
-  // Configure tmux session
+  // Configure tmux session — mouse OFF, status OFF.
+  // Mouse must be OFF so xterm.js handles text selection and Cmd+C/Cmd+V.
+  // See codev/resources/terminal-tmux.md for full rationale.
   await run(`tmux set-option -t "${sessionName}" status off`);
-  await run(`tmux set-option -t "${sessionName}" -g mouse on`);
-  await run(`tmux set-option -t "${sessionName}" -g set-clipboard on`);
-
-  // Copy selection to clipboard when mouse is released (pbcopy for macOS)
-  await run(`tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
-  await run(`tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"`);
+  await run(`tmux set-option -t "${sessionName}" mouse off`);
 }
 
 /**

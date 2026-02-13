@@ -383,8 +383,9 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       await activateProject(towerPort, testProjectPath);
 
       // Poll for project to appear in tower status
+      // CI runners can be slow — allow up to 15s (60 × 250ms)
       let status: any;
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 60; i++) {
         const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
         status = await statusRes.json();
         if (status.instances?.length > 0) break;

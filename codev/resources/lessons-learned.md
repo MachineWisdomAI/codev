@@ -16,6 +16,9 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0043] Establish baselines BEFORE optimizing - before/after data makes impact clear
 - [From 0065/PR-133] NEVER skip CMAP reviews - they catch issues manual review misses (e.g., stale commits in PR, scope creep)
 - [From 0085] When guessing fails, build a minimal repro - capturing raw data beats speculation (crab icon fix took 5 failed attempts, then 1 repro solved it)
+- [From scroll saga] Intermittent bugs = external state mutation. Grep for everything that touches the state before attempting fixes. The scroll issue took ~10 hours because we kept fixing the renderer instead of finding what was flipping tmux settings (`-g mouse on` in architect.ts — one flag, one character)
+- [From scroll saga] Consult external models EARLY. Three AI consultations found the root cause in minutes; solo debugging produced three failed quick fixes over hours
+- [From scroll saga] Never spawn builders for symptom fixes. If you don't understand the root cause, more code won't help — PRs #220 and #225 were wasted work
 
 ## Security
 
@@ -56,6 +59,7 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 - [From 0057] Follow git's branch naming rules - use pattern-based rejection, not whitelist
 - [From 0002-001] Shell escaping in tmux: complex content with backticks/quotes needs launch scripts
 - [From 0085] xterm.js `customGlyphs: true` renders block elements (▀▄█) procedurally — crisp at any size, no font dependency
+- [From scroll saga] tmux `-g` flag sets options GLOBALLY across ALL sessions. Always use `-t <session>` for per-session settings. One `-g mouse on` poisoned every tmux session on the machine
 
 ## Documentation
 
@@ -69,5 +73,5 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 ---
 
-*Last updated: 2025-12-28 (Maintenance Run 0004)*
+*Last updated: 2026-02-13 (scroll saga retrospective)*
 *Source: codev/reviews/*

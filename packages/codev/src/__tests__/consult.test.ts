@@ -613,7 +613,7 @@ describe('consult command', () => {
       expect(logOutput.some(l => l.includes('Read, Glob, Grep'))).toBe(true);
     });
 
-    it('should log tool use blocks to stderr', async () => {
+    it('should suppress tool use blocks from stderr', async () => {
       vi.resetModules();
       const { consult } = await import('../commands/consult/index.js');
 
@@ -641,8 +641,8 @@ describe('consult command', () => {
 
       await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
 
-      expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(true);
-      expect(stderrWrites.some(w => w.includes('/foo/bar.ts'))).toBe(true);
+      // Tool use blocks are intentionally suppressed to reduce noise
+      expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(false);
     });
   });
 });

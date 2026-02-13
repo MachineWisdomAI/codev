@@ -26,11 +26,22 @@ tmux's alternate screen buffer creates an irreconcilable conflict:
 
 ## Current State (as of 2026-02-13)
 
-- **tmux mouse: OFF** (`tower-server.ts` line ~572)
+- **tmux mouse: OFF** (`tower-server.ts` line ~572, `architect.ts` per-session)
+- **tmux alternate-screen: OFF** (`tower-server.ts` — both creation and reconnection paths)
 - **Custom wheel handler: NONE** (removed from `Terminal.tsx`)
 - **Text selection: WORKS** (xterm.js handles natively)
 - **Cmd+C/Cmd+V: WORKS** (browser clipboard)
 - **Scroll wheel: WORKS** — xterm.js handles it natively when no one intercepts the events
+
+### Root Cause of Intermittent Failures (2026-02-13)
+
+The scroll issue kept reappearing because `architect.ts:106` was running:
+```typescript
+await run(`tmux set-option -t "${sessionName}" -g mouse on`);
+```
+The `-g` flag made this **GLOBAL** — every time an architect session started, it set `mouse on` for ALL tmux sessions on the machine. This poisoned sessions that tower-server.ts had correctly set to `mouse off`. The intermittent behavior (works after reload, breaks later) was caused by architect sessions being created at unpredictable times.
+
+**Fix**: Removed `-g` flag and all mouse/clipboard config from `architect.ts`. Replaced with per-session `mouse off`.
 
 ## The Key Lesson
 
@@ -93,6 +104,34 @@ In a native terminal (iTerm2, Terminal.app), this isn't a problem because:
 
 In a web browser with xterm.js, we don't have these luxuries. xterm.js either reports mouse events to the application (tmux) or handles them locally — there's no in-between.
 
+## Debugging Methodology — What Went Wrong
+
+The scroll issue consumed ~8-10 hours across two sessions (Feb 12-13, 2026). The root cause was a single `-g` flag in `architect.ts`. Here's what went wrong and what to do differently next time:
+
+### The pattern that wasted time
+
+1. Symptom observed (scroll broken)
+2. AI jumps to quick fix in Terminal.tsx (wheel handler)
+3. User pushes back — "read the docs"
+4. AI reads docs, tries another quick fix anyway
+5. Repeat 3 times
+
+### What should have happened
+
+1. Symptom observed (scroll broken)
+2. Note: behavior is **intermittent** (works after reload, breaks later)
+3. **Key question**: "What is changing tmux state between reloads?"
+4. `grep -r "mouse" packages/codev/src/` → finds `architect.ts` with `-g mouse on`
+5. Fix the one line. Done in 5 minutes.
+
+### Rules for future terminal/tmux debugging
+
+1. **Intermittent = external state mutation.** Grep for everything that touches the relevant state. Don't fix the renderer — find who's flipping the switch.
+2. **Consult early.** If the first fix doesn't work, consult Gemini/Codex/web search immediately. Don't iterate solo.
+3. **Never spawn a builder for a symptom fix.** If you don't understand the root cause, more code won't help.
+4. **Read THIS document first.** It exists to prevent repeating failed approaches.
+5. **tmux `-g` flag is dangerous.** It sets options GLOBALLY across ALL sessions. Always use `-t <session>` for per-session settings.
+
 ## Proper Solutions (Future Work)
 
 ### Option A: Server-side scroll buffer
@@ -133,9 +172,31 @@ This makes tmux write directly to xterm.js's normal screen buffer, which HAS scr
 **Pros**: Simplest fix. xterm.js native scroll works immediately.
 **Cons**: May cause rendering artifacts. Some programs (vim, less, Claude Code TUI) expect alternate screen behavior. Screen content may not clean up properly when programs exit.
 
-### Recommended path: Option C first, Option A long-term
+### Option D: `attachCustomWheelEventHandler` (xterm.js API)
 
-Option C (`alternate-screen off`) is worth testing as a quick experiment. If it works without major rendering issues, it's the lowest-effort fix. Option A (server-side scroll buffer) is the architecturally correct long-term solution but requires significant engineering.
+Use xterm.js's public API to intercept wheel events in alternate screen buffer:
+
+```typescript
+term.attachCustomWheelEventHandler((event: WheelEvent) => {
+  if (term.buffer.active.type === 'alternate') {
+    return false; // suppress — prevent arrow key translation
+  }
+  return true; // normal buffer — let xterm.js handle natively
+});
+```
+
+**Pros**: Clean, uses public API, no tmux changes needed, solves the xterm.js wheel-to-arrow translation directly.
+**Cons**: Scroll does nothing in alternate buffer (but that's better than cycling command history). Does not provide actual scroll-through-history.
+
+**Note**: xterm.js translates wheel events to arrow keys when `buffer.hasScrollback` is false (alternate buffer). This is hardcoded in `CoreBrowserTerminal.ts` — there's no config option. `attachCustomWheelEventHandler` is the escape hatch. See also xterm.js Issue #5194 (DECSET 1007 support, tagged `help wanted`).
+
+### Recommended path: Option D now, Option A long-term
+
+Option D (`attachCustomWheelEventHandler`) is the cleanest immediate fix — it uses xterm.js's own API to prevent the wheel-to-arrow translation that causes command history cycling. It doesn't add scroll-in-alternate-buffer, but it eliminates the bad behavior.
+
+Option C (`alternate-screen off`) is currently deployed and works but is fragile — apps like Claude Code send their own alternate screen sequences that can bypass it.
+
+Option A (server-side scroll buffer) is the architecturally correct long-term solution but requires significant engineering.
 
 ## Key Files
 
@@ -144,6 +205,7 @@ Option C (`alternate-screen off`) is worth testing as a quick experiment. If it 
 | `packages/codev/dashboard/src/components/Terminal.tsx` | xterm.js setup, event handlers |
 | `packages/codev/dashboard/__tests__/Terminal.scroll.test.tsx` | Scroll behavior tests |
 | `packages/codev/src/agent-farm/servers/tower-server.ts` (~line 572) | tmux session creation, mouse config |
+| `packages/codev/src/agent-farm/commands/architect.ts` (~line 104) | Architect tmux session setup — **was the source of `-g mouse on` bug** |
 | `packages/codev/src/terminal/pty-manager.ts` | PTY session lifecycle |
 
 ## Operational Notes

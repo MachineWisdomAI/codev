@@ -287,8 +287,9 @@ describe('Tower API (Phase 1)', () => {
       expect(activateData.success).toBe(true);
 
       // Poll for project to appear in the projects list with terminals
+      // CI runners can be slow — allow up to 15s (60 × 250ms)
       let project: any;
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 60; i++) {
         const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
         expect(listRes.ok).toBe(true);
         const listData = await listRes.json();

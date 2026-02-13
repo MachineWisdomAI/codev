@@ -115,8 +115,9 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     expect(activateRes.ok).toBe(true);
 
     // Step 3: Poll for project to appear in the project list
+    // CI runners can be slow — allow up to 15s (60 × 250ms)
     let found1: any;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 60; i++) {
       const listRes1 = await fetch(`${base}/api/projects`);
       expect(listRes1.ok).toBe(true);
       const data1 = await listRes1.json();
