@@ -1228,7 +1228,7 @@
               <span class="port-type">Overview</span>
             </div>
             <div class="port-actions">
-              <a href="${escapeHtml(instance.proxyUrl)}" target="_blank">Open</a>
+              <a href="${escapeHtml(relUrl(instance.proxyUrl))}" target="_blank">Open</a>
             </div>
           </div>
         `;
@@ -1242,7 +1242,7 @@
                 <span class="port-type">${escapeHtml(terminal.label)}</span>
               </div>
               <div class="port-actions">
-                <a href="${escapeHtml(terminal.url)}&fullscreen=1" target="_blank">Open</a>
+                <a href="${escapeHtml(relUrl(terminal.url))}&fullscreen=1" target="_blank">Open</a>
               </div>
             </div>
           `).join('');
@@ -1629,6 +1629,13 @@
       } catch (err) {
         showToast('Failed to copy', 'error');
       }
+    }
+
+    // Convert absolute paths to relative so links work behind reverse proxies.
+    // E.g. "/project/abc/" → "./project/abc/"
+    function relUrl(path) {
+      if (path && path.startsWith('/')) return '.' + path;
+      return path || '';
     }
 
     // HTML escape
