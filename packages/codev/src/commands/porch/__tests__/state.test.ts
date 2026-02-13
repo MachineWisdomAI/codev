@@ -11,6 +11,8 @@ import {
   writeState,
   createInitialState,
   findStatusPath,
+  detectProjectIdFromCwd,
+  resolveProjectId,
   getProjectDir,
   getStatusPath,
   PROJECTS_DIR,
@@ -239,6 +241,113 @@ updated_at: "${state.updated_at}"
 
       const result = findStatusPath(emptyDir, '0074');
       expect(result).toBeNull();
+    });
+  });
+
+  describe('detectProjectIdFromCwd', () => {
+    it('should detect project ID from spec worktree root', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073')).toBe('0073');
+    });
+
+    it('should detect project ID from spec worktree subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073/src/commands/')).toBe('0073');
+    });
+
+    it('should detect and zero-pad bugfix worktree ID', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228')).toBe('0228');
+    });
+
+    it('should detect bugfix ID from subdirectory', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-228/src/deep/path')).toBe('0228');
+    });
+
+    it('should zero-pad single-digit bugfix IDs', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-5')).toBe('0005');
+    });
+
+    it('should handle bugfix IDs > 9999 without truncation', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/bugfix-12345')).toBe('12345');
+    });
+
+    it('should return null for task worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/task-aB2C')).toBeNull();
+    });
+
+    it('should return null for maintain worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/maintain-xY9z')).toBeNull();
+    });
+
+    it('should return null for protocol worktrees', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/spir-aB2C')).toBeNull();
+    });
+
+    it('should return null for non-worktree paths', () => {
+      expect(detectProjectIdFromCwd('/regular/path/no/builders')).toBeNull();
+    });
+
+    it('should return null for worktree names with extra text after ID', () => {
+      expect(detectProjectIdFromCwd('/repo/.builders/0073-extra-text/')).toBeNull();
+    });
+
+    it('should not match partial .builders in unrelated paths', () => {
+      expect(detectProjectIdFromCwd('/repo/not.builders/0073')).toBeNull();
+    });
+  });
+
+  describe('resolveProjectId (priority chain)', () => {
+    let singleProjectRoot: string;
+    let emptyProjectRoot: string;
+
+    beforeEach(() => {
+      // Create a temp dir with exactly one project for filesystem scan tests
+      singleProjectRoot = fs.mkdtempSync(path.join(tmpdir(), 'resolve-single-'));
+      const projectDir = path.join(singleProjectRoot, PROJECTS_DIR, '0099-test-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, 'status.yaml'), 'id: "0099"\n');
+
+      // Create a temp dir with no projects for error path tests
+      emptyProjectRoot = fs.mkdtempSync(path.join(tmpdir(), 'resolve-empty-'));
+      fs.mkdirSync(path.join(emptyProjectRoot, PROJECTS_DIR), { recursive: true });
+    });
+
+    afterEach(() => {
+      fs.rmSync(singleProjectRoot, { recursive: true, force: true });
+      fs.rmSync(emptyProjectRoot, { recursive: true, force: true });
+    });
+
+    it('step 1: explicit arg takes highest priority over CWD and filesystem scan', () => {
+      // Even when CWD is a worktree and filesystem has a project, explicit arg wins
+      const result = resolveProjectId('0042', '/repo/.builders/0073', singleProjectRoot);
+      expect(result).toEqual({ id: '0042', source: 'explicit' });
+    });
+
+    it('step 2: CWD worktree detection takes precedence over filesystem scan', () => {
+      // No explicit arg, CWD is a worktree -> CWD detection wins over filesystem scan
+      const result = resolveProjectId(undefined, '/repo/.builders/0073', singleProjectRoot);
+      expect(result).toEqual({ id: '0073', source: 'cwd' });
+    });
+
+    it('step 2: CWD bugfix worktree resolves correctly', () => {
+      const result = resolveProjectId(undefined, '/repo/.builders/bugfix-42', singleProjectRoot);
+      expect(result).toEqual({ id: '0042', source: 'cwd' });
+    });
+
+    it('step 3: falls back to filesystem scan when CWD is not a worktree', () => {
+      // No explicit arg, CWD is NOT a worktree -> filesystem scan finds the project
+      const result = resolveProjectId(undefined, '/regular/path', singleProjectRoot);
+      expect(result).toEqual({ id: '0099', source: 'filesystem' });
+    });
+
+    it('step 4: throws when no detection method succeeds', () => {
+      // No explicit arg, CWD is NOT a worktree, no projects on filesystem
+      expect(() => resolveProjectId(undefined, '/regular/path', emptyProjectRoot))
+        .toThrow('Cannot determine project ID');
+    });
+
+    it('step 4: task/protocol worktrees fall through to error when no filesystem match', () => {
+      // Task worktrees return null from CWD detection, and empty root has no projects
+      expect(() => resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot))
+        .toThrow('Cannot determine project ID');
     });
   });
 });
