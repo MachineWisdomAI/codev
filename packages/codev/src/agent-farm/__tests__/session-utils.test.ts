@@ -99,12 +99,24 @@ describe('parseTmuxSessionName', () => {
         type: 'builder', projectBasename: 'codev-public', roleId: 'task-AbCd',
       });
     });
+
+    it('should parse task IDs with underscores and hyphens (URL-safe base64)', () => {
+      expect(parseTmuxSessionName('builder-codev-public-task-A_-d')).toEqual({
+        type: 'builder', projectBasename: 'codev-public', roleId: 'task-A_-d',
+      });
+    });
   });
 
   describe('worktree builder sessions', () => {
     it('should parse worktree-{shortId}', () => {
       expect(parseTmuxSessionName('builder-codev-public-worktree-QwEr')).toEqual({
         type: 'builder', projectBasename: 'codev-public', roleId: 'worktree-QwEr',
+      });
+    });
+
+    it('should parse worktree IDs with underscores and hyphens (URL-safe base64)', () => {
+      expect(parseTmuxSessionName('builder-my-app-worktree-x_Y3')).toEqual({
+        type: 'builder', projectBasename: 'my-app', roleId: 'worktree-x_Y3',
       });
     });
   });

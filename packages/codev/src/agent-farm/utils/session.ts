@@ -48,14 +48,14 @@ export function parseTmuxSessionName(name: string): ParsedTmuxSession | null {
     return { type: 'builder', projectBasename: bugfixMatch[1], roleId: bugfixMatch[2] };
   }
 
-  // builder-{basename}-task-{shortId} — ad-hoc task builder
-  const taskMatch = name.match(/^builder-(.+)-(task-[a-zA-Z0-9]+)$/);
+  // builder-{basename}-task-{shortId} — ad-hoc task builder (shortId is URL-safe base64: a-zA-Z0-9_-)
+  const taskMatch = name.match(/^builder-(.+)-(task-[a-zA-Z0-9_-]+)$/);
   if (taskMatch) {
     return { type: 'builder', projectBasename: taskMatch[1], roleId: taskMatch[2] };
   }
 
-  // builder-{basename}-worktree-{shortId} — generic worktree builder
-  const worktreeMatch = name.match(/^builder-(.+)-(worktree-[a-zA-Z0-9]+)$/);
+  // builder-{basename}-worktree-{shortId} — generic worktree builder (shortId is URL-safe base64)
+  const worktreeMatch = name.match(/^builder-(.+)-(worktree-[a-zA-Z0-9_-]+)$/);
   if (worktreeMatch) {
     return { type: 'builder', projectBasename: worktreeMatch[1], roleId: worktreeMatch[2] };
   }
