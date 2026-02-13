@@ -157,7 +157,10 @@ export async function stopAll(): Promise<void> {
 /** Get WebSocket path for a terminal tab's node-pty session. */
 export function getTerminalWsPath(tab: { type: string; terminalId?: string }): string | null {
   if (tab.terminalId) {
-    const base = getApiBase();
+    // Use window.location.pathname for an absolute path that includes any
+    // reverse-proxy prefix (e.g. /t/abc123/project/xyz/).
+    const path = window.location.pathname;
+    const base = path.endsWith('/') ? path : path + '/';
     return `${base}ws/terminal/${tab.terminalId}`;
   }
   return null;
@@ -210,8 +213,7 @@ const ERROR_STATUS: TunnelStatus = {
 
 export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
   try {
-    // Tunnel endpoints are tower-level (root), not project-scoped — use absolute path
-    const res = await fetch('/api/tunnel/status', { headers: getAuthHeaders() });
+    const res = await fetch(apiUrl('api/tunnel/status'), { headers: getAuthHeaders() });
     if (res.status === 404) return null; // Tunnel not configured
     if (!res.ok) return ERROR_STATUS; // Server error — distinct from not-registered
     return res.json();
@@ -221,7 +223,7 @@ export async function fetchTunnelStatus(): Promise<TunnelStatus | null> {
 }
 
 export async function connectTunnel(): Promise<void> {
-  const res = await fetch('/api/tunnel/connect', {
+  const res = await fetch(apiUrl('api/tunnel/connect'), {
     method: 'POST',
     headers: getAuthHeaders(),
   });
@@ -229,7 +231,7 @@ export async function connectTunnel(): Promise<void> {
 }
 
 export async function disconnectTunnel(): Promise<void> {
-  const res = await fetch('/api/tunnel/disconnect', {
+  const res = await fetch(apiUrl('api/tunnel/disconnect'), {
     method: 'POST',
     headers: getAuthHeaders(),
   });

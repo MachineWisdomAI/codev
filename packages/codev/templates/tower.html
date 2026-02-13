@@ -1038,7 +1038,7 @@
     // Logout function
     function logout() {
       localStorage.removeItem('codev_web_key');
-      window.location.href = '/';
+      window.location.href = './';
     }
 
     // Initialize
@@ -1073,7 +1073,7 @@
       sseController = new AbortController();
 
       try {
-        const response = await fetch('/api/events', {
+        const response = await fetch('./api/events', {
           headers: getAuthHeaders(),
           signal: sseController.signal,
         });
@@ -1151,7 +1151,7 @@
     async function refresh() {
       try {
         const [statusResponse, cloudStatus] = await Promise.all([
-          authFetch('/api/status'),
+          authFetch('./api/status'),
           fetchCloudStatus(),
         ]);
 
@@ -1396,7 +1396,7 @@
       }
 
       try {
-        const response = await authFetch('/api/browse?path=' + encodeURIComponent(inputPath));
+        const response = await authFetch('./api/browse?path=' + encodeURIComponent(inputPath));
         const data = await response.json();
         suggestions = data.suggestions || [];
         selectedIndex = -1;
@@ -1451,7 +1451,7 @@
     // Launch a specific path (from recents)
     async function launchPath(projectPath) {
       try {
-        const response = await authFetch('/api/launch', {
+        const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1477,7 +1477,7 @@
     // Stop an instance by project path
     async function stopInstance(projectPath) {
       try {
-        const response = await authFetch('/api/stop', {
+        const response = await authFetch('./api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1500,7 +1500,7 @@
     async function restartInstance(projectPath) {
       try {
         // First stop
-        await authFetch('/api/stop', {
+        await authFetch('./api/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1510,7 +1510,7 @@
         await new Promise(r => setTimeout(r, 1000));
 
         // Then start
-        const response = await authFetch('/api/launch', {
+        const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1540,7 +1540,7 @@
       }
 
       try {
-        const response = await authFetch('/api/launch', {
+        const response = await authFetch('./api/launch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectPath })
@@ -1571,7 +1571,7 @@
       try {
         // Use tower proxy to route to the project's dashboard API
         const encodedPath = toBase64URL(projectPath);
-        const response = await authFetch(`/project/${encodedPath}/api/tabs/shell`, {
+        const response = await authFetch(`./project/${encodedPath}/api/tabs/shell`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -1656,7 +1656,7 @@
     // The React dashboard handles tab selection internally
     function getProxyUrl(instance, portType) {
       const encodedPath = toBase64URL(instance.projectPath);
-      return `/project/${encodedPath}/`;
+      return `./project/${encodedPath}/`;
     }
 
     // Toast notifications
@@ -1708,7 +1708,7 @@
       hideCreateProjectDialog();
 
       try {
-        const response = await authFetch('/api/create', {
+        const response = await authFetch('./api/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ parent, name })
@@ -1746,7 +1746,7 @@
 
     async function fetchCloudStatus() {
       try {
-        const res = await authFetch('/api/tunnel/status');
+        const res = await authFetch('./api/tunnel/status');
         if (res.status === 404) return null;
         if (!res.ok) return { state: 'error' };
         return await res.json();
@@ -1829,7 +1829,7 @@
       cloudLoading = true;
       renderCloudStatus({ registered: true, state: 'connecting' });
       try {
-        await authFetch('/api/tunnel/connect', { method: 'POST' });
+        await authFetch('./api/tunnel/connect', { method: 'POST' });
         showToast('Connecting to cloud...', 'success');
       } catch (err) {
         showToast('Connect failed: ' + err.message, 'error');
@@ -1842,7 +1842,7 @@
     async function cloudDisconnect() {
       cloudLoading = true;
       try {
-        await authFetch('/api/tunnel/disconnect', { method: 'POST' });
+        await authFetch('./api/tunnel/disconnect', { method: 'POST' });
         showToast('Disconnected from cloud', 'success');
       } catch (err) {
         showToast('Disconnect failed: ' + err.message, 'error');
