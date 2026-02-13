@@ -31,11 +31,13 @@ vi.mock('node:os', async () => {
 
 import {
   getCloudConfigPath,
+  getMachineIdPath,
   readCloudConfig,
   writeCloudConfig,
   deleteCloudConfig,
   isRegistered,
   maskApiKey,
+  getOrCreateMachineId,
   type CloudConfig,
 } from '../lib/cloud-config.js';
 
@@ -314,6 +316,91 @@ describe('cloud-config', () => {
     it('handles key with underscore but too short after prefix', () => {
       // "c_ab" is 4 chars total — too short to show any chars safely
       expect(maskApiKey('c_ab')).toBe('****');
+    });
+  });
+
+  describe('getOrCreateMachineId', () => {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+    it('generates a valid UUID v4 on first call', () => {
+      const id = getOrCreateMachineId();
+      expect(id).toMatch(UUID_REGEX);
+    });
+
+    it('persists the machine ID to ~/.agent-farm/machine-id', () => {
+      const id = getOrCreateMachineId();
+      const machineIdPath = getMachineIdPath();
+      expect(existsSync(machineIdPath)).toBe(true);
+      const stored = readFileSync(machineIdPath, 'utf-8').trim();
+      expect(stored).toBe(id);
+    });
+
+    it('returns the same ID on subsequent calls', () => {
+      const first = getOrCreateMachineId();
+      const second = getOrCreateMachineId();
+      expect(second).toBe(first);
+    });
+
+    it('survives cloud config deletion (deregistration)', () => {
+      const id = getOrCreateMachineId();
+      // Simulate deregistration
+      writeCloudConfig(VALID_CONFIG);
+      deleteCloudConfig();
+      // Machine ID should still be intact
+      const afterDeregister = getOrCreateMachineId();
+      expect(afterDeregister).toBe(id);
+    });
+
+    it('generates a new ID if machine-id file is empty', () => {
+      const machineIdPath = getMachineIdPath();
+      mkdirSync(AGENT_FARM_DIR, { recursive: true });
+      writeFileSync(machineIdPath, '', { mode: 0o600 });
+
+      const id = getOrCreateMachineId();
+      expect(id).toMatch(UUID_REGEX);
+      expect(id.length).toBeGreaterThan(0);
+    });
+
+    it('is not based on hostname, OS, or arch', () => {
+      const id = getOrCreateMachineId();
+      const { hostname } = require('node:os');
+      const { platform, arch } = process;
+      // The ID should NOT contain hostname-platform-arch pattern
+      expect(id).not.toContain(hostname());
+      expect(id).not.toContain(platform);
+      expect(id).not.toContain(arch);
+    });
+
+    it('regenerates UUID if file contains invalid/corrupt content', () => {
+      const machineIdPath = getMachineIdPath();
+      mkdirSync(AGENT_FARM_DIR, { recursive: true });
+      writeFileSync(machineIdPath, 'not-a-valid-uuid\n', { mode: 0o600 });
+
+      const id = getOrCreateMachineId();
+      expect(id).toMatch(UUID_REGEX);
+      expect(id).not.toBe('not-a-valid-uuid');
+    });
+
+    it('enforces 0600 permissions on existing machine-id file', () => {
+      const machineIdPath = getMachineIdPath();
+      // Create with lax permissions
+      mkdirSync(AGENT_FARM_DIR, { recursive: true });
+      const validUuid = '12345678-1234-4abc-8def-123456789abc';
+      writeFileSync(machineIdPath, validUuid + '\n', { mode: 0o644 });
+
+      const id = getOrCreateMachineId();
+      expect(id).toBe(validUuid);
+      // Permissions should now be 0600
+      const mode = statSync(machineIdPath).mode & 0o777;
+      expect(mode).toBe(0o600);
+    });
+  });
+
+  describe('getMachineIdPath', () => {
+    it('returns path under ~/.agent-farm/', () => {
+      const path = getMachineIdPath();
+      expect(path).toContain('.agent-farm');
+      expect(path).toContain('machine-id');
     });
   });
 });

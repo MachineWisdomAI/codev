@@ -16,9 +16,11 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm');
 const CLOUD_CONFIG_FILENAME = 'cloud-config.json';
+const MACHINE_ID_FILENAME = 'machine-id';
 
 /**
  * Cloud configuration stored after tower registration with codevos.ai.
@@ -128,6 +130,48 @@ export function deleteCloudConfig(): void {
  */
 export function isRegistered(): boolean {
   return readCloudConfig() !== null;
+}
+
+/**
+ * Returns the path to ~/.agent-farm/machine-id
+ */
+export function getMachineIdPath(): string {
+  return resolve(AGENT_FARM_DIR, MACHINE_ID_FILENAME);
+}
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/**
+ * Get or create a persistent machine ID (UUID v4).
+ *
+ * Reads from ~/.agent-farm/machine-id if it exists and contains a valid UUID v4.
+ * Otherwise generates a new UUID, persists it, and returns it.
+ * Enforces 0600 permissions on the file.
+ * This ID survives tower deregistration and re-registration.
+ */
+export function getOrCreateMachineId(): string {
+  const machineIdPath = getMachineIdPath();
+
+  if (existsSync(machineIdPath)) {
+    const id = readFileSync(machineIdPath, 'utf-8').trim();
+    if (id && UUID_V4_REGEX.test(id)) {
+      // Enforce 0600 permissions on existing file
+      const mode = statSync(machineIdPath).mode & 0o777;
+      if (mode !== 0o600) {
+        chmodSync(machineIdPath, 0o600);
+      }
+      return id;
+    }
+  }
+
+  const id = randomUUID();
+
+  if (!existsSync(AGENT_FARM_DIR)) {
+    mkdirSync(AGENT_FARM_DIR, { recursive: true, mode: 0o700 });
+  }
+
+  writeFileSync(machineIdPath, id + '\n', { mode: 0o600 });
+  return id;
 }
 
 /**
