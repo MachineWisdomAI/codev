@@ -1380,9 +1380,7 @@ async function getTerminalsForProject(
     if (alreadyRegistered) continue;
 
     // Orphaned tmux session — reconnect it.
-    // Skip architect sessions: launchInstance handles architect creation/reconnection
-    // and has its own exit handler for auto-restart. Reconnecting here races with
-    // the restart logic and can attach to a dead tmux session.
+    // Skip architect sessions: launchInstance handles creation/reconnection.
     if (parsed.type === 'architect') continue;
 
     try {
@@ -1655,12 +1653,17 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
             activeTmuxSession = sanitizedTmuxName;
             log('INFO', `Reconnecting to existing tmux session "${sanitizedTmuxName}" for architect`);
           } else {
-            const createdName = createTmuxSession(tmuxName, cmd, cmdArgs, projectPath, 200, 50);
+            // Wrap architect in a restart loop inside tmux so it auto-restarts
+            // when the user exits Claude Code (e.g., /exit). The loop runs
+            // inside tmux itself, independent of Tower's node-pty exit handler.
+            const innerCmd = [cmd, ...cmdArgs].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+            const loopCmd = `while true; do ${innerCmd}; echo "Architect exited. Restarting in 2s..."; sleep 2; done`;
+            const createdName = createTmuxSession(tmuxName, 'sh', ['-c', loopCmd], projectPath, 200, 50);
             if (createdName) {
               cmd = 'tmux';
               cmdArgs = ['attach-session', '-t', createdName];
               activeTmuxSession = createdName;
-              log('INFO', `Created tmux session "${createdName}" for architect`);
+              log('INFO', `Created tmux session "${createdName}" for architect (with restart loop)`);
             }
           }
         }
@@ -1678,50 +1681,17 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
         // TICK-001: Save to SQLite for persistence (with tmux session name)
         saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
 
-        // Auto-restart architect on exit
+        // Clean up cache/SQLite when the node-pty session exits.
+        // Restart is handled by the while-true loop inside tmux (not here).
         const ptySession = manager.getSession(session.id);
         if (ptySession) {
-          const startedAt = Date.now();
           ptySession.on('exit', () => {
-            // Re-read entry from the Map — getTerminalsForProject() periodically
-            // replaces the Map entry with a fresh object, so the `entry` captured
-            // in the closure may be stale.
             const currentEntry = getProjectTerminalsEntry(resolvedPath);
             if (currentEntry.architect === session.id) {
               currentEntry.architect = undefined;
             }
             deleteTerminalSession(session.id);
-
-            // Check if the tmux session's inner process is still alive.
-            // The node-pty process is `tmux attach` — it exits on disconnect
-            // timeout, but the tmux session (and the architect process inside
-            // it) may still be running. Only kill tmux if the inner process
-            // has also exited (e.g., user typed "exit" or process crashed).
-            const tmuxAlive = activeTmuxSession && tmuxSessionExists(activeTmuxSession);
-            if (activeTmuxSession && !tmuxAlive) {
-              log('INFO', `Tmux session "${activeTmuxSession}" already gone for ${projectPath}`);
-            } else if (tmuxAlive) {
-              log('INFO', `Tmux session "${activeTmuxSession}" still alive for ${projectPath}, preserving for reconnect`);
-            }
-
-            // Only restart if the architect ran for at least 5s (prevents crash loops)
-            const uptime = Date.now() - startedAt;
-            if (uptime < 5000) {
-              log('INFO', `Architect exited after ${uptime}ms for ${projectPath}, not restarting (too short)`);
-              return;
-            }
-            // Kill the stale tmux session so launchInstance creates a fresh one
-            // instead of reconnecting to the dead session.
-            if (activeTmuxSession && tmuxSessionExists(activeTmuxSession)) {
-              killTmuxSession(activeTmuxSession);
-              log('INFO', `Killed stale tmux session "${activeTmuxSession}" before restart`);
-            }
-            log('INFO', `Architect exited for ${projectPath}, restarting in 2s...`);
-            setTimeout(() => {
-              launchInstance(projectPath).catch((err) => {
-                log('WARN', `Failed to restart architect for ${projectPath}: ${(err as Error).message}`);
-              });
-            }, 2000);
+            log('INFO', `Architect pty exited for ${projectPath} (tmux loop handles restart)`);
           });
         }
 
