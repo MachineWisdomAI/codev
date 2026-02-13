@@ -130,7 +130,7 @@
     }
   },
   "defaults": {
-    "mode": "soft",
+    "mode": "strict",
     "consultation": {
       "enabled": true,
       "models": ["gemini", "codex"],
