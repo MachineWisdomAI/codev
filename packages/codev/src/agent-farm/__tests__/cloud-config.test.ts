@@ -370,6 +370,30 @@ describe('cloud-config', () => {
       expect(id).not.toContain(platform);
       expect(id).not.toContain(arch);
     });
+
+    it('regenerates UUID if file contains invalid/corrupt content', () => {
+      const machineIdPath = getMachineIdPath();
+      mkdirSync(AGENT_FARM_DIR, { recursive: true });
+      writeFileSync(machineIdPath, 'not-a-valid-uuid\n', { mode: 0o600 });
+
+      const id = getOrCreateMachineId();
+      expect(id).toMatch(UUID_REGEX);
+      expect(id).not.toBe('not-a-valid-uuid');
+    });
+
+    it('enforces 0600 permissions on existing machine-id file', () => {
+      const machineIdPath = getMachineIdPath();
+      // Create with lax permissions
+      mkdirSync(AGENT_FARM_DIR, { recursive: true });
+      const validUuid = '12345678-1234-4abc-8def-123456789abc';
+      writeFileSync(machineIdPath, validUuid + '\n', { mode: 0o644 });
+
+      const id = getOrCreateMachineId();
+      expect(id).toBe(validUuid);
+      // Permissions should now be 0600
+      const mode = statSync(machineIdPath).mode & 0o777;
+      expect(mode).toBe(0o600);
+    });
   });
 
   describe('getMachineIdPath', () => {

@@ -139,11 +139,14 @@ export function getMachineIdPath(): string {
   return resolve(AGENT_FARM_DIR, MACHINE_ID_FILENAME);
 }
 
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 /**
  * Get or create a persistent machine ID (UUID v4).
  *
- * Reads from ~/.agent-farm/machine-id if it exists.
+ * Reads from ~/.agent-farm/machine-id if it exists and contains a valid UUID v4.
  * Otherwise generates a new UUID, persists it, and returns it.
+ * Enforces 0600 permissions on the file.
  * This ID survives tower deregistration and re-registration.
  */
 export function getOrCreateMachineId(): string {
@@ -151,7 +154,14 @@ export function getOrCreateMachineId(): string {
 
   if (existsSync(machineIdPath)) {
     const id = readFileSync(machineIdPath, 'utf-8').trim();
-    if (id) return id;
+    if (id && UUID_V4_REGEX.test(id)) {
+      // Enforce 0600 permissions on existing file
+      const mode = statSync(machineIdPath).mode & 0o777;
+      if (mode !== 0o600) {
+        chmodSync(machineIdPath, 0o600);
+      }
+      return id;
+    }
   }
 
   const id = randomUUID();
