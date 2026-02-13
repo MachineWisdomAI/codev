@@ -637,6 +637,61 @@
       }
     }
 
+    /* Cloud status */
+    .cloud-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .cloud-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .cloud-dot--green { background: var(--status-running); }
+    .cloud-dot--yellow { background: #eab308; }
+    .cloud-dot--red { background: #ef4444; }
+    .cloud-dot--gray { background: var(--text-muted); }
+
+    .cloud-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    .cloud-link:hover {
+      text-decoration: underline;
+    }
+
+    .cloud-uptime {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .cloud-btn {
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .cloud-btn:hover {
+      background: #333;
+    }
+
+    .cloud-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
     /* Reduced motion */
     @media (prefers-reduced-motion: reduce) {
       .status-dot.running,
@@ -840,6 +895,7 @@
       Agent Farm Control Tower
     </h1>
     <div class="header-actions">
+      <span id="cloud-status"></span>
       <button class="btn" onclick="refresh()">Refresh</button>
     </div>
   </header>
@@ -1038,13 +1094,18 @@
     // Refresh data from API
     async function refresh() {
       try {
-        const response = await authFetch('/api/status');
-        if (!response.ok) throw new Error('Failed to fetch status');
+        const [statusResponse, cloudStatus] = await Promise.all([
+          authFetch('/api/status'),
+          fetchCloudStatus(),
+        ]);
 
-        const data = await response.json();
+        if (!statusResponse.ok) throw new Error('Failed to fetch status');
+
+        const data = await statusResponse.json();
         runningInstances = (data.instances || []).filter(i => i.running);
         recentInstances = (data.instances || []).filter(i => !i.running);
         render();
+        renderCloudStatus(cloudStatus);
       } catch (err) {
         console.error('Refresh error:', err);
         showToast('Failed to refresh: ' + err.message, 'error');
@@ -1623,6 +1684,116 @@
         hideCreateProjectDialog();
       }
     });
+
+    // Cloud status
+    let cloudLoading = false;
+
+    async function fetchCloudStatus() {
+      try {
+        const res = await authFetch('/api/tunnel/status');
+        if (res.status === 404) return null;
+        if (!res.ok) return { state: 'error' };
+        return await res.json();
+      } catch {
+        return null;
+      }
+    }
+
+    function formatUptime(ms) {
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return h + 'h ' + m + 'm';
+    }
+
+    function renderCloudStatus(status) {
+      const el = document.getElementById('cloud-status');
+      if (!status || status.state === 'error') {
+        el.innerHTML = `
+          <span class="cloud-status">
+            <span class="cloud-dot cloud-dot--gray"></span>
+            Cloud: not registered
+          </span>`;
+        return;
+      }
+
+      if (!status.registered) {
+        el.innerHTML = `
+          <span class="cloud-status">
+            <span class="cloud-dot cloud-dot--gray"></span>
+            Cloud: not registered
+          </span>`;
+        return;
+      }
+
+      if (status.state === 'auth_failed') {
+        el.innerHTML = `
+          <span class="cloud-status">
+            <span class="cloud-dot cloud-dot--red"></span>
+            Cloud: auth failed
+          </span>`;
+        return;
+      }
+
+      if (status.state === 'connecting') {
+        el.innerHTML = `
+          <span class="cloud-status">
+            <span class="cloud-dot cloud-dot--yellow"></span>
+            Cloud: connecting...
+          </span>`;
+        return;
+      }
+
+      if (status.state === 'connected') {
+        const uptimeStr = status.uptime != null ? ' <span class="cloud-uptime">' + formatUptime(status.uptime) + '</span>' : '';
+        const openLink = status.accessUrl ? ' <a href="' + escapeHtml(status.accessUrl) + '" target="_blank" rel="noopener" class="cloud-link">Open</a>' : '';
+        el.innerHTML = `
+          <span class="cloud-status">
+            <span class="cloud-dot cloud-dot--green"></span>
+            Cloud: ${escapeHtml(status.towerName || 'connected')}
+            ${uptimeStr}
+            ${openLink}
+            <button class="cloud-btn" onclick="cloudDisconnect()" ${cloudLoading ? 'disabled' : ''}>Disconnect</button>
+          </span>`;
+        return;
+      }
+
+      // Disconnected
+      el.innerHTML = `
+        <span class="cloud-status">
+          <span class="cloud-dot cloud-dot--gray"></span>
+          Cloud: disconnected
+          <button class="cloud-btn" onclick="cloudConnect()" ${cloudLoading ? 'disabled' : ''}>Connect</button>
+        </span>`;
+    }
+
+    async function cloudConnect() {
+      cloudLoading = true;
+      renderCloudStatus({ registered: true, state: 'connecting' });
+      try {
+        await authFetch('/api/tunnel/connect', { method: 'POST' });
+        showToast('Connecting to cloud...', 'success');
+      } catch (err) {
+        showToast('Connect failed: ' + err.message, 'error');
+      }
+      cloudLoading = false;
+      // Refresh will pick up new status
+      setTimeout(refresh, 2000);
+    }
+
+    async function cloudDisconnect() {
+      cloudLoading = true;
+      try {
+        await authFetch('/api/tunnel/disconnect', { method: 'POST' });
+        showToast('Disconnected from cloud', 'success');
+      } catch (err) {
+        showToast('Disconnect failed: ' + err.message, 'error');
+      }
+      cloudLoading = false;
+      setTimeout(refresh, 1000);
+    }
 
     // Initialize
     init();
