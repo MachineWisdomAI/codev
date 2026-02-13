@@ -49,13 +49,26 @@ This is awkward because:
 
 When porch is invoked without an explicit ID, it should:
 
-1. **Check if CWD is inside a `.builders/` worktree** by walking up from `process.cwd()` looking for a parent path segment matching `.builders/<something>`.
+1. **Check if CWD is inside a `.builders/` worktree** by walking up from `process.cwd()` looking for a parent path segment matching `.builders/<something>`. Detection works from **any subdirectory** within the worktree (e.g., `.builders/0073/src/commands/` resolves the same as `.builders/0073/`).
 2. **Extract the project ID from the worktree directory name**:
    - `.builders/0073` -> project ID `0073`
    - `.builders/bugfix-228` -> project ID `0228` (zero-padded to 4 digits)
    - `.builders/task-aB2C` -> no project ID (task mode doesn't map to a project)
    - `.builders/maintain-xY9z` -> no project ID
 3. **Fall back to the existing `detectProjectId()`** if CWD is not in a worktree (e.g., running from the main repo root).
+
+### Path Handling
+
+The CWD path should be normalized using `path.resolve()` before regex matching to ensure consistent forward-slash separators. While Codev primarily targets macOS/Linux, path normalization is a low-cost defensive measure.
+
+### ID Validation
+
+The `detectProjectIdFromCwd()` function returns a **candidate** ID only. It does not validate that a corresponding `codev/projects/<id>-*/status.yaml` exists — that validation happens downstream in `findStatusPath()`, which already throws a clear error if the project directory is missing. This avoids duplicating validation logic.
+
+### Known Limitations
+
+- **Custom `--worktree` names**: If `porch init` is given a non-standard worktree path (e.g., `.builders/my-custom-name`), CWD detection will not extract the project ID. The explicit CLI argument remains available as fallback.
+- **Bugfix IDs > 9999**: `padStart(4, '0')` is a no-op for IDs already 4+ digits, so `bugfix-12345` correctly resolves to `"12345"`. This is consistent with how the codebase handles project IDs generally.
 
 ### Resolution Priority
 
@@ -71,13 +84,17 @@ When porch is invoked without an explicit ID, it should:
 Add a new function `detectProjectIdFromCwd()` in `state.ts`:
 
 ```typescript
+import path from 'node:path';
+
 /**
  * Detect project ID from the current working directory if inside a builder worktree.
  * Returns 4-digit zero-padded project ID, or null if not in a worktree.
+ * Works from any subdirectory within the worktree.
  */
 export function detectProjectIdFromCwd(cwd: string): string | null {
-  // Walk up looking for .builders/<id> in the path
-  const match = cwd.match(/\.builders\/(bugfix-(\d+)|(\d{4}))\b/);
+  // Normalize path separators
+  const normalized = path.resolve(cwd).split(path.sep).join('/');
+  const match = normalized.match(/\.builders\/(bugfix-(\d+)|(\d{4}))(\/|$)/);
   if (!match) return null;
 
   // bugfix-228 -> "0228", 0073 -> "0073"
@@ -124,10 +141,11 @@ porch status 0073   # explicit ID required if multiple projects exist
 
 1. `porch status` (no arg) works correctly when CWD is inside `.builders/0073/`
 2. `porch status` (no arg) works correctly when CWD is inside `.builders/bugfix-228/`
-3. Explicit ID argument still takes precedence over CWD detection
-4. `detectProjectId()` fallback still works from main repo root
-5. Task/protocol worktrees (no project mapping) produce a clear error message
-6. Unit tests cover all worktree naming patterns
+3. Detection works from subdirectories (e.g., `.builders/0073/src/commands/`)
+4. Explicit ID argument still takes precedence over CWD detection
+5. `detectProjectId()` fallback still works from main repo root
+6. Task/protocol worktrees (no project mapping) produce a clear error message
+7. Unit tests cover all worktree naming patterns and the full resolution priority chain (explicit arg > CWD > filesystem scan > error)
 
 ## Out of Scope
 
