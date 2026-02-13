@@ -98,31 +98,35 @@ Add a new `describe('detectProjectIdFromCwd')` block to `__tests__/state.test.ts
 
 #### Implementation Details
 
-Modify `getProjectId()` in `packages/codev/src/commands/porch/index.ts` (line 614):
+Modify `getProjectId()` in `packages/codev/src/commands/porch/index.ts` (line 614). **Preserve the existing signature** `(provided?: string)` — only insert CWD detection between the explicit arg check and the filesystem scan:
 
 ```typescript
 function getProjectId(provided?: string): string {
-  if (provided) return provided.padStart(4, '0');
+  // 1. Explicit CLI argument (highest priority)
+  if (provided) return provided;
 
-  // CWD worktree detection
+  // 2. CWD worktree detection
   const fromCwd = detectProjectIdFromCwd(process.cwd());
   if (fromCwd) {
     console.log(chalk.dim(`[auto-detected project from worktree: ${fromCwd}]`));
     return fromCwd;
   }
 
-  // Filesystem scan fallback
+  // 3. Filesystem scan fallback
   const detected = detectProjectId(projectRoot);
   if (detected) {
     console.log(chalk.dim(`[auto-detected project: ${detected}]`));
     return detected;
   }
 
+  // 4. Error — none of the detection methods succeeded
   throw new Error(
     'Cannot determine project ID. Provide it explicitly or run from a builder worktree.'
   );
 }
 ```
+
+Note: The existing signature `(provided?: string)` is preserved. The `provided` value already comes from `rest[0]` at each call site (e.g., `getProjectId(rest[0])`), so no call sites need changes. The `projectRoot` variable is captured from the outer `cli()` scope (line 611).
 
 Add import of `detectProjectIdFromCwd` from `./state.js`.
 
@@ -131,10 +135,18 @@ Update the help text (line 680) to mention CWD auto-detection:
 'Project ID is auto-detected from worktree path or when exactly one project exists.'
 ```
 
+#### Test Plan
+
+Add unit tests for the full resolution priority chain. Since `getProjectId()` is a closure inside `cli()`, test the priority behavior via the exported `detectProjectIdFromCwd()` function and verify integration manually:
+
+- Test that `detectProjectIdFromCwd()` returns `null` for non-worktree paths (ensuring filesystem scan fallback kicks in)
+- Test that when CWD is a task/protocol worktree, `detectProjectIdFromCwd()` returns `null` and the error path is reached (when filesystem scan also returns `null`)
+- Verify `npm run build` and existing test suite pass
+
 #### Acceptance Criteria
 - [ ] Explicit arg takes precedence over CWD detection
 - [ ] CWD detection takes precedence over filesystem scan
-- [ ] Error message is clear when no ID can be determined
+- [ ] Error message is clear when no ID can be determined (includes task/protocol worktrees)
 - [ ] Existing porch tests pass with no regressions
 - [ ] `npm run build` succeeds
 
