@@ -4,32 +4,9 @@ Procedures for testing Codev changes locally before publishing or claiming a fix
 
 ## Local Testing (Without Publishing)
 
-To test changes locally before publishing to npm:
-
-```bash
-# From packages/codev directory:
-cd packages/codev
-
-# Build and create tarball
-npm run build
-npm pack
-
-# Stop Tower before reinstalling
-af tower stop
-
-# Install globally from tarball (wildcard avoids hardcoding version)
-npm install -g ./cluesmith-codev-*.tgz
-
-# Clean up tarball
-rm ./cluesmith-codev-*.tgz
-
-# Restart Tower with new code
-af tower start
-```
-
-This installs the exact package that would be published, without touching the npm registry. Better than `npm link` which has symlink issues.
-
-**Do NOT use `npm link`** - it breaks global installs and has weird dependency resolution issues.
+See the **Local Build Testing** section in `CLAUDE.md` for the build/install procedure. Key points:
+- Build and pack **before** stopping Tower to minimize downtime
+- Do NOT use `npm link` — it breaks global installs
 
 ## UI Testing with Playwright
 
@@ -82,8 +59,7 @@ const { chromium } = require('playwright');
 
 The Tower Single Daemon architecture (Spec 0090) has state management complexity that unit tests don't catch. Before claiming any Tower/Agent Farm change works:
 
-1. **Build and install**: `npm run build && npm pack && npm install -g ./cluesmith-codev-*.tgz && rm ./cluesmith-codev-*.tgz`
-2. **Restart Tower**: `af tower stop && af tower start`
+1. **Build, install, restart**: Follow the Local Build Testing procedure in `CLAUDE.md`
 3. **Test the actual scenario**: Use Playwright or manual testing to verify the specific bug/feature
 4. **Verify multi-project scenarios**: If touching project management, test with 2+ projects
 

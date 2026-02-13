@@ -253,37 +253,11 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       }
     });
 
-    // Scroll handling: when xterm.js is in the alternate screen buffer (e.g., tmux),
-    // translate wheel events to arrow key sequences sent to the PTY so apps like
-    // Claude Code scroll their TUI output. In normal screen buffer, xterm.js
-    // handles scrollback natively via its own viewport.
-    let scrollAccumulator = 0;
-    const SCROLL_PIXELS_PER_LINE = 20; // responsive threshold for trackpad
-
-    const handleWheel = (event: WheelEvent) => {
-      if (term.buffer.active.type !== 'alternate') return;
-      if (ws.readyState !== WebSocket.OPEN) return;
-
-      event.preventDefault();
-
-      const delta = event.deltaMode === 1
-        ? event.deltaY * SCROLL_PIXELS_PER_LINE // line mode → pixels
-        : event.deltaY;
-
-      scrollAccumulator += delta;
-
-      const lines = Math.trunc(scrollAccumulator / SCROLL_PIXELS_PER_LINE);
-      if (lines === 0) return;
-
-      scrollAccumulator -= lines * SCROLL_PIXELS_PER_LINE;
-
-      const count = Math.min(Math.abs(lines), 15);
-      const seq = lines < 0 ? '\x1b[A' : '\x1b[B'; // Up / Down arrow
-      sendData(ws, seq.repeat(count));
-    };
-
-    const wheelTarget = containerRef.current;
-    wheelTarget.addEventListener('wheel', handleWheel, { passive: false });
+    // Scroll: no custom wheel handler. In normal buffer, xterm.js handles
+    // scrollback natively. In alternate buffer (tmux), scroll wheel is a known
+    // limitation (#220) — tmux mouse mode is OFF to preserve text selection
+    // and Cmd+C/Cmd+V clipboard. Arrow keys and Page Up/Down both cause
+    // undesirable side effects (command history, copy mode).
 
     // Handle window resize (debounced to prevent resize storms)
     const resizeObserver = new ResizeObserver(debouncedFit);
@@ -301,7 +275,6 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
       if (flushTimer) clearTimeout(flushTimer);
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
-      wheelTarget.removeEventListener('wheel', handleWheel);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();

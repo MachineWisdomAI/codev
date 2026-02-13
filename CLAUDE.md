@@ -31,9 +31,30 @@ This repository has a dual nature that's important to understand:
 
 To release a new version, tell the AI: `Let's release v1.6.0`. The AI follows the **RELEASE protocol** (`codev/protocols/release/protocol.md`). Release candidate workflow and local testing procedures are documented there. For local testing shortcuts, see `codev/resources/testing-guide.md`.
 
+### Local Build Testing
+
+To test changes locally before publishing to npm:
+
+```bash
+# From packages/codev directory:
+cd packages/codev
+
+# 1. Build and create tarball (Tower stays up during this)
+npm run build
+npm pack
+
+# 2. Stop Tower, install, clean up, restart (minimize downtime)
+af tower stop
+npm install -g ./cluesmith-codev-*.tgz
+rm ./cluesmith-codev-*.tgz
+af tower start
+```
+
+Build and pack **before** stopping Tower so it's down for the minimum time. Do NOT use `npm link` — it breaks global installs.
+
 ### Testing
 
-When making changes to UI code (tower, dashboard, terminal), you MUST test using Playwright before claiming the fix works. See `codev/resources/testing-guide.md` for procedures, including local build testing, Playwright patterns, and Tower regression prevention.
+When making changes to UI code (tower, dashboard, terminal), you MUST test using Playwright before claiming the fix works. See `codev/resources/testing-guide.md` for Playwright patterns and Tower regression prevention.
 
 ## Quick Start
 

@@ -569,8 +569,9 @@ function createTmuxSession(
     // events during layout settling. Default tmux behavior (size to smallest
     // client) is more stable since we only have one client per session.
     spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
-    // Mouse OFF — xterm.js in the browser handles selection, scrolling,
-    // and Cmd+C/Cmd+V clipboard. tmux mouse mode conflicts with this.
+    // Mouse OFF — xterm.js in the browser handles selection and Cmd+C/Cmd+V
+    // clipboard. tmux mouse mode conflicts (auto-copy on selection, intercepts
+    // click/drag). Scroll in alternate buffer is a known limitation (#220).
     spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'off'], { stdio: 'ignore' });
     // Unset CLAUDECODE so spawned Claude processes don't detect a nested session
     spawnSync('tmux', ['set-environment', '-t', sessionName, '-u', 'CLAUDECODE'], { stdio: 'ignore' });
