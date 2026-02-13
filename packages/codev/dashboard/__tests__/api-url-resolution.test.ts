@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Regression test for GitHub issue #222:
-// Dashboard API calls must use relative URLs so they work behind reverse proxies.
+// Regression tests for GitHub issues #222 and #234:
+// Dashboard API calls and tower links must use relative URLs so they work
+// behind reverse proxies (e.g., codevos.ai /t/{slug}/).
 
 describe('getApiBase (constants.ts)', () => {
   it('returns relative base "./" regardless of pathname', async () => {
@@ -72,5 +73,39 @@ describe('getTerminalWsPath (api.ts)', () => {
   it('returns null when no terminalId', async () => {
     const { getTerminalWsPath } = await import('../src/lib/api.js');
     expect(getTerminalWsPath({ type: 'builder' })).toBeNull();
+  });
+});
+
+// Regression test for GitHub issue #234:
+// Tower.html instance/terminal links must be relative, not absolute.
+// The server returns absolute paths like "/project/<encoded>/" in API responses.
+// The client's relUrl() converts these to relative "./project/<encoded>/" so
+// they resolve through the proxy prefix.
+describe('tower.html relUrl pattern (issue #234)', () => {
+  // Mirror of the relUrl() function in tower.html
+  function relUrl(path: string | null | undefined): string {
+    if (path && path.startsWith('/')) return '.' + path;
+    return path || '';
+  }
+
+  it('converts absolute project URL to relative', () => {
+    expect(relUrl('/project/abc123/')).toBe('./project/abc123/');
+  });
+
+  it('converts absolute terminal URL to relative', () => {
+    expect(relUrl('/project/abc123/?tab=architect')).toBe('./project/abc123/?tab=architect');
+  });
+
+  it('leaves already-relative URLs unchanged', () => {
+    expect(relUrl('./project/abc123/')).toBe('./project/abc123/');
+  });
+
+  it('handles empty string', () => {
+    expect(relUrl('')).toBe('');
+  });
+
+  it('handles null/undefined', () => {
+    expect(relUrl(null)).toBe('');
+    expect(relUrl(undefined)).toBe('');
   });
 });
