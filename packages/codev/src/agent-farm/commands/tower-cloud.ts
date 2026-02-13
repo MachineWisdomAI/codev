@@ -126,6 +126,7 @@ export async function getTunnelStatus(port?: number): Promise<{
 
 export interface TowerRegisterOptions {
   reauth?: boolean;
+  serviceUrl?: string;
   port?: number;
 }
 
@@ -158,14 +159,17 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
 
   logger.header('Tower Registration');
 
+  // Resolve service URL: CLI --service flag > CODEVOS_URL env var > existing config > default
+  const serverUrl = options.serviceUrl || process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
+
   // Start ephemeral callback server
   const callbackServer = await startCallbackServer();
   const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
 
   const callbackParam = `callback=${encodeURIComponent(callbackUrl)}`;
   const browserUrl = options.reauth
-    ? `${CODEVOS_URL}/towers/register?reauth=true&${callbackParam}`
-    : `${CODEVOS_URL}/towers/register?${callbackParam}`;
+    ? `${serverUrl}/towers/register?reauth=true&${callbackParam}`
+    : `${serverUrl}/towers/register?${callbackParam}`;
 
   logger.info('Opening browser for authentication...');
   logger.kv('URL', browserUrl);
@@ -204,8 +208,6 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   }
 
   // Exchange token for API key
-  // Explicit CODEVOS_URL env var takes priority over existing config (allows migration)
-  const serverUrl = process.env.CODEVOS_URL || existing?.server_url || 'https://codevos.ai';
   logger.info('Exchanging token...');
 
   let towerId: string;

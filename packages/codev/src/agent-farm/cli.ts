@@ -428,10 +428,11 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .command('register')
     .description('Register this tower with codevos.ai for remote access')
     .option('--reauth', 'Update API key without changing tower name')
+    .option('--service <url>', 'CodevOS service URL (default: https://codevos.ai)')
     .option('-p, --port <port>', 'Tower port to signal after registration (default: 4100)')
     .action(async (options) => {
       try {
-        await towerRegister({ reauth: options.reauth, port: options.port ? parseInt(options.port, 10) : undefined });
+        await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
