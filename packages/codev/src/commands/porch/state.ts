@@ -171,6 +171,8 @@ export function detectProjectIdFromCwd(cwd: string): string | null {
   return rawId.padStart(4, '0');
 }
 
+export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
+
 /**
  * Resolve project ID using the priority chain:
  * 1. Explicit CLI argument (highest priority)
@@ -182,17 +184,17 @@ export function resolveProjectId(
   provided: string | undefined,
   cwd: string,
   projectRoot: string,
-): string {
+): ResolvedProjectId {
   // 1. Explicit CLI argument (highest priority)
-  if (provided) return provided;
+  if (provided) return { id: provided, source: 'explicit' };
 
   // 2. CWD worktree detection
   const fromCwd = detectProjectIdFromCwd(cwd);
-  if (fromCwd) return fromCwd;
+  if (fromCwd) return { id: fromCwd, source: 'cwd' };
 
   // 3. Filesystem scan fallback
   const detected = detectProjectId(projectRoot);
-  if (detected) return detected;
+  if (detected) return { id: detected, source: 'filesystem' };
 
   // 4. Error — none of the detection methods succeeded
   throw new Error('Cannot determine project ID. Provide it explicitly or run from a builder worktree.');

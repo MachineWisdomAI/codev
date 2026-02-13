@@ -318,24 +318,24 @@ updated_at: "${state.updated_at}"
     it('step 1: explicit arg takes highest priority over CWD and filesystem scan', () => {
       // Even when CWD is a worktree and filesystem has a project, explicit arg wins
       const result = resolveProjectId('0042', '/repo/.builders/0073', singleProjectRoot);
-      expect(result).toBe('0042');
+      expect(result).toEqual({ id: '0042', source: 'explicit' });
     });
 
     it('step 2: CWD worktree detection takes precedence over filesystem scan', () => {
       // No explicit arg, CWD is a worktree -> CWD detection wins over filesystem scan
       const result = resolveProjectId(undefined, '/repo/.builders/0073', singleProjectRoot);
-      expect(result).toBe('0073');
+      expect(result).toEqual({ id: '0073', source: 'cwd' });
     });
 
     it('step 2: CWD bugfix worktree resolves correctly', () => {
       const result = resolveProjectId(undefined, '/repo/.builders/bugfix-42', singleProjectRoot);
-      expect(result).toBe('0042');
+      expect(result).toEqual({ id: '0042', source: 'cwd' });
     });
 
     it('step 3: falls back to filesystem scan when CWD is not a worktree', () => {
       // No explicit arg, CWD is NOT a worktree -> filesystem scan finds the project
       const result = resolveProjectId(undefined, '/regular/path', singleProjectRoot);
-      expect(result).toBe('0099');
+      expect(result).toEqual({ id: '0099', source: 'filesystem' });
     });
 
     it('step 4: throws when no detection method succeeds', () => {

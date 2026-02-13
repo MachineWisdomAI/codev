@@ -18,7 +18,6 @@ import {
   getProjectDir,
   getStatusPath,
   detectProjectId,
-  detectProjectIdFromCwd,
   resolveProjectId,
 } from './state.js';
 import {
@@ -614,17 +613,13 @@ export async function cli(args: string[]): Promise<void> {
 
   // Auto-detect project ID for commands that need it
   function getProjectId(provided?: string): string {
-    const resolved = resolveProjectId(provided, process.cwd(), projectRoot);
-    // Log auto-detection source when no explicit arg was given
-    if (!provided) {
-      const fromCwd = detectProjectIdFromCwd(process.cwd());
-      if (fromCwd) {
-        console.log(chalk.dim(`[auto-detected project from worktree: ${resolved}]`));
-      } else {
-        console.log(chalk.dim(`[auto-detected project: ${resolved}]`));
-      }
+    const { id, source } = resolveProjectId(provided, process.cwd(), projectRoot);
+    if (source === 'cwd') {
+      console.log(chalk.dim(`[auto-detected project from worktree: ${id}]`));
+    } else if (source === 'filesystem') {
+      console.log(chalk.dim(`[auto-detected project: ${id}]`));
     }
-    return resolved;
+    return id;
   }
 
   try {
