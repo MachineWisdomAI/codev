@@ -159,6 +159,48 @@ export function findStatusPath(projectRoot: string, projectId: string): string |
 }
 
 /**
+ * Detect project ID from the current working directory if inside a builder worktree.
+ * Works from any subdirectory within the worktree.
+ * Returns zero-padded project ID, or null if not in a recognized worktree.
+ */
+export function detectProjectIdFromCwd(cwd: string): string | null {
+  const normalized = path.resolve(cwd).split(path.sep).join('/');
+  const match = normalized.match(/\/\.builders\/(bugfix-(\d+)|(\d{4}))(\/|$)/);
+  if (!match) return null;
+  const rawId = match[2] || match[3];
+  return rawId.padStart(4, '0');
+}
+
+export type ResolvedProjectId = { id: string; source: 'explicit' | 'cwd' | 'filesystem' };
+
+/**
+ * Resolve project ID using the priority chain:
+ * 1. Explicit CLI argument (highest priority)
+ * 2. CWD worktree detection
+ * 3. Filesystem scan fallback
+ * 4. Error if none succeed
+ */
+export function resolveProjectId(
+  provided: string | undefined,
+  cwd: string,
+  projectRoot: string,
+): ResolvedProjectId {
+  // 1. Explicit CLI argument (highest priority)
+  if (provided) return { id: provided, source: 'explicit' };
+
+  // 2. CWD worktree detection
+  const fromCwd = detectProjectIdFromCwd(cwd);
+  if (fromCwd) return { id: fromCwd, source: 'cwd' };
+
+  // 3. Filesystem scan fallback
+  const detected = detectProjectId(projectRoot);
+  if (detected) return { id: detected, source: 'filesystem' };
+
+  // 4. Error — none of the detection methods succeeded
+  throw new Error('Cannot determine project ID. Provide it explicitly or run from a builder worktree.');
+}
+
+/**
  * Auto-detect project ID when only one project exists.
  * Returns null if zero or multiple projects found.
  */
