@@ -70,8 +70,12 @@ Generalizable wisdom extracted from review documents, ordered by impact. Updated
 
 - [From 0054] Each reviewer catches different aspects - Claude: spec compliance, Gemini: API correctness, Codex: practical issues
 - [From 0061-002] Security vulnerabilities (XSS) often identified in 3-way review that weren't in initial implementation
+- [From CMAP analysis] Codex catches security edge cases (SSRF bypass, path traversal, file permissions) that other reviewers miss; blocked in 38 rounds across Jan 30-Feb 13 window
+- [From CMAP analysis] CMAP misses proxy/deployment topology bugs and React lifecycle/WebSocket timing issues — add "works behind reverse proxy?" to review checklist for HTTP specs
+- [From CMAP analysis] When 2/3 approve for 3+ consecutive rounds, auto-advance with documented dissent — prevents 7-10 iteration loops (seen in 0097 Phase 7, 0101 Phase 4)
+- [From CMAP analysis] Full analysis with ROI data: `codev/resources/cmap-value-analysis-2026-02.md`
 
 ---
 
-*Last updated: 2026-02-13 (scroll saga retrospective)*
+*Last updated: 2026-02-13 (CMAP value analysis)*
 *Source: codev/reviews/*
