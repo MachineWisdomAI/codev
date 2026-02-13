@@ -10,6 +10,7 @@
  * The H2 role-reversal is transport-agnostic — it works over any duplex stream.
  */
 
+import { randomBytes } from 'node:crypto';
 import http2 from 'node:http2';
 import http from 'node:http';
 import https from 'node:https';
@@ -461,7 +462,7 @@ export class TunnelClient {
       'Upgrade': 'websocket',
       'Connection': 'Upgrade',
       'Sec-WebSocket-Version': '13',
-      'Sec-WebSocket-Key': Buffer.from(Math.random().toString()).toString('base64'),
+      'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
       'Host': authority,
     };
     for (const [key, value] of Object.entries(headers)) {
