@@ -1,0 +1,1743 @@
+/**
+ * HTTP route handlers for tower server.
+ * Spec 0105: Tower Server Decomposition — Phase 6
+ *
+ * Contains all HTTP request routing and response logic.
+ * The orchestrator (tower-server.ts) creates the HTTP server and
+ * delegates to handleRequest() for all HTTP requests.
+ *
+ * NOTE: This file exceeds the 900-line guideline because it contains
+ * all HTTP route handlers (~30 routes) which share a single responsibility
+ * (HTTP request handling). Splitting would create arbitrary boundaries
+ * without improving cohesion. See spec: "cohesion trumps arbitrary ceilings."
+ */
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { execSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import type { SessionManager } from '../../terminal/session-manager.js';
+import type { PtySessionInfo } from '../../terminal/pty-session.js';
+import type { SSEClient } from './tower-types.js';
+import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
+import {
+  isRateLimited,
+  normalizeProjectPath,
+  getLanguageForExt,
+  getMimeTypeForFile,
+  serveStaticFile,
+} from './tower-utils.js';
+import { handleTunnelEndpoint } from './tower-tunnel.js';
+import {
+  getKnownProjectPaths,
+  getInstances,
+  getDirectorySuggestions,
+  launchInstance,
+  killTerminalWithShepherd,
+  stopInstance,
+} from './tower-instances.js';
+import {
+  getProjectTerminals,
+  getTerminalManager,
+  getProjectTerminalsEntry,
+  getNextShellId,
+  saveTerminalSession,
+  isSessionPersistent,
+  deleteTerminalSession,
+  deleteProjectTerminalSessions,
+  saveFileTab,
+  deleteFileTab,
+  getTerminalsForProject,
+} from './tower-terminals.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ============================================================================
+// Route context — dependencies provided by the orchestrator
+// ============================================================================
+
+export interface RouteContext {
+  log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
+  port: number;
+  templatePath: string | null;
+  reactDashboardPath: string;
+  hasReactDashboard: boolean;
+  getShepherdManager: () => SessionManager | null;
+  broadcastNotification: (notification: { type: string; title: string; body: string; project?: string }) => void;
+  addSseClient: (client: SSEClient) => void;
+  removeSseClient: (id: string) => void;
+}
+
+// ============================================================================
+// Helper: read raw request body
+// ============================================================================
+
+async function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise<string>((resolve) => {
+    let data = '';
+    req.on('data', (chunk: Buffer) => data += chunk.toString());
+    req.on('end', () => resolve(data));
+  });
+}
+
+// ============================================================================
+// Main request handler
+// ============================================================================
+
+export async function handleRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  // Security: Validate Host and Origin headers
+  if (!isRequestAllowed(req)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
+  }
+
+  // CORS headers — allow localhost and tunnel proxy origins
+  const origin = req.headers.origin;
+  if (origin && (
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin.startsWith('https://')
+  )) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url || '/', `http://localhost:${ctx.port}`);
+
+  try {
+    // =========================================================================
+    // NEW API ENDPOINTS (Spec 0090 - Tower as Single Daemon)
+    // =========================================================================
+
+    // Health check endpoint (Spec 0090 Phase 1)
+    if (req.method === 'GET' && url.pathname === '/health') {
+      return await handleHealthCheck(res);
+    }
+
+    // =========================================================================
+    // Tunnel Management Endpoints (Spec 0097 Phase 4)
+    // Also reachable from /project/<encoded>/api/tunnel/* (see project router)
+    // =========================================================================
+
+    if (url.pathname.startsWith('/api/tunnel/')) {
+      const tunnelSub = url.pathname.slice('/api/tunnel/'.length);
+      await handleTunnelEndpoint(req, res, tunnelSub);
+      return;
+    }
+
+    // API: List all projects (Spec 0090 Phase 1)
+    if (req.method === 'GET' && url.pathname === '/api/projects') {
+      return await handleListProjects(res);
+    }
+
+    // API: Project-specific endpoints (Spec 0090 Phase 1)
+    // Routes: /api/projects/:encodedPath/activate, /deactivate, /status
+    const projectApiMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/(activate|deactivate|status)$/);
+    if (projectApiMatch) {
+      return await handleProjectAction(req, res, ctx, projectApiMatch);
+    }
+
+    // =========================================================================
+    // TERMINAL API (Phase 2 - Spec 0090)
+    // =========================================================================
+
+    // POST /api/terminals - Create a new terminal
+    if (req.method === 'POST' && url.pathname === '/api/terminals') {
+      return await handleTerminalCreate(req, res, ctx);
+    }
+
+    // GET /api/terminals - List all terminals
+    if (req.method === 'GET' && url.pathname === '/api/terminals') {
+      return handleTerminalList(res);
+    }
+
+    // Terminal-specific routes: /api/terminals/:id/*
+    const terminalRouteMatch = url.pathname.match(/^\/api\/terminals\/([^/]+)(\/.*)?$/);
+    if (terminalRouteMatch) {
+      return await handleTerminalRoutes(req, res, url, terminalRouteMatch);
+    }
+
+    // =========================================================================
+    // EXISTING API ENDPOINTS
+    // =========================================================================
+
+    // API: Get status of all instances (legacy - kept for backward compat)
+    if (req.method === 'GET' && url.pathname === '/api/status') {
+      return await handleStatus(res);
+    }
+
+    // API: Server-Sent Events for push notifications
+    if (req.method === 'GET' && url.pathname === '/api/events') {
+      return handleSSEEvents(req, res, ctx);
+    }
+
+    // API: Receive notification from builder
+    if (req.method === 'POST' && url.pathname === '/api/notify') {
+      return await handleNotify(req, res, ctx);
+    }
+
+    // API: Browse directories for autocomplete
+    if (req.method === 'GET' && url.pathname === '/api/browse') {
+      return await handleBrowse(res, url);
+    }
+
+    // API: Create new project
+    if (req.method === 'POST' && url.pathname === '/api/create') {
+      return await handleCreateProject(req, res, ctx);
+    }
+
+    // API: Launch new instance
+    if (req.method === 'POST' && url.pathname === '/api/launch') {
+      return await handleLaunchInstance(req, res);
+    }
+
+    // API: Stop an instance
+    if (req.method === 'POST' && url.pathname === '/api/stop') {
+      return await handleStopInstance(req, res);
+    }
+
+    // Serve dashboard
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      return handleDashboard(res, ctx);
+    }
+
+    // Project routes: /project/:base64urlPath/*
+    // Phase 4 (Spec 0090): Tower serves React dashboard and handles APIs directly
+    if (url.pathname.startsWith('/project/')) {
+      return await handleProjectRoutes(req, res, ctx, url);
+    }
+
+    // 404 for everything else
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
+  } catch (err) {
+    ctx.log('ERROR', `Request error: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+// ============================================================================
+// Global route handlers
+// ============================================================================
+
+async function handleHealthCheck(res: http.ServerResponse): Promise<void> {
+  const instances = await getInstances();
+  const activeCount = instances.filter((i) => i.running).length;
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      status: 'healthy',
+      uptime: process.uptime(),
+      activeProjects: activeCount,
+      totalProjects: instances.length,
+      memoryUsage: process.memoryUsage().heapUsed,
+      timestamp: new Date().toISOString(),
+    })
+  );
+}
+
+async function handleListProjects(res: http.ServerResponse): Promise<void> {
+  const instances = await getInstances();
+  const projects = instances.map((i) => ({
+    path: i.projectPath,
+    name: i.projectName,
+    active: i.running,
+    proxyUrl: i.proxyUrl,
+    terminals: i.terminals.length,
+  }));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ projects }));
+}
+
+async function handleProjectAction(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  match: RegExpMatchArray,
+): Promise<void> {
+  const [, encodedPath, action] = match;
+  let projectPath: string;
+  try {
+    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+      throw new Error('Invalid path');
+    }
+    projectPath = normalizeProjectPath(projectPath);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
+    return;
+  }
+
+  // GET /api/projects/:path/status
+  if (req.method === 'GET' && action === 'status') {
+    const instances = await getInstances();
+    const instance = instances.find((i) => i.projectPath === projectPath);
+    if (!instance) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Project not found' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        path: instance.projectPath,
+        name: instance.projectName,
+        active: instance.running,
+        terminals: instance.terminals,
+        gateStatus: instance.gateStatus,
+      })
+    );
+    return;
+  }
+
+  // POST /api/projects/:path/activate
+  if (req.method === 'POST' && action === 'activate') {
+    // Rate limiting: 10 activations per minute per client
+    const clientIp = req.socket.remoteAddress || '127.0.0.1';
+    if (isRateLimited(clientIp)) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Too many activations, try again later' }));
+      return;
+    }
+
+    const result = await launchInstance(projectPath);
+    if (result.success) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, adopted: result.adopted }));
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: result.error }));
+    }
+    return;
+  }
+
+  // POST /api/projects/:path/deactivate
+  if (req.method === 'POST' && action === 'deactivate') {
+    const knownPaths = getKnownProjectPaths();
+    const resolvedPath = fs.existsSync(projectPath) ? fs.realpathSync(projectPath) : projectPath;
+    const isKnown = knownPaths.some(
+      (p) => p === projectPath || p === resolvedPath
+    );
+
+    if (!isKnown) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Project not found' }));
+      return;
+    }
+
+    const result = await stopInstance(projectPath);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+    return;
+  }
+}
+
+async function handleTerminalCreate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  try {
+    const body = await parseJsonBody(req);
+    const manager = getTerminalManager();
+
+    // Parse request fields
+    const command = typeof body.command === 'string' ? body.command : undefined;
+    const args = Array.isArray(body.args) ? body.args as string[] : undefined;
+    const cols = typeof body.cols === 'number' ? body.cols : undefined;
+    const rows = typeof body.rows === 'number' ? body.rows : undefined;
+    const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
+    const env = typeof body.env === 'object' && body.env !== null ? (body.env as Record<string, string>) : undefined;
+    const label = typeof body.label === 'string' ? body.label : undefined;
+
+    // Optional session persistence via shepherd
+    const projectPath = typeof body.projectPath === 'string' ? body.projectPath : null;
+    const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
+    const roleId = typeof body.roleId === 'string' ? body.roleId : null;
+    const requestPersistence = body.persistent === true;
+
+    let info: PtySessionInfo | undefined;
+    let persistent = false;
+
+    // Try shepherd if persistence was requested
+    const shepherdManager = ctx.getShepherdManager();
+    if (requestPersistence && shepherdManager && command && cwd) {
+      try {
+        const sessionId = crypto.randomUUID();
+        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
+        const sessionEnv = { ...(env || process.env) } as Record<string, string>;
+        delete sessionEnv['CLAUDECODE'];
+        const client = await shepherdManager.createSession({
+          sessionId,
+          command,
+          args: args || [],
+          cwd,
+          env: sessionEnv,
+          cols: cols || 200,
+          rows: 50,
+          restartOnExit: false,
+        });
+
+        const replayData = client.getReplayData() ?? Buffer.alloc(0);
+        const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+
+        const session = manager.createSessionRaw({
+          label: label || `terminal-${sessionId.slice(0, 8)}`,
+          cwd,
+        });
+        const ptySession = manager.getSession(session.id);
+        if (ptySession) {
+          ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+        }
+
+        info = session;
+        persistent = true;
+
+        if (projectPath && termType && roleId) {
+          const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+          if (termType === 'builder') {
+            entry.builders.set(roleId, session.id);
+          } else {
+            entry.shells.set(roleId, session.id);
+          }
+          saveTerminalSession(session.id, projectPath, termType, roleId, shepherdInfo.pid,
+            shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+          ctx.log('INFO', `Registered shepherd terminal ${session.id} as ${termType} "${roleId}" for project ${projectPath}`);
+        }
+      } catch (shepherdErr) {
+        ctx.log('WARN', `Shepherd creation failed for terminal, falling back: ${(shepherdErr as Error).message}`);
+      }
+    }
+
+    // Fallback: non-persistent session (graceful degradation per plan)
+    // Shepherd is the only persistence backend for new sessions.
+    if (!info) {
+      info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
+      persistent = false;
+
+      if (projectPath && termType && roleId) {
+        const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+        if (termType === 'builder') {
+          entry.builders.set(roleId, info.id);
+        } else {
+          entry.shells.set(roleId, info.id);
+        }
+        saveTerminalSession(info.id, projectPath, termType, roleId, info.pid);
+        ctx.log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shepherd unavailable)`);
+      }
+    }
+
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}`, persistent }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    ctx.log('ERROR', `Failed to create terminal: ${message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'INTERNAL_ERROR', message }));
+  }
+}
+
+function handleTerminalList(res: http.ServerResponse): void {
+  const manager = getTerminalManager();
+  const terminals = manager.listSessions();
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ terminals }));
+}
+
+async function handleTerminalRoutes(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  match: RegExpMatchArray,
+): Promise<void> {
+  const [, terminalId, subpath] = match;
+  const manager = getTerminalManager();
+
+  // GET /api/terminals/:id - Get terminal info
+  if (req.method === 'GET' && (!subpath || subpath === '')) {
+    const session = manager.getSession(terminalId);
+    if (!session) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(session.info));
+    return;
+  }
+
+  // DELETE /api/terminals/:id - Kill terminal (disable shepherd auto-restart if applicable)
+  if (req.method === 'DELETE' && (!subpath || subpath === '')) {
+    if (!(await killTerminalWithShepherd(manager, terminalId))) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+      return;
+    }
+
+    // TICK-001: Delete from SQLite
+    deleteTerminalSession(terminalId);
+
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // POST /api/terminals/:id/write - Write data to terminal (Spec 0104)
+  if (req.method === 'POST' && subpath === '/write') {
+    try {
+      const body = await parseJsonBody(req);
+      if (typeof body.data !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'data must be a string' }));
+        return;
+      }
+      const session = manager.getSession(terminalId);
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        return;
+      }
+      session.write(body.data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Invalid JSON body' }));
+    }
+    return;
+  }
+
+  // POST /api/terminals/:id/resize - Resize terminal
+  if (req.method === 'POST' && subpath === '/resize') {
+    try {
+      const body = await parseJsonBody(req);
+      if (typeof body.cols !== 'number' || typeof body.rows !== 'number') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'cols and rows must be numbers' }));
+        return;
+      }
+      const info = manager.resizeSession(terminalId, body.cols, body.rows);
+      if (!info) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(info));
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Invalid JSON body' }));
+    }
+    return;
+  }
+
+  // GET /api/terminals/:id/output - Get terminal output
+  if (req.method === 'GET' && subpath === '/output') {
+    const lines = parseInt(url.searchParams.get('lines') ?? '100', 10);
+    const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+    const output = manager.getOutput(terminalId, lines, offset);
+    if (!output) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(output));
+    return;
+  }
+}
+
+async function handleStatus(res: http.ServerResponse): Promise<void> {
+  const instances = await getInstances();
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ instances }));
+}
+
+function handleSSEEvents(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): void {
+  const clientId = crypto.randomBytes(8).toString('hex');
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  // Send initial connection event
+  res.write(`data: ${JSON.stringify({ type: 'connected', id: clientId })}\n\n`);
+
+  const client: SSEClient = { res, id: clientId };
+  ctx.addSseClient(client);
+
+  ctx.log('INFO', `SSE client connected: ${clientId}`);
+
+  // Clean up on disconnect
+  req.on('close', () => {
+    ctx.removeSseClient(clientId);
+    ctx.log('INFO', `SSE client disconnected: ${clientId}`);
+  });
+}
+
+async function handleNotify(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = await parseJsonBody(req);
+  const type = typeof body.type === 'string' ? body.type : 'info';
+  const title = typeof body.title === 'string' ? body.title : '';
+  const messageBody = typeof body.body === 'string' ? body.body : '';
+  const project = typeof body.project === 'string' ? body.project : undefined;
+
+  if (!title || !messageBody) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Missing title or body' }));
+    return;
+  }
+
+  // Broadcast to all connected SSE clients
+  ctx.broadcastNotification({
+    type,
+    title,
+    body: messageBody,
+    project,
+  });
+
+  ctx.log('INFO', `Notification broadcast: ${title}`);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ success: true }));
+}
+
+async function handleBrowse(res: http.ServerResponse, url: URL): Promise<void> {
+  const inputPath = url.searchParams.get('path') || '';
+
+  try {
+    const suggestions = await getDirectorySuggestions(inputPath);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ suggestions }));
+  } catch (err) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ suggestions: [], error: (err as Error).message }));
+  }
+}
+
+async function handleCreateProject(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = await parseJsonBody(req);
+  const parentPath = body.parent as string;
+  const projectName = body.name as string;
+
+  if (!parentPath || !projectName) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Missing parent or name' }));
+    return;
+  }
+
+  // Validate project name
+  if (!/^[a-zA-Z0-9_-]+$/.test(projectName)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Invalid project name' }));
+    return;
+  }
+
+  // Expand ~ to home directory
+  let expandedParent = parentPath;
+  if (expandedParent.startsWith('~')) {
+    expandedParent = expandedParent.replace('~', homedir());
+  }
+
+  // Validate parent exists
+  if (!fs.existsSync(expandedParent)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: `Parent directory does not exist: ${parentPath}` }));
+    return;
+  }
+
+  const projectPath = path.join(expandedParent, projectName);
+
+  // Check if project already exists
+  if (fs.existsSync(projectPath)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: `Directory already exists: ${projectPath}` }));
+    return;
+  }
+
+  try {
+    // Run codev init (it creates the directory)
+    execSync(`codev init --yes "${projectName}"`, {
+      cwd: expandedParent,
+      stdio: 'pipe',
+      timeout: 60000,
+    });
+
+    // Launch the instance
+    const launchResult = await launchInstance(projectPath);
+    if (!launchResult.success) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: launchResult.error }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, projectPath }));
+  } catch (err) {
+    // Clean up on failure
+    try {
+      if (fs.existsSync(projectPath)) {
+        fs.rmSync(projectPath, { recursive: true });
+      }
+    } catch {
+      // Ignore cleanup errors
+    }
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: `Failed to create project: ${(err as Error).message}` }));
+  }
+}
+
+async function handleLaunchInstance(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<void> {
+  const body = await parseJsonBody(req);
+  let projectPath = body.projectPath as string;
+
+  if (!projectPath) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
+    return;
+  }
+
+  // Expand ~ to home directory
+  if (projectPath.startsWith('~')) {
+    projectPath = projectPath.replace('~', homedir());
+  }
+
+  // Reject relative paths — tower daemon CWD is unpredictable
+  if (!path.isAbsolute(projectPath)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      success: false,
+      error: `Relative paths are not supported. Use an absolute path (e.g., /Users/.../project or ~/Development/project).`,
+    }));
+    return;
+  }
+
+  // Normalize path (resolve .. segments, trailing slashes)
+  projectPath = path.resolve(projectPath);
+
+  const result = await launchInstance(projectPath);
+  res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
+}
+
+async function handleStopInstance(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<void> {
+  const body = await parseJsonBody(req);
+  const targetPath = body.projectPath as string;
+
+  if (!targetPath) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Missing projectPath' }));
+    return;
+  }
+
+  const result = await stopInstance(targetPath);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result));
+}
+
+function handleDashboard(res: http.ServerResponse, ctx: RouteContext): void {
+  if (!ctx.templatePath) {
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Template not found. Make sure tower.html exists in agent-farm/templates/');
+    return;
+  }
+
+  try {
+    const template = fs.readFileSync(ctx.templatePath, 'utf-8');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(template);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Error loading template: ' + (err as Error).message);
+  }
+}
+
+// ============================================================================
+// Project-scoped route handler
+// ============================================================================
+
+async function handleProjectRoutes(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  url: URL,
+): Promise<void> {
+  const pathParts = url.pathname.split('/');
+  // ['', 'project', base64urlPath, ...rest]
+  const encodedPath = pathParts[2];
+  const subPath = pathParts.slice(3).join('/');
+
+  if (!encodedPath) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing project path' }));
+    return;
+  }
+
+  // Decode Base64URL (RFC 4648)
+  let projectPath: string;
+  try {
+    projectPath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    // Support both POSIX (/) and Windows (C:\) paths
+    if (!projectPath || (!projectPath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(projectPath))) {
+      throw new Error('Invalid project path');
+    }
+    // Normalize to resolve symlinks (e.g. /var/folders → /private/var/folders on macOS)
+    projectPath = normalizeProjectPath(projectPath);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Invalid project path encoding' }));
+    return;
+  }
+
+  // Phase 4 (Spec 0090): Tower handles everything directly
+  const isApiCall = subPath.startsWith('api/') || subPath === 'api';
+  const isWsPath = subPath.startsWith('ws/') || subPath === 'ws';
+
+  // Tunnel endpoints are tower-level, not project-scoped, but the React
+  // dashboard uses relative paths (./api/tunnel/...) which resolve to
+  // /project/<encoded>/api/tunnel/... in project context. Handle here by
+  // extracting the tunnel sub-path and dispatching to handleTunnelEndpoint().
+  if (subPath.startsWith('api/tunnel/')) {
+    const tunnelSub = subPath.slice('api/tunnel/'.length); // e.g. "status", "connect", "disconnect"
+    await handleTunnelEndpoint(req, res, tunnelSub);
+    return;
+  }
+
+  // GET /file?path=<relative-path> — Read project file by path (for StatusPanel project list)
+  if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
+    const relPath = url.searchParams.get('path')!;
+    const fullPath = path.resolve(projectPath, relPath);
+    // Security: ensure resolved path stays within project directory
+    if (!fullPath.startsWith(projectPath + path.sep) && fullPath !== projectPath) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+    try {
+      const content = fs.readFileSync(fullPath, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(content);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    }
+    return;
+  }
+
+  // Serve React dashboard static files directly if:
+  // 1. Not an API call
+  // 2. Not a WebSocket path
+  // 3. React dashboard is available
+  // 4. Project doesn't need to be running for static files
+  if (!isApiCall && !isWsPath && ctx.hasReactDashboard) {
+    // Determine which static file to serve
+    let staticPath: string;
+    if (!subPath || subPath === '' || subPath === 'index.html') {
+      staticPath = path.join(ctx.reactDashboardPath, 'index.html');
+    } else {
+      // Check if it's a static asset
+      staticPath = path.join(ctx.reactDashboardPath, subPath);
+    }
+
+    // Try to serve the static file
+    if (serveStaticFile(staticPath, res)) {
+      return;
+    }
+
+    // SPA fallback: serve index.html for client-side routing
+    const indexPath = path.join(ctx.reactDashboardPath, 'index.html');
+    if (serveStaticFile(indexPath, res)) {
+      return;
+    }
+  }
+
+  // Phase 4 (Spec 0090): Handle project APIs directly instead of proxying to dashboard-server
+  if (isApiCall) {
+    const apiPath = subPath.replace(/^api\/?/, '');
+
+    // GET /api/state - Return project state (architect, builders, shells)
+    if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
+      return handleProjectState(res, projectPath);
+    }
+
+    // POST /api/tabs/shell - Create a new shell terminal
+    if (req.method === 'POST' && apiPath === 'tabs/shell') {
+      return handleProjectShellCreate(res, ctx, projectPath);
+    }
+
+    // POST /api/tabs/file - Create a file tab (Spec 0092)
+    if (req.method === 'POST' && apiPath === 'tabs/file') {
+      return handleProjectFileTabCreate(req, res, ctx, projectPath);
+    }
+
+    // GET /api/file/:id - Get file content as JSON (Spec 0092)
+    const fileGetMatch = apiPath.match(/^file\/([^/]+)$/);
+    if (req.method === 'GET' && fileGetMatch) {
+      return handleProjectFileGet(res, ctx, projectPath, fileGetMatch[1]);
+    }
+
+    // GET /api/file/:id/raw - Get raw file content (for images/video) (Spec 0092)
+    const fileRawMatch = apiPath.match(/^file\/([^/]+)\/raw$/);
+    if (req.method === 'GET' && fileRawMatch) {
+      return handleProjectFileRaw(res, ctx, projectPath, fileRawMatch[1]);
+    }
+
+    // POST /api/file/:id/save - Save file content (Spec 0092)
+    const fileSaveMatch = apiPath.match(/^file\/([^/]+)\/save$/);
+    if (req.method === 'POST' && fileSaveMatch) {
+      return handleProjectFileSave(req, res, ctx, projectPath, fileSaveMatch[1]);
+    }
+
+    // DELETE /api/tabs/:id - Delete a terminal or file tab
+    const deleteMatch = apiPath.match(/^tabs\/(.+)$/);
+    if (req.method === 'DELETE' && deleteMatch) {
+      return handleProjectTabDelete(res, ctx, projectPath, deleteMatch[1]);
+    }
+
+    // POST /api/stop - Stop all terminals for project
+    if (req.method === 'POST' && apiPath === 'stop') {
+      return handleProjectStopAll(res, projectPath);
+    }
+
+    // GET /api/files - Return project directory tree for file browser (Spec 0092)
+    if (req.method === 'GET' && apiPath === 'files') {
+      return handleProjectFiles(res, url, projectPath);
+    }
+
+    // GET /api/git/status - Return git status for file browser (Spec 0092)
+    if (req.method === 'GET' && apiPath === 'git/status') {
+      return handleProjectGitStatus(res, ctx, projectPath);
+    }
+
+    // GET /api/files/recent - Return recently opened file tabs (Spec 0092)
+    if (req.method === 'GET' && apiPath === 'files/recent') {
+      return handleProjectRecentFiles(res, projectPath);
+    }
+
+    // GET /api/annotate/:tabId/* — Serve rich annotator template and sub-APIs
+    const annotateMatch = apiPath.match(/^annotate\/([^/]+)(\/(.*))?$/);
+    if (annotateMatch) {
+      return handleProjectAnnotate(req, res, ctx, url, projectPath, annotateMatch);
+    }
+
+    // Unhandled API route
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'API endpoint not found', path: apiPath }));
+    return;
+  }
+
+  // For WebSocket paths, let the upgrade handler deal with it
+  if (isWsPath) {
+    // WebSocket paths are handled by the upgrade handler
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('WebSocket connections should use ws:// protocol');
+    return;
+  }
+
+  // If we get here for non-API, non-WS paths and React dashboard is not available
+  if (!ctx.hasReactDashboard) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Dashboard not available');
+    return;
+  }
+
+  // Fallback for unmatched paths
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+}
+
+// ============================================================================
+// Project API sub-handlers
+// ============================================================================
+
+async function handleProjectState(
+  res: http.ServerResponse,
+  projectPath: string,
+): Promise<void> {
+  // Refresh cache via getTerminalsForProject (handles SQLite sync
+  // and shepherd reconnection in one place)
+  const encodedPath = Buffer.from(projectPath).toString('base64url');
+  const proxyUrl = `/project/${encodedPath}/`;
+  const { gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
+
+  // Now read from the refreshed cache
+  const entry = getProjectTerminalsEntry(projectPath);
+  const manager = getTerminalManager();
+  const state: {
+    architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
+    builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
+    utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
+    annotations: Array<{ id: string; file: string; port: number; pid: number }>;
+    projectName?: string;
+    gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
+  } = {
+    architect: null,
+    builders: [],
+    utils: [],
+    annotations: [],
+    projectName: path.basename(projectPath),
+    gateStatus,
+  };
+
+  // Add architect if exists
+  if (entry.architect) {
+    const session = manager.getSession(entry.architect);
+    if (session) {
+      state.architect = {
+        port: 0,
+        pid: session.pid || 0,
+        terminalId: entry.architect,
+        persistent: isSessionPersistent(entry.architect, session),
+      };
+    }
+  }
+
+  // Add shells from refreshed cache
+  for (const [shellId, terminalId] of entry.shells) {
+    const session = manager.getSession(terminalId);
+    if (session) {
+      state.utils.push({
+        id: shellId,
+        name: `Shell ${shellId.replace('shell-', '')}`,
+        port: 0,
+        pid: session.pid || 0,
+        terminalId,
+        persistent: isSessionPersistent(terminalId, session),
+      });
+    }
+  }
+
+  // Add builders from refreshed cache
+  for (const [builderId, terminalId] of entry.builders) {
+    const session = manager.getSession(terminalId);
+    if (session) {
+      state.builders.push({
+        id: builderId,
+        name: `Builder ${builderId}`,
+        port: 0,
+        pid: session.pid || 0,
+        status: 'running',
+        phase: '',
+        worktree: '',
+        branch: '',
+        type: 'spec',
+        terminalId,
+        persistent: isSessionPersistent(terminalId, session),
+      });
+    }
+  }
+
+  // Add file tabs (Spec 0092 - served through Tower, no separate ports)
+  for (const [tabId, tab] of entry.fileTabs) {
+    state.annotations.push({
+      id: tabId,
+      file: tab.path,
+      port: 0,  // No separate port - served through Tower
+      pid: 0,   // No separate process
+    });
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(state));
+}
+
+async function handleProjectShellCreate(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+): Promise<void> {
+  try {
+    const manager = getTerminalManager();
+    const shellId = getNextShellId(projectPath);
+    const shellCmd = process.env.SHELL || '/bin/bash';
+    const shellArgs: string[] = [];
+
+    let shellCreated = false;
+
+    // Try shepherd first for persistent shell session
+    const shepherdManager = ctx.getShepherdManager();
+    if (shepherdManager) {
+      try {
+        const sessionId = crypto.randomUUID();
+        // Strip CLAUDECODE so spawned Claude processes don't detect nesting
+        const shellEnv = { ...process.env } as Record<string, string>;
+        delete shellEnv['CLAUDECODE'];
+        const client = await shepherdManager.createSession({
+          sessionId,
+          command: shellCmd,
+          args: shellArgs,
+          cwd: projectPath,
+          env: shellEnv,
+          cols: 200,
+          rows: 50,
+          restartOnExit: false,
+        });
+
+        const replayData = client.getReplayData() ?? Buffer.alloc(0);
+        const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+
+        const session = manager.createSessionRaw({
+          label: `Shell ${shellId.replace('shell-', '')}`,
+          cwd: projectPath,
+        });
+        const ptySession = manager.getSession(session.id);
+        if (ptySession) {
+          ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+        }
+
+        const entry = getProjectTerminalsEntry(projectPath);
+        entry.shells.set(shellId, session.id);
+        saveTerminalSession(session.id, projectPath, 'shell', shellId, shepherdInfo.pid,
+          shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+
+        shellCreated = true;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: shellId,
+          port: 0,
+          name: `Shell ${shellId.replace('shell-', '')}`,
+          terminalId: session.id,
+          persistent: true,
+        }));
+      } catch (shepherdErr) {
+        ctx.log('WARN', `Shepherd creation failed for shell, falling back: ${(shepherdErr as Error).message}`);
+      }
+    }
+
+    // Fallback: non-persistent session (graceful degradation per plan)
+    // Shepherd is the only persistence backend for new sessions.
+    if (!shellCreated) {
+      const session = await manager.createSession({
+        command: shellCmd,
+        args: shellArgs,
+        cwd: projectPath,
+        label: `Shell ${shellId.replace('shell-', '')}`,
+        env: process.env as Record<string, string>,
+      });
+
+      const entry = getProjectTerminalsEntry(projectPath);
+      entry.shells.set(shellId, session.id);
+      saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid);
+      ctx.log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shepherd unavailable)`);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        id: shellId,
+        port: 0,
+        name: `Shell ${shellId.replace('shell-', '')}`,
+        terminalId: session.id,
+        persistent: false,
+      }));
+    }
+  } catch (err) {
+    ctx.log('ERROR', `Failed to create shell: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+async function handleProjectFileTabCreate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const { path: filePath, line, terminalId } = JSON.parse(body || '{}');
+
+    if (!filePath || typeof filePath !== 'string') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing path parameter' }));
+      return;
+    }
+
+    // Resolve path: use terminal's cwd for relative paths when terminalId is provided
+    let fullPath: string;
+    if (path.isAbsolute(filePath)) {
+      fullPath = filePath;
+    } else if (terminalId) {
+      const manager = getTerminalManager();
+      const session = manager.getSession(terminalId);
+      if (session) {
+        fullPath = path.join(session.cwd, filePath);
+      } else {
+        ctx.log('WARN', `Terminal session ${terminalId} not found, falling back to project root`);
+        fullPath = path.join(projectPath, filePath);
+      }
+    } else {
+      fullPath = path.join(projectPath, filePath);
+    }
+
+    // Security: symlink-aware containment check
+    // For non-existent files, resolve the parent directory to handle
+    // intermediate symlinks (e.g., /tmp -> /private/tmp on macOS).
+    let resolvedPath: string;
+    try {
+      resolvedPath = fs.realpathSync(fullPath);
+    } catch {
+      try {
+        resolvedPath = path.join(fs.realpathSync(path.dirname(fullPath)), path.basename(fullPath));
+      } catch {
+        resolvedPath = path.resolve(fullPath);
+      }
+    }
+
+    let normalizedProject: string;
+    try {
+      normalizedProject = fs.realpathSync(projectPath);
+    } catch {
+      normalizedProject = path.resolve(projectPath);
+    }
+
+    const isWithinProject = resolvedPath.startsWith(normalizedProject + path.sep)
+      || resolvedPath === normalizedProject;
+
+    if (!isWithinProject) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Path outside project' }));
+      return;
+    }
+
+    // Non-existent files still create a tab (spec 0101: file viewer shows "File not found")
+    const fileExists = fs.existsSync(fullPath);
+
+    const entry = getProjectTerminalsEntry(projectPath);
+
+    // Check if already open
+    for (const [id, tab] of entry.fileTabs) {
+      if (tab.path === fullPath) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id, existing: true, line, notFound: !fileExists }));
+        return;
+      }
+    }
+
+    // Create new file tab (write-through: in-memory + SQLite)
+    const id = `file-${crypto.randomUUID()}`;
+    const createdAt = Date.now();
+    entry.fileTabs.set(id, { id, path: fullPath, createdAt });
+    saveFileTab(id, projectPath, fullPath, createdAt);
+
+    ctx.log('INFO', `Created file tab: ${id} for ${path.basename(fullPath)}`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ id, existing: false, line, notFound: !fileExists }));
+  } catch (err) {
+    ctx.log('ERROR', `Failed to create file tab: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+function handleProjectFileGet(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+  tabId: string,
+): void {
+  const entry = getProjectTerminalsEntry(projectPath);
+  const tab = entry.fileTabs.get(tabId);
+
+  if (!tab) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'File tab not found' }));
+    return;
+  }
+
+  try {
+    const ext = path.extname(tab.path).slice(1).toLowerCase();
+    const isText = !['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'webm', 'mov', 'pdf'].includes(ext);
+
+    if (isText) {
+      const content = fs.readFileSync(tab.path, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        path: tab.path,
+        name: path.basename(tab.path),
+        content,
+        language: getLanguageForExt(ext),
+        isMarkdown: ext === 'md',
+        isImage: false,
+        isVideo: false,
+      }));
+    } else {
+      // For binary files, just return metadata
+      const stat = fs.statSync(tab.path);
+      const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+      const isVideo = ['mp4', 'webm', 'mov'].includes(ext);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        path: tab.path,
+        name: path.basename(tab.path),
+        content: null,
+        language: ext,
+        isMarkdown: false,
+        isImage,
+        isVideo,
+        size: stat.size,
+      }));
+    }
+  } catch (err) {
+    ctx.log('ERROR', `GET /api/file/:id failed: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+function handleProjectFileRaw(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+  tabId: string,
+): void {
+  const entry = getProjectTerminalsEntry(projectPath);
+  const tab = entry.fileTabs.get(tabId);
+
+  if (!tab) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'File tab not found' }));
+    return;
+  }
+
+  try {
+    const data = fs.readFileSync(tab.path);
+    const mimeType = getMimeTypeForFile(tab.path);
+    res.writeHead(200, {
+      'Content-Type': mimeType,
+      'Content-Length': data.length,
+      'Cache-Control': 'no-cache',
+    });
+    res.end(data);
+  } catch (err) {
+    ctx.log('ERROR', `GET /api/file/:id/raw failed: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+async function handleProjectFileSave(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+  tabId: string,
+): Promise<void> {
+  const entry = getProjectTerminalsEntry(projectPath);
+  const tab = entry.fileTabs.get(tabId);
+
+  if (!tab) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'File tab not found' }));
+    return;
+  }
+
+  try {
+    const body = await readBody(req);
+    const { content } = JSON.parse(body || '{}');
+
+    if (typeof content !== 'string') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing content parameter' }));
+      return;
+    }
+
+    fs.writeFileSync(tab.path, content, 'utf-8');
+    ctx.log('INFO', `Saved file: ${tab.path}`);
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true }));
+  } catch (err) {
+    ctx.log('ERROR', `POST /api/file/:id/save failed: ${(err as Error).message}`);
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: (err as Error).message }));
+  }
+}
+
+async function handleProjectTabDelete(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+  tabId: string,
+): Promise<void> {
+  const entry = getProjectTerminalsEntry(projectPath);
+  const manager = getTerminalManager();
+
+  // Check if it's a file tab first (Spec 0092, write-through: in-memory + SQLite)
+  if (tabId.startsWith('file-')) {
+    if (entry.fileTabs.has(tabId)) {
+      entry.fileTabs.delete(tabId);
+      deleteFileTab(tabId);
+      ctx.log('INFO', `Deleted file tab: ${tabId}`);
+      res.writeHead(204);
+      res.end();
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'File tab not found' }));
+    }
+    return;
+  }
+
+  // Find and delete the terminal
+  let terminalId: string | undefined;
+
+  if (tabId.startsWith('shell-')) {
+    terminalId = entry.shells.get(tabId);
+    if (terminalId) {
+      entry.shells.delete(tabId);
+    }
+  } else if (tabId.startsWith('builder-')) {
+    terminalId = entry.builders.get(tabId);
+    if (terminalId) {
+      entry.builders.delete(tabId);
+    }
+  } else if (tabId === 'architect') {
+    terminalId = entry.architect;
+    if (terminalId) {
+      entry.architect = undefined;
+    }
+  }
+
+  if (terminalId) {
+    // Disable shepherd auto-restart if applicable, then kill the PtySession
+    await killTerminalWithShepherd(manager, terminalId);
+
+    // TICK-001: Delete from SQLite
+    deleteTerminalSession(terminalId);
+
+    res.writeHead(204);
+    res.end();
+  } else {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Tab not found' }));
+  }
+}
+
+async function handleProjectStopAll(
+  res: http.ServerResponse,
+  projectPath: string,
+): Promise<void> {
+  const entry = getProjectTerminalsEntry(projectPath);
+  const manager = getTerminalManager();
+
+  // Kill all terminals (disable shepherd auto-restart if applicable)
+  if (entry.architect) {
+    await killTerminalWithShepherd(manager, entry.architect);
+  }
+  for (const terminalId of entry.shells.values()) {
+    await killTerminalWithShepherd(manager, terminalId);
+  }
+  for (const terminalId of entry.builders.values()) {
+    await killTerminalWithShepherd(manager, terminalId);
+  }
+
+  // Clear registry
+  getProjectTerminals().delete(projectPath);
+
+  // TICK-001: Delete all terminal sessions from SQLite
+  deleteProjectTerminalSessions(projectPath);
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: true }));
+}
+
+function handleProjectFiles(
+  res: http.ServerResponse,
+  url: URL,
+  projectPath: string,
+): void {
+  const maxDepth = parseInt(url.searchParams.get('depth') || '3', 10);
+  const ignore = new Set(['.git', 'node_modules', '.builders', 'dist', '.agent-farm', '.next', '.cache', '__pycache__']);
+
+  function readTree(dir: string, depth: number): Array<{ name: string; path: string; type: 'file' | 'directory'; children?: Array<unknown> }> {
+    if (depth <= 0) return [];
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      return entries
+        .filter(e => !e.name.startsWith('.') || e.name === '.env.example')
+        .filter(e => !ignore.has(e.name))
+        .sort((a, b) => {
+          // Directories first, then alphabetical
+          if (a.isDirectory() && !b.isDirectory()) return -1;
+          if (!a.isDirectory() && b.isDirectory()) return 1;
+          return a.name.localeCompare(b.name);
+        })
+        .map(e => {
+          const fullPath = path.join(dir, e.name);
+          const relativePath = path.relative(projectPath, fullPath);
+          if (e.isDirectory()) {
+            return { name: e.name, path: relativePath, type: 'directory' as const, children: readTree(fullPath, depth - 1) };
+          }
+          return { name: e.name, path: relativePath, type: 'file' as const };
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  const tree = readTree(projectPath, maxDepth);
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(tree));
+}
+
+function handleProjectGitStatus(
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  projectPath: string,
+): void {
+  try {
+    // Get git status in porcelain format for parsing
+    const result = execSync('git status --porcelain', {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    // Parse porcelain output: XY filename
+    // X = staging area status, Y = working tree status
+    const modified: string[] = [];
+    const staged: string[] = [];
+    const untracked: string[] = [];
+
+    for (const line of result.split('\n')) {
+      if (!line) continue;
+      const x = line[0]; // staging area
+      const y = line[1]; // working tree
+      const filepath = line.slice(3);
+
+      if (x === '?' && y === '?') {
+        untracked.push(filepath);
+      } else {
+        if (x !== ' ' && x !== '?') {
+          staged.push(filepath);
+        }
+        if (y !== ' ' && y !== '?') {
+          modified.push(filepath);
+        }
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ modified, staged, untracked }));
+  } catch (err) {
+    // Not a git repo or git command failed — return graceful degradation with error field
+    ctx.log('WARN', `GET /api/git/status failed: ${(err as Error).message}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ modified: [], staged: [], untracked: [], error: (err as Error).message }));
+  }
+}
+
+function handleProjectRecentFiles(
+  res: http.ServerResponse,
+  projectPath: string,
+): void {
+  const entry = getProjectTerminalsEntry(projectPath);
+
+  // Get all file tabs sorted by creation time (most recent first)
+  const recentFiles = Array.from(entry.fileTabs.values())
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 10)  // Limit to 10 most recent
+    .map(tab => ({
+      id: tab.id,
+      path: tab.path,
+      name: path.basename(tab.path),
+      relativePath: path.relative(projectPath, tab.path),
+    }));
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(recentFiles));
+}
+
+function handleProjectAnnotate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  ctx: RouteContext,
+  url: URL,
+  projectPath: string,
+  annotateMatch: RegExpMatchArray,
+): void {
+  const tabId = annotateMatch[1];
+  const subRoute = annotateMatch[3] || '';
+  const entry = getProjectTerminalsEntry(projectPath);
+  const tab = entry.fileTabs.get(tabId);
+
+  if (!tab) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'File tab not found' }));
+    return;
+  }
+
+  const filePath = tab.path;
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+  const isVideo = ['mp4', 'webm', 'mov'].includes(ext);
+  const is3D = ['stl', '3mf'].includes(ext);
+  const isPdf = ext === 'pdf';
+  const isMarkdown = ext === 'md';
+
+  // Sub-route: GET /file — re-read file content from disk
+  if (req.method === 'GET' && subRoute === 'file') {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(content);
+    } catch (err) {
+      ctx.log('ERROR', `GET /api/annotate/:id/file failed: ${(err as Error).message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
+    return;
+  }
+
+  // Sub-route: POST /save — save file content
+  if (req.method === 'POST' && subRoute === 'save') {
+    // Note: async body reading handled via callback pattern since this function is sync
+    let data = '';
+    req.on('data', (chunk: Buffer) => data += chunk.toString());
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(data || '{}');
+        const fileContent = parsed.content;
+        if (typeof fileContent !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('Missing content');
+          return;
+        }
+        fs.writeFileSync(filePath, fileContent, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        ctx.log('ERROR', `POST /api/annotate/:id/save failed: ${(err as Error).message}`);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
+    });
+    return;
+  }
+
+  // Sub-route: GET /api/mtime — file modification time
+  if (req.method === 'GET' && subRoute === 'api/mtime') {
+    try {
+      const stat = fs.statSync(filePath);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mtime: stat.mtimeMs }));
+    } catch (err) {
+      ctx.log('ERROR', `GET /api/annotate/:id/api/mtime failed: ${(err as Error).message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
+    return;
+  }
+
+  // Sub-route: GET /api/image, /api/video, /api/model, /api/pdf — raw binary content
+  if (req.method === 'GET' && (subRoute === 'api/image' || subRoute === 'api/video' || subRoute === 'api/model' || subRoute === 'api/pdf')) {
+    try {
+      const data = fs.readFileSync(filePath);
+      const mimeType = getMimeTypeForFile(filePath);
+      res.writeHead(200, {
+        'Content-Type': mimeType,
+        'Content-Length': data.length,
+        'Cache-Control': 'no-cache',
+      });
+      res.end(data);
+    } catch (err) {
+      ctx.log('ERROR', `GET /api/annotate/:id/${subRoute} failed: ${(err as Error).message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
+    return;
+  }
+
+  // Default: serve the annotator HTML template
+  if (req.method === 'GET' && (subRoute === '' || subRoute === undefined)) {
+    try {
+      const templateFile = is3D ? '3d-viewer.html' : 'open.html';
+      const tplPath = path.resolve(__dirname, `../../../templates/${templateFile}`);
+      let html = fs.readFileSync(tplPath, 'utf-8');
+
+      const fileName = path.basename(filePath);
+      const fileSize = fs.statSync(filePath).size;
+
+      if (is3D) {
+        html = html.replace(/\{\{FILE\}\}/g, fileName);
+        html = html.replace(/\{\{FILE_PATH_JSON\}\}/g, JSON.stringify(filePath));
+        html = html.replace(/\{\{FORMAT\}\}/g, ext);
+      } else {
+        html = html.replace(/\{\{FILE\}\}/g, fileName);
+        html = html.replace(/\{\{FILE_PATH\}\}/g, filePath);
+        html = html.replace(/\{\{BUILDER_ID\}\}/g, '');
+        html = html.replace(/\{\{LANG\}\}/g, getLanguageForExt(ext));
+        html = html.replace(/\{\{IS_MARKDOWN\}\}/g, String(isMarkdown));
+        html = html.replace(/\{\{IS_IMAGE\}\}/g, String(isImage));
+        html = html.replace(/\{\{IS_VIDEO\}\}/g, String(isVideo));
+        html = html.replace(/\{\{IS_PDF\}\}/g, String(isPdf));
+        html = html.replace(/\{\{FILE_SIZE\}\}/g, String(fileSize));
+
+        // Inject initialization script (template loads content via fetch)
+        let initScript: string;
+        if (isImage) {
+          initScript = `initImage(${fileSize});`;
+        } else if (isVideo) {
+          initScript = `initVideo(${fileSize});`;
+        } else if (isPdf) {
+          initScript = `initPdf(${fileSize});`;
+        } else {
+          initScript = `fetch('file').then(r=>r.text()).then(init);`;
+        }
+        html = html.replace('// FILE_CONTENT will be injected by the server', initScript);
+      }
+
+      // Handle ?line= query param for scroll-to-line
+      const lineParam = url.searchParams.get('line');
+      if (lineParam) {
+        const scrollScript = `<script>window.addEventListener('load',()=>{setTimeout(()=>{const el=document.querySelector('[data-line="${lineParam}"]');if(el){el.scrollIntoView({block:'center'});el.classList.add('highlighted-line');}},200);})</script>`;
+        html = html.replace('</body>', `${scrollScript}</body>`);
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end(`Failed to serve annotator: ${(err as Error).message}`);
+    }
+    return;
+  }
+}
