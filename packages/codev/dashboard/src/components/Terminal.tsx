@@ -324,42 +324,31 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       term.write('\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n');
     };
 
-    // Mobile IME deduplication: On mobile browsers, all keyboard input
-    // goes through IME composition. Some browsers fire both input and
-    // compositionend events, causing xterm.js to emit onData twice for
-    // the same keystroke. Track composition state and deduplicate.
-    const textarea = term.textarea;
-    let imeActive = false;
-    let imeResetTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastImeData = '';
-    let lastImeTime = 0;
-
-    const onCompositionStart = () => { imeActive = true; };
-    const onCompositionEnd = () => {
-      // Keep imeActive true briefly so the dedup window covers both
-      // the compositionend-triggered and input-triggered onData calls.
-      if (imeResetTimer) clearTimeout(imeResetTimer);
-      imeResetTimer = setTimeout(() => { imeActive = false; }, 100);
-    };
-
-    if (textarea) {
-      textarea.addEventListener('compositionstart', onCompositionStart);
-      textarea.addEventListener('compositionend', onCompositionEnd);
-    }
+    // Mobile input deduplication: On mobile browsers, keyboard input goes
+    // through IME composition. Browsers can fire both compositionend and
+    // input events, causing xterm.js to emit onData twice for the same
+    // keystroke. Near line wraps, duplicates can arrive well after the
+    // composition ends, so we always dedup on mobile (not just during
+    // active composition). The 150ms window is short enough to not
+    // interfere with intentional rapid typing.
+    const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    let lastSentData = '';
+    let lastSentTime = 0;
 
     // Send user input to the PTY
     term.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
 
-      // During IME composition, skip exact duplicate onData calls
-      // that arrive within 100ms (caused by double event dispatch).
-      if (imeActive) {
+      // On mobile, skip exact duplicate onData calls within 150ms.
+      // Line wraps can cause delayed duplicates that outlast the old
+      // 100ms IME-only window.
+      if (isMobileDevice) {
         const now = Date.now();
-        if (data === lastImeData && now - lastImeTime < 100) {
+        if (data === lastSentData && now - lastSentTime < 150) {
           return;
         }
-        lastImeData = data;
-        lastImeTime = now;
+        lastSentData = data;
+        lastSentTime = now;
       }
 
       // During initial handshake, filter automatic terminal responses
@@ -442,11 +431,6 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
-      if (imeResetTimer) clearTimeout(imeResetTimer);
-      if (textarea) {
-        textarea.removeEventListener('compositionstart', onCompositionStart);
-        textarea.removeEventListener('compositionend', onCompositionEnd);
-      }
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
       containerRef.current?.removeEventListener('paste', onNativePaste);
