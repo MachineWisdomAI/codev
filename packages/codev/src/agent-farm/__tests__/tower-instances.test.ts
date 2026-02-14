@@ -1,0 +1,540 @@
+/**
+ * Unit tests for tower-instances.ts (Spec 0105 Phase 3)
+ *
+ * Tests: registerKnownProject, getKnownProjectPaths, getInstances,
+ * getDirectorySuggestions, launchInstance, killTerminalWithShepherd, stopInstance,
+ * initInstances / shutdownInstances lifecycle.
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import {
+  initInstances,
+  shutdownInstances,
+  registerKnownProject,
+  getKnownProjectPaths,
+  getInstances,
+  getDirectorySuggestions,
+  launchInstance,
+  killTerminalWithShepherd,
+  stopInstance,
+  type InstanceDeps,
+} from '../servers/tower-instances.js';
+
+// ---------------------------------------------------------------------------
+// Mocks (vi.hoisted ensures these exist before vi.mock factories run)
+// ---------------------------------------------------------------------------
+
+const {
+  mockDbPrepare,
+  mockDbRun,
+  mockDbAll,
+  mockGetGateStatusForProject,
+  mockIsTempDirectory,
+} = vi.hoisted(() => {
+  const mockDbRun = vi.fn();
+  const mockDbAll = vi.fn().mockReturnValue([]);
+  const mockDbPrepare = vi.fn().mockReturnValue({ run: mockDbRun, all: mockDbAll });
+  return {
+    mockDbPrepare,
+    mockDbRun,
+    mockDbAll,
+    mockGetGateStatusForProject: vi.fn().mockReturnValue(null),
+    mockIsTempDirectory: vi.fn().mockReturnValue(false),
+  };
+});
+
+vi.mock('../db/index.js', () => ({
+  getGlobalDb: () => ({ prepare: mockDbPrepare }),
+}));
+
+vi.mock('../utils/gate-status.js', () => ({
+  getGateStatusForProject: (...args: unknown[]) => mockGetGateStatusForProject(...args),
+}));
+
+vi.mock('../servers/tower-utils.js', async () => {
+  const actual = await vi.importActual<typeof import('../servers/tower-utils.js')>('../servers/tower-utils.js');
+  return {
+    ...actual,
+    isTempDirectory: (...args: unknown[]) => mockIsTempDirectory(...args),
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
+  return {
+    log: vi.fn(),
+    projectTerminals: new Map(),
+    getTerminalManager: vi.fn().mockReturnValue({
+      getSession: vi.fn(),
+      killSession: vi.fn(),
+      createSession: vi.fn(),
+      createSessionRaw: vi.fn(),
+      listSessions: vi.fn().mockReturnValue([]),
+    }),
+    shepherdManager: null,
+    getProjectTerminalsEntry: vi.fn().mockReturnValue({
+      architect: undefined,
+      builders: new Map(),
+      shells: new Map(),
+    }),
+    saveTerminalSession: vi.fn(),
+    deleteTerminalSession: vi.fn(),
+    deleteProjectTerminalSessions: vi.fn(),
+    getTerminalsForProject: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('tower-instances', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    shutdownInstances();
+  });
+
+  // =========================================================================
+  // initInstances / shutdownInstances lifecycle
+  // =========================================================================
+
+  describe('initInstances / shutdownInstances', () => {
+    it('shutdownInstances is safe to call without prior init', () => {
+      expect(() => shutdownInstances()).not.toThrow();
+    });
+
+    it('initInstances sets up module state', () => {
+      const deps = makeDeps();
+      initInstances(deps);
+      // Verify by calling a function that requires initialization
+      expect(() => getKnownProjectPaths()).not.toThrow();
+    });
+
+    it('subsequent init replaces previous deps', () => {
+      const deps1 = makeDeps();
+      const deps2 = makeDeps();
+      initInstances(deps1);
+      initInstances(deps2);
+      shutdownInstances();
+      // No error means it worked
+    });
+  });
+
+  // =========================================================================
+  // registerKnownProject
+  // =========================================================================
+
+  describe('registerKnownProject', () => {
+    it('inserts project into known_projects table', () => {
+      registerKnownProject('/home/user/my-project');
+
+      expect(mockDbPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO known_projects'));
+      expect(mockDbRun).toHaveBeenCalledWith('/home/user/my-project', 'my-project');
+    });
+
+    it('handles database errors gracefully', () => {
+      mockDbPrepare.mockImplementationOnce(() => { throw new Error('DB error'); });
+
+      // Should not throw
+      expect(() => registerKnownProject('/some/path')).not.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // getKnownProjectPaths
+  // =========================================================================
+
+  describe('getKnownProjectPaths', () => {
+    it('returns empty array when no projects exist', () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const paths = getKnownProjectPaths();
+      expect(paths).toEqual([]);
+    });
+
+    it('includes paths from known_projects table', () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      // First call returns known_projects, second returns terminal_sessions
+      mockDbAll
+        .mockReturnValueOnce([{ project_path: '/path/a' }])
+        .mockReturnValueOnce([]);
+
+      const paths = getKnownProjectPaths();
+      expect(paths).toContain('/path/a');
+    });
+
+    it('includes paths from in-memory projectTerminals', () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/path/b', { architect: undefined, builders: new Map(), shells: new Map() });
+      const deps = makeDeps({ projectTerminals });
+      initInstances(deps);
+
+      const paths = getKnownProjectPaths();
+      expect(paths).toContain('/path/b');
+    });
+
+    it('deduplicates paths across sources', () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/path/c', { architect: undefined, builders: new Map(), shells: new Map() });
+      const deps = makeDeps({ projectTerminals });
+      initInstances(deps);
+
+      // Both DB tables return the same path
+      mockDbAll
+        .mockReturnValueOnce([{ project_path: '/path/c' }])
+        .mockReturnValueOnce([{ project_path: '/path/c' }]);
+
+      const paths = getKnownProjectPaths();
+      // Should appear only once
+      expect(paths.filter(p => p === '/path/c')).toHaveLength(1);
+    });
+
+    it('handles database errors gracefully', () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      mockDbPrepare.mockImplementation(() => { throw new Error('DB error'); });
+
+      // Should not throw, returns whatever is in memory
+      expect(() => getKnownProjectPaths()).not.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // getInstances
+  // =========================================================================
+
+  describe('getInstances', () => {
+    it('returns empty array when called before initInstances (startup guard)', async () => {
+      const instances = await getInstances();
+      expect(instances).toEqual([]);
+    });
+
+    it('returns empty array when no projects known', async () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const instances = await getInstances();
+      expect(instances).toEqual([]);
+    });
+
+    it('skips builder worktrees', async () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/home/user/project/.builders/001', {
+        architect: undefined, builders: new Map(), shells: new Map(),
+      });
+      const deps = makeDeps({ projectTerminals });
+      initInstances(deps);
+
+      const instances = await getInstances();
+      expect(instances).toEqual([]);
+    });
+
+    it('skips non-existent directories', async () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/nonexistent/path/project', {
+        architect: undefined, builders: new Map(), shells: new Map(),
+      });
+      const deps = makeDeps({ projectTerminals });
+      initInstances(deps);
+
+      const instances = await getInstances();
+      expect(instances).toEqual([]);
+    });
+
+    it('returns instances sorted: running first, then by name', async () => {
+      // Create a temp dir that actually exists so it passes the existsSync check
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-a-'));
+      const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-test-b-'));
+
+      try {
+        const projectTerminals = new Map();
+        projectTerminals.set(tmpDir, {
+          architect: undefined, builders: new Map(), shells: new Map(),
+        });
+        projectTerminals.set(tmpDir2, {
+          architect: undefined, builders: new Map(), shells: new Map(),
+        });
+
+        const getTerminalsForProject = vi.fn()
+          .mockResolvedValueOnce({ terminals: [], gateStatus: null })  // tmpDir: inactive
+          .mockResolvedValueOnce({ terminals: [{ id: 't1' }], gateStatus: null });  // tmpDir2: active
+
+        const deps = makeDeps({ projectTerminals, getTerminalsForProject });
+        initInstances(deps);
+
+        const instances = await getInstances();
+        expect(instances.length).toBe(2);
+        // Active instance should come first
+        expect(instances[0].running).toBe(true);
+        expect(instances[1].running).toBe(false);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+        fs.rmSync(tmpDir2, { recursive: true });
+      }
+    });
+  });
+
+  // =========================================================================
+  // getDirectorySuggestions (pure — no module state needed)
+  // =========================================================================
+
+  describe('getDirectorySuggestions', () => {
+    it('returns empty for relative paths', async () => {
+      const suggestions = await getDirectorySuggestions('relative/path');
+      expect(suggestions).toEqual([]);
+    });
+
+    it('returns empty for non-existent directory', async () => {
+      const suggestions = await getDirectorySuggestions('/nonexistent/path/abc123xyz');
+      expect(suggestions).toEqual([]);
+    });
+
+    it('expands ~ to home directory', async () => {
+      // We can test that it doesn't crash; the home dir should exist
+      const suggestions = await getDirectorySuggestions('~/');
+      expect(Array.isArray(suggestions)).toBe(true);
+    });
+
+    it('defaults empty input to home directory', async () => {
+      const suggestions = await getDirectorySuggestions('');
+      expect(Array.isArray(suggestions)).toBe(true);
+    });
+
+    it('filters by prefix when path does not end with /', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-suggest-'));
+      fs.mkdirSync(path.join(tmpDir, 'alpha'));
+      fs.mkdirSync(path.join(tmpDir, 'beta'));
+
+      try {
+        const suggestions = await getDirectorySuggestions(path.join(tmpDir, 'al'));
+        expect(suggestions).toHaveLength(1);
+        expect(suggestions[0].path).toContain('alpha');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('limits results to 20', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-limit-'));
+      for (let i = 0; i < 25; i++) {
+        fs.mkdirSync(path.join(tmpDir, `dir-${String(i).padStart(2, '0')}`));
+      }
+
+      try {
+        const suggestions = await getDirectorySuggestions(tmpDir + '/');
+        expect(suggestions.length).toBeLessThanOrEqual(20);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+
+    it('skips hidden directories', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-hidden-'));
+      fs.mkdirSync(path.join(tmpDir, '.hidden'));
+      fs.mkdirSync(path.join(tmpDir, 'visible'));
+
+      try {
+        const suggestions = await getDirectorySuggestions(tmpDir + '/');
+        expect(suggestions).toHaveLength(1);
+        expect(suggestions[0].path).toContain('visible');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+  });
+
+  // =========================================================================
+  // launchInstance
+  // =========================================================================
+
+  describe('launchInstance', () => {
+    it('returns error when called before initInstances (startup guard)', async () => {
+      const result = await launchInstance('/some/path');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/still starting/i);
+    });
+
+    it('returns error for non-existent path', async () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const result = await launchInstance('/nonexistent/path/abc123');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/does not exist/);
+    });
+
+    it('returns error for file path (not directory)', async () => {
+      const tmpFile = path.join(os.tmpdir(), `tower-test-file-${Date.now()}`);
+      fs.writeFileSync(tmpFile, 'test');
+
+      try {
+        const deps = makeDeps();
+        initInstances(deps);
+
+        const result = await launchInstance(tmpFile);
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/Not a directory/);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    it('returns success for valid directory with codev/', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-launch-'));
+      fs.mkdirSync(path.join(tmpDir, 'codev'));
+
+      try {
+        const deps = makeDeps();
+        initInstances(deps);
+
+        const result = await launchInstance(tmpDir);
+        expect(result.success).toBe(true);
+        expect(result.adopted).toBeFalsy();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true });
+      }
+    });
+  });
+
+  // =========================================================================
+  // killTerminalWithShepherd
+  // =========================================================================
+
+  describe('killTerminalWithShepherd', () => {
+    it('returns false when module is not initialized', async () => {
+      const manager = { getSession: vi.fn(), killSession: vi.fn() } as any;
+      const result = await killTerminalWithShepherd(manager, 'term-1');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when session does not exist', async () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const manager = { getSession: vi.fn().mockReturnValue(null), killSession: vi.fn() } as any;
+      const result = await killTerminalWithShepherd(manager, 'term-1');
+      expect(result).toBe(false);
+    });
+
+    it('kills session without shepherd for non-shepherd sessions', async () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const manager = {
+        getSession: vi.fn().mockReturnValue({ shepherdBacked: false }),
+        killSession: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await killTerminalWithShepherd(manager, 'term-1');
+      expect(result).toBe(true);
+      expect(manager.killSession).toHaveBeenCalledWith('term-1');
+    });
+
+    it('calls shepherdManager.killSession for shepherd-backed sessions', async () => {
+      const mockShepherdKill = vi.fn();
+      const deps = makeDeps({
+        shepherdManager: { killSession: mockShepherdKill } as any,
+      });
+      initInstances(deps);
+
+      const manager = {
+        getSession: vi.fn().mockReturnValue({
+          shepherdBacked: true,
+          shepherdSessionId: 'shep-1',
+        }),
+        killSession: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await killTerminalWithShepherd(manager, 'term-1');
+      expect(result).toBe(true);
+      expect(mockShepherdKill).toHaveBeenCalledWith('shep-1');
+      expect(manager.killSession).toHaveBeenCalledWith('term-1');
+    });
+  });
+
+  // =========================================================================
+  // stopInstance
+  // =========================================================================
+
+  describe('stopInstance', () => {
+    it('returns error when called before initInstances (startup guard)', async () => {
+      const result = await stopInstance('/some/path');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/still starting/i);
+      expect(result.stopped).toEqual([]);
+    });
+
+    it('returns success with empty stopped when no terminals found', async () => {
+      const deps = makeDeps();
+      initInstances(deps);
+
+      const result = await stopInstance('/some/path');
+      expect(result.success).toBe(true);
+      expect(result.stopped).toEqual([]);
+      expect(result.error).toMatch(/No terminals found/);
+    });
+
+    it('kills all terminals for a project', async () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/project/path', {
+        architect: 'arch-1',
+        builders: new Map([['b1', 'build-1']]),
+        shells: new Map([['s1', 'shell-1']]),
+      });
+
+      const mockManager = {
+        getSession: vi.fn().mockReturnValue({ pid: 42, shepherdBacked: false }),
+        killSession: vi.fn().mockReturnValue(true),
+      };
+
+      const deps = makeDeps({
+        projectTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      initInstances(deps);
+
+      const result = await stopInstance('/project/path');
+      expect(result.success).toBe(true);
+      expect(result.stopped).toHaveLength(3); // architect + builder + shell
+      expect(mockManager.killSession).toHaveBeenCalledTimes(3);
+      expect(deps.deleteProjectTerminalSessions).toHaveBeenCalled();
+    });
+
+    it('clears project from registry after stop', async () => {
+      const projectTerminals = new Map();
+      projectTerminals.set('/project/path', {
+        architect: 'arch-1',
+        builders: new Map(),
+        shells: new Map(),
+      });
+
+      const mockManager = {
+        getSession: vi.fn().mockReturnValue({ pid: 42, shepherdBacked: false }),
+        killSession: vi.fn().mockReturnValue(true),
+      };
+
+      const deps = makeDeps({
+        projectTerminals,
+        getTerminalManager: vi.fn().mockReturnValue(mockManager) as any,
+      });
+      initInstances(deps);
+
+      await stopInstance('/project/path');
+      expect(projectTerminals.has('/project/path')).toBe(false);
+    });
+  });
+});
