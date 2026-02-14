@@ -1,6 +1,6 @@
 # Agent Farm CLI Reference
 
-The `agent-farm` CLI (`af`) orchestrates multi-agent development with git worktrees, tmux sessions, and a web dashboard.
+The `agent-farm` CLI (`af`) orchestrates multi-agent development with git worktrees, persistent terminal sessions, and a web dashboard.
 
 ## Installation
 

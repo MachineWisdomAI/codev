@@ -9,7 +9,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
@@ -29,7 +29,7 @@ import { TerminalManager } from '../../terminal/pty-manager.js';
 import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protocol.js';
 import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
 import { readCloudConfig, getCloudConfigPath, maskApiKey, type CloudConfig } from '../lib/cloud-config.js';
-import { parseTmuxSessionName, type ParsedTmuxSession } from '../utils/session.js';
+import { SessionManager, type ReconnectRestartOptions } from '../../terminal/session-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -380,7 +380,9 @@ interface DbTerminalSession {
   type: 'architect' | 'builder' | 'shell';
   role_id: string | null;
   pid: number | null;
-  tmux_session: string | null;
+  shepherd_socket: string | null;
+  shepherd_pid: number | null;
+  shepherd_start_time: number | null;
   created_at: string;
 }
 
@@ -407,7 +409,9 @@ function saveTerminalSession(
   type: 'architect' | 'builder' | 'shell',
   roleId: string | null,
   pid: number | null,
-  tmuxSession: string | null
+  shepherdSocket: string | null = null,
+  shepherdPid: number | null = null,
+  shepherdStartTime: number | null = null,
 ): void {
   try {
     const normalizedPath = normalizeProjectPath(projectPath);
@@ -421,13 +425,21 @@ function saveTerminalSession(
 
     const db = getGlobalDb();
     db.prepare(`
-      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(terminalId, normalizedPath, type, roleId, pid, tmuxSession);
+      INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(terminalId, normalizedPath, type, roleId, pid, shepherdSocket, shepherdPid, shepherdStartTime);
     log('INFO', `Saved terminal session to SQLite: ${terminalId} (${type}) for ${path.basename(normalizedPath)}`);
   } catch (err) {
     log('WARN', `Failed to save terminal session: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Check if a terminal session is persistent (shepherd-backed).
+ * A session is persistent if it can survive a Tower restart.
+ */
+function isSessionPersistent(_terminalId: string, session: PtySession): boolean {
+  return session.shepherdBacked;
 }
 
 /**
@@ -500,112 +512,8 @@ function loadFileTabsForProject(projectPath: string): Map<string, FileTab> {
   return new Map<string, FileTab>();
 }
 
-// Whether tmux is available on this system (checked once at startup)
-let tmuxAvailable = false;
-
-/**
- * Check if tmux is installed and available
- */
-function checkTmux(): boolean {
-  try {
-    execSync('tmux -V', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Sanitize a tmux session name to match what tmux actually creates.
- * tmux replaces dots with underscores and strips colons from session names.
- * Without this, stored names won't match actual tmux session names,
- * causing reconnection to fail (e.g., "builder-codevos.ai-0001" vs "builder-codevos_ai-0001").
- */
-function sanitizeTmuxSessionName(name: string): string {
-  return name.replace(/\./g, '_').replace(/:/g, '');
-}
-
-/**
- * Create a tmux session with the given command.
- * Returns the sanitized session name if created successfully, null on failure.
- * Session names are sanitized to match tmux behavior (dots → underscores, colons stripped).
- */
-function createTmuxSession(
-  sessionName: string,
-  command: string,
-  args: string[],
-  cwd: string,
-  cols: number,
-  rows: number
-): string | null {
-  // Sanitize to match what tmux actually creates (dots → underscores, colons stripped)
-  sessionName = sanitizeTmuxSessionName(sessionName);
-
-  // Kill any stale session with this name
-  if (tmuxSessionExists(sessionName)) {
-    killTmuxSession(sessionName);
-  }
-
-  try {
-    // Use spawnSync with array args to avoid shell injection via project paths.
-    // Wrap command with `env -u CLAUDECODE` to prevent Claude from detecting
-    // a nested session when the Tower was started from within Claude Code.
-    const tmuxArgs = [
-      'new-session', '-d',
-      '-s', sessionName,
-      '-c', cwd,
-      '-x', String(cols),
-      '-y', String(rows),
-      'env', '-u', 'CLAUDECODE', command, ...args,
-    ];
-    const result = spawnSync('tmux', tmuxArgs, { stdio: 'ignore' });
-    if (result.status !== 0) {
-      log('WARN', `tmux new-session exited with code ${result.status} for "${sessionName}"`);
-      return null;
-    }
-
-    // Hide tmux status bar (dashboard has its own tabs) and enable mouse.
-    // NOTE: aggressive-resize was removed — it caused resize bouncing and
-    // visual flashing (dots/redraws) when the dashboard sent multiple resize
-    // events during layout settling. Default tmux behavior (size to smallest
-    // client) is more stable since we only have one client per session.
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'status', 'off'], { stdio: 'ignore' });
-    // Mouse OFF — xterm.js in the browser handles selection and Cmd+C/Cmd+V
-    // clipboard. tmux mouse mode conflicts (auto-copy on selection, intercepts
-    // click/drag). See codev/resources/terminal-tmux.md.
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'mouse', 'off'], { stdio: 'ignore' });
-    // Alternate screen OFF — without this, tmux puts xterm.js into alternate
-    // buffer which has no scrollback. xterm.js then translates wheel events
-    // to arrow keys (cycling command history). With alternate-screen off,
-    // tmux writes to the normal buffer and xterm.js native scroll works.
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'alternate-screen', 'off'], { stdio: 'ignore' });
-    // Increase tmux scrollback buffer from default 2,000 to 50,000 lines.
-    // Even with alternate-screen off, tmux manages its own internal buffer
-    // which can limit output flow to xterm.js. See issue #247.
-    spawnSync('tmux', ['set-option', '-t', sessionName, 'history-limit', '50000'], { stdio: 'ignore' });
-    // Unset CLAUDECODE so spawned Claude processes don't detect a nested session
-    spawnSync('tmux', ['set-environment', '-t', sessionName, '-u', 'CLAUDECODE'], { stdio: 'ignore' });
-
-    return sessionName;
-  } catch (err) {
-    log('WARN', `Failed to create tmux session "${sessionName}": ${(err as Error).message}`);
-    return null;
-  }
-}
-
-/**
- * Check if a tmux session exists.
- * Sanitizes the name to handle legacy entries stored before dot-replacement fix.
- */
-function tmuxSessionExists(sessionName: string): boolean {
-  const sanitized = sanitizeTmuxSessionName(sessionName);
-  try {
-    execSync(`tmux has-session -t "${sanitized}" 2>/dev/null`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// Shepherd session manager (initialized at startup)
+let shepherdManager: SessionManager | null = null;
 
 /**
  * Check if a process is running
@@ -619,237 +527,171 @@ function processExists(pid: number): boolean {
   }
 }
 
-/**
- * Kill a tmux session by name
- */
-function killTmuxSession(sessionName: string): void {
-  try {
-    execSync(`tmux kill-session -t "${sessionName}" 2>/dev/null`, { stdio: 'ignore' });
-    log('INFO', `Killed orphaned tmux session: ${sessionName}`);
-  } catch {
-    // Session may have already died
-  }
-}
-
-// ============================================================================
-// Tmux-First Discovery (tmux is source of truth for existence)
-// ============================================================================
-
-/**
- * List all tmux sessions that match codev naming conventions.
- * Returns an array of { tmuxName, parsed } for each matching session.
- * Sessions with recognized prefixes (architect-, builder-, shell-) but
- * unparseable ID formats are included with parsed: null for SQLite lookup.
- */
-// Cache for listCodevTmuxSessions — avoid shelling out on every dashboard poll
-let _tmuxListCache: Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> = [];
-let _tmuxListCacheTime = 0;
-const TMUX_LIST_CACHE_TTL = 10_000;  // 10 seconds
-
-function listCodevTmuxSessions(bypassCache = false): Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> {
-  if (!tmuxAvailable) return [];
-
-  const now = Date.now();
-  if (!bypassCache && now - _tmuxListCacheTime < TMUX_LIST_CACHE_TTL) {
-    return _tmuxListCache;
-  }
-
-  try {
-    const result = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', { encoding: 'utf-8' });
-    const sessions = result.trim().split('\n').filter(Boolean);
-    const codevSessions: Array<{ tmuxName: string; parsed: ParsedTmuxSession | null }> = [];
-
-    for (const name of sessions) {
-      const parsed = parseTmuxSessionName(name);
-      if (parsed) {
-        codevSessions.push({ tmuxName: name, parsed });
-      } else if (/^(?:architect|builder|shell)-/.test(name)) {
-        // Recognized codev prefix but unparseable ID format — include for SQLite lookup
-        codevSessions.push({ tmuxName: name, parsed: null });
-      }
-    }
-
-    _tmuxListCache = codevSessions;
-    _tmuxListCacheTime = now;
-    return codevSessions;
-  } catch {
-    _tmuxListCache = [];
-    _tmuxListCacheTime = now;
-    return [];
-  }
-}
-
-/**
- * Find the SQLite row that matches a given tmux session name.
- * Looks up by tmux_session column directly.
- */
-function findSqliteRowForTmuxSession(tmuxName: string): DbTerminalSession | null {
-  try {
-    const db = getGlobalDb();
-    return (db.prepare('SELECT * FROM terminal_sessions WHERE tmux_session = ?').get(tmuxName) as DbTerminalSession) || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Find the full project path for a tmux session's project basename.
- * Checks known projects (terminal_sessions + in-memory cache) for a matching basename.
- * Returns null if no match found.
- */
-function resolveProjectPathFromBasename(projectBasename: string): string | null {
-  const knownPaths = getKnownProjectPaths();
-  for (const projectPath of knownPaths) {
-    if (path.basename(projectPath) === projectBasename) {
-      return normalizeProjectPath(projectPath);
-    }
-  }
-
-  return null;
-}
 
 /**
  * Reconcile terminal sessions on startup.
  *
- * DUAL-SOURCE STRATEGY (tmux + SQLite):
+ * DUAL-SOURCE STRATEGY (shepherd + SQLite):
  *
- * tmux is the source of truth for LIVENESS (process existence).
- * SQLite is the source of truth for METADATA (project association, type, role ID).
+ * Phase 1 — Shepherd reconnection:
+ *   For SQLite rows with shepherd_socket IS NOT NULL, attempt to reconnect
+ *   via SessionManager.reconnectSession(). Shepherd processes survive Tower
+ *   restarts as detached OS processes.
  *
- * This is intentional: tmux sessions survive Tower restarts because they are
- * OS-level processes independent of Tower. SQLite rows, on the other hand,
- * cannot track process liveness — a row may exist for a terminal whose process
- * has long since exited. Therefore:
- *   - We NEVER trust SQLite alone to determine if a terminal is running.
- *   - We ALWAYS check tmux for liveness, then use SQLite for enrichment.
+ * Phase 2 — SQLite sweep:
+ *   Any rows not matched in Phase 1 are stale → clean up.
  *
  * File tabs are the exception: they have no backing process, so SQLite is
  * the sole source of truth for their persistence (see file_tabs table).
- *
- * Phase 1 — tmux-first discovery:
- *   List all codev tmux sessions. For each, look up SQLite for metadata.
- *   If SQLite has a matching row → reconnect with full metadata.
- *   If SQLite has no row (orphaned tmux) → derive metadata from session name, reconnect.
- *
- * Phase 2 — SQLite sweep:
- *   Any SQLite rows not matched to a tmux session are stale → clean up.
- *   (Also kills orphaned processes that have no tmux backing.)
  */
 async function reconcileTerminalSessions(): Promise<void> {
   const manager = getTerminalManager();
   const db = getGlobalDb();
 
-  // Phase 1: Discover living tmux sessions (bypass cache on startup)
-  const liveTmuxSessions = listCodevTmuxSessions(/* bypassCache */ true);
-
-  // Track which SQLite rows we matched (by tmux_session name)
-  const matchedTmuxNames = new Set<string>();
-
-  let reconnected = 0;
+  let shepherdReconnected = 0;
   let orphanReconnected = 0;
-
-  if (liveTmuxSessions.length > 0) {
-    log('INFO', `Found ${liveTmuxSessions.length} live codev tmux session(s) — reconnecting...`);
-  }
-
-  for (const { tmuxName, parsed } of liveTmuxSessions) {
-    // Look up SQLite for this tmux session's metadata
-    const dbRow = findSqliteRowForTmuxSession(tmuxName);
-    matchedTmuxNames.add(tmuxName);
-
-    // Determine metadata — prefer SQLite, fall back to parsed name
-    const projectPath = dbRow?.project_path || (parsed && resolveProjectPathFromBasename(parsed.projectBasename));
-    const type = (dbRow?.type || parsed?.type) as 'architect' | 'builder' | 'shell' | undefined;
-    const roleId = dbRow?.role_id ?? parsed?.roleId ?? null;
-
-    if (!projectPath || !type) {
-      log('WARN', `Cannot resolve ${!projectPath ? 'project path' : 'type'} for tmux session "${tmuxName}"${parsed ? ` (basename: ${parsed.projectBasename})` : ''} — skipping`);
-      continue;
-    }
-
-    // Skip sessions whose project path doesn't exist on disk or is in a
-    // temp directory (left over from E2E tests that share global.db/tmux).
-    if (!fs.existsSync(projectPath)) {
-      log('INFO', `Skipping tmux "${tmuxName}" — project path no longer exists: ${projectPath}`);
-      killTmuxSession(tmuxName);
-      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
-      continue;
-    }
-    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => projectPath.startsWith(d))) {
-      log('INFO', `Skipping tmux "${tmuxName}" — project is in temp directory: ${projectPath}`);
-      killTmuxSession(tmuxName);
-      if (dbRow) db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
-      continue;
-    }
-
-    try {
-      const label = type === 'architect' ? 'Architect' : `${type} ${roleId || 'unknown'}`;
-      const newSession = await manager.createSession({
-        command: 'tmux',
-        args: ['attach-session', '-t', tmuxName],
-        cwd: projectPath,
-        label,
-      });
-
-      // Register in projectTerminals Map
-      const entry = getProjectTerminalsEntry(projectPath);
-      if (type === 'architect') {
-        entry.architect = newSession.id;
-      } else if (type === 'builder') {
-        entry.builders.set(roleId || tmuxName, newSession.id);
-      } else if (type === 'shell') {
-        entry.shells.set(roleId || tmuxName, newSession.id);
-      }
-
-      // Update SQLite: delete old row (if any), insert fresh one
-      if (dbRow) {
-        db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbRow.id);
-      }
-      saveTerminalSession(newSession.id, projectPath, type, roleId, newSession.pid, tmuxName);
-      registerKnownProject(projectPath);
-
-      // Ensure correct tmux options on reconnected sessions
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'alternate-screen', 'off'], { stdio: 'ignore' });
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'history-limit', '50000'], { stdio: 'ignore' });
-
-      if (dbRow) {
-        log('INFO', `Reconnected tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)})`);
-        reconnected++;
-      } else {
-        log('INFO', `Recovered orphaned tmux "${tmuxName}" → terminal ${newSession.id} (${type} for ${path.basename(projectPath)}) [no SQLite row]`);
-        orphanReconnected++;
-      }
-    } catch (err) {
-      log('WARN', `Failed to reconnect to tmux "${tmuxName}": ${(err as Error).message}`);
-    }
-  }
-
-  // Phase 2: Sweep stale SQLite rows (those with no matching live tmux session)
   let killed = 0;
   let cleaned = 0;
 
+  // Track matched session IDs across all phases
+  const matchedSessionIds = new Set<string>();
+
+  // ---- Phase 1: Shepherd reconnection ----
   let allDbSessions: DbTerminalSession[];
   try {
     allDbSessions = db.prepare('SELECT * FROM terminal_sessions').all() as DbTerminalSession[];
   } catch (err) {
-    log('WARN', `Failed to read terminal sessions for sweep: ${(err as Error).message}`);
+    log('WARN', `Failed to read terminal sessions: ${(err as Error).message}`);
     allDbSessions = [];
   }
 
-  for (const session of allDbSessions) {
-    // Skip rows that were already reconnected in Phase 1
-    if (session.tmux_session && matchedTmuxNames.has(session.tmux_session)) {
+  const shepherdSessions = allDbSessions.filter(s => s.shepherd_socket !== null);
+  if (shepherdSessions.length > 0) {
+    log('INFO', `Found ${shepherdSessions.length} shepherd session(s) in SQLite — reconnecting...`);
+  }
+
+  for (const dbSession of shepherdSessions) {
+    const projectPath = dbSession.project_path;
+
+    // Skip sessions whose project path doesn't exist or is in temp directory
+    if (!fs.existsSync(projectPath)) {
+      log('INFO', `Skipping shepherd session ${dbSession.id} — project path no longer exists: ${projectPath}`);
+      // Kill orphaned shepherd process before removing row
+      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
+        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      }
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
+      cleaned++;
+      continue;
+    }
+    const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+    if (tmpDirs.some(d => projectPath === d || projectPath.startsWith(d + '/'))) {
+      log('INFO', `Skipping shepherd session ${dbSession.id} — project is in temp directory: ${projectPath}`);
+      // Kill orphaned shepherd process before removing row
+      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
+        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      }
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
+      cleaned++;
       continue;
     }
 
-    // Also skip rows whose terminal is still alive in PtyManager
-    // (non-tmux sessions created during this Tower run)
-    const existing = manager.getSession(session.id);
-    if (existing && existing.status !== 'exited') {
+    if (!shepherdManager) {
+      log('WARN', `Shepherd manager not initialized — cannot reconnect ${dbSession.id}`);
       continue;
     }
+
+    try {
+      // For architect sessions, restore auto-restart behavior after reconnection
+      let restartOptions: ReconnectRestartOptions | undefined;
+      if (dbSession.type === 'architect') {
+        let architectCmd = 'claude';
+        const configPath = path.join(projectPath, 'af-config.json');
+        if (fs.existsSync(configPath)) {
+          try {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            if (config.shell?.architect) {
+              architectCmd = config.shell.architect;
+            }
+          } catch { /* use default */ }
+        }
+        const cmdParts = architectCmd.split(/\s+/);
+        const cleanEnv = { ...process.env } as Record<string, string>;
+        delete cleanEnv['CLAUDECODE'];
+        restartOptions = {
+          command: cmdParts[0],
+          args: cmdParts.slice(1),
+          cwd: projectPath,
+          env: cleanEnv,
+          restartDelay: 2000,
+          maxRestarts: 50,
+        };
+      }
+
+      const client = await shepherdManager.reconnectSession(
+        dbSession.id,
+        dbSession.shepherd_socket!,
+        dbSession.shepherd_pid!,
+        dbSession.shepherd_start_time!,
+        restartOptions,
+      );
+
+      if (!client) {
+        log('INFO', `Shepherd session ${dbSession.id} is stale (PID/socket dead) — will clean up`);
+        continue; // Will be cleaned up in Phase 3
+      }
+
+      const replayData = client.getReplayData() ?? Buffer.alloc(0);
+      const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || 'unknown'}`;
+
+      // Create a PtySession backed by the reconnected shepherd client
+      const session = manager.createSessionRaw({ label, cwd: projectPath });
+      const ptySession = manager.getSession(session.id);
+      if (ptySession) {
+        ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
+      }
+
+      // Register in projectTerminals Map
+      const entry = getProjectTerminalsEntry(projectPath);
+      if (dbSession.type === 'architect') {
+        entry.architect = session.id;
+      } else if (dbSession.type === 'builder') {
+        entry.builders.set(dbSession.role_id || dbSession.id, session.id);
+      } else if (dbSession.type === 'shell') {
+        entry.shells.set(dbSession.role_id || dbSession.id, session.id);
+      }
+
+      // Update SQLite with new terminal ID
+      db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
+      saveTerminalSession(session.id, projectPath, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
+        dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
+      registerKnownProject(projectPath);
+
+      // Clean up on exit
+      if (ptySession) {
+        ptySession.on('exit', () => {
+          const currentEntry = getProjectTerminalsEntry(projectPath);
+          if (dbSession.type === 'architect' && currentEntry.architect === session.id) {
+            currentEntry.architect = undefined;
+          }
+          deleteTerminalSession(session.id);
+        });
+      }
+
+      matchedSessionIds.add(dbSession.id);
+      shepherdReconnected++;
+      log('INFO', `Reconnected shepherd session → ${session.id} (${dbSession.type} for ${path.basename(projectPath)})`);
+    } catch (err) {
+      log('WARN', `Failed to reconnect shepherd session ${dbSession.id}: ${(err as Error).message}`);
+    }
+  }
+
+  // ---- Phase 2: Sweep stale SQLite rows ----
+  for (const session of allDbSessions) {
+    if (matchedSessionIds.has(session.id)) continue;
+
+    const existing = manager.getSession(session.id);
+    if (existing && existing.status !== 'exited') continue;
 
     // Stale row — kill orphaned process if any, then delete
     if (session.pid && processExists(session.pid)) {
@@ -857,18 +699,16 @@ async function reconcileTerminalSessions(): Promise<void> {
       try {
         process.kill(session.pid, 'SIGTERM');
         killed++;
-      } catch {
-        // Process may not be killable
-      }
+      } catch { /* process not killable */ }
     }
 
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
     cleaned++;
   }
 
-  const total = reconnected + orphanReconnected;
+  const total = shepherdReconnected + orphanReconnected;
   if (total > 0 || killed > 0 || cleaned > 0) {
-    log('INFO', `Reconciliation complete: ${reconnected} reconnected, ${orphanReconnected} orphan-recovered, ${killed} killed, ${cleaned} stale rows cleaned`);
+    log('INFO', `Reconciliation complete: ${shepherdReconnected} shepherd, ${orphanReconnected} orphan, ${killed} killed, ${cleaned} stale rows cleaned`);
   } else {
     log('INFO', 'No terminal sessions to reconcile');
   }
@@ -889,7 +729,7 @@ function getTerminalSessionsForProject(projectPath: string): DbTerminalSession[]
 }
 
 // Import PtySession type for WebSocket handling
-import type { PtySession } from '../../terminal/pty-session.js';
+import type { PtySession, PtySessionInfo } from '../../terminal/pty-session.js';
 
 /**
  * Handle WebSocket connection to a terminal session
@@ -1037,6 +877,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
   if (terminalManager) {
     log('INFO', 'Shutting down terminal manager...');
     terminalManager.shutdown();
+  }
+
+  // 3b. Shepherd clients: do NOT call shepherdManager.shutdown() here.
+  // SessionManager.shutdown() disconnects sockets, which triggers ShepherdClient
+  // 'close' events → PtySession exit(-1) → SQLite row deletion. This would erase
+  // the rows that reconcileTerminalSessions() needs on restart.
+  // Instead, let the process exit naturally — OS closes all sockets, and shepherds
+  // detect the disconnection and keep running. SQLite rows are preserved.
+  if (shepherdManager) {
+    log('INFO', 'Shepherd sessions will continue running (sockets close on process exit)');
   }
 
   // 4. Stop gate watcher
@@ -1208,7 +1058,7 @@ async function getTerminalsForProject(
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
-  // Query SQLite first, then augment with tmux discovery
+  // Query SQLite first, then augment with shepherd reconnection
   const dbSessions = getTerminalSessionsForProject(projectPath);
 
   // Use normalized path for cache consistency
@@ -1232,33 +1082,74 @@ async function getTerminalsForProject(
   for (const dbSession of dbSessions) {
     // Verify session still exists in TerminalManager (runtime state)
     let session = manager.getSession(dbSession.id);
-    const sanitizedTmux = dbSession.tmux_session ? sanitizeTmuxSessionName(dbSession.tmux_session) : null;
-    if (!session && sanitizedTmux && tmuxAvailable && tmuxSessionExists(sanitizedTmux)) {
-      // PTY session gone but tmux session survives — reconnect on-the-fly
+
+    if (!session && dbSession.shepherd_socket && shepherdManager) {
+      // PTY session gone but shepherd may still be alive — reconnect on-the-fly
       try {
-        const newSession = await manager.createSession({
-          command: 'tmux',
-          args: ['attach-session', '-t', sanitizedTmux],
-          cwd: dbSession.project_path,
-          label: dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`,
-          env: process.env as Record<string, string>,
-        });
-        // Update SQLite with new terminal ID (use sanitized tmux name)
-        deleteTerminalSession(dbSession.id);
-        saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, newSession.pid, sanitizedTmux);
-        dbSession.id = newSession.id;
-        session = manager.getSession(newSession.id);
-        // Ensure correct tmux options on reconnected sessions
-        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'mouse', 'off'], { stdio: 'ignore' });
-        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'alternate-screen', 'off'], { stdio: 'ignore' });
-        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'history-limit', '50000'], { stdio: 'ignore' });
-        log('INFO', `Reconnected to tmux "${sanitizedTmux}" on-the-fly → ${newSession.id}`);
+        // Restore auto-restart for architect sessions (same as startup reconciliation)
+        let restartOptions: ReconnectRestartOptions | undefined;
+        if (dbSession.type === 'architect') {
+          let architectCmd = 'claude';
+          const configPath = path.join(dbSession.project_path, 'af-config.json');
+          if (fs.existsSync(configPath)) {
+            try {
+              const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+              if (config.shell?.architect) {
+                architectCmd = config.shell.architect;
+              }
+            } catch { /* use default */ }
+          }
+          const cmdParts = architectCmd.split(/\s+/);
+          const cleanEnv = { ...process.env } as Record<string, string>;
+          delete cleanEnv['CLAUDECODE'];
+          restartOptions = {
+            command: cmdParts[0],
+            args: cmdParts.slice(1),
+            cwd: dbSession.project_path,
+            env: cleanEnv,
+            restartDelay: 2000,
+            maxRestarts: 50,
+          };
+        }
+
+        const client = await shepherdManager.reconnectSession(
+          dbSession.id,
+          dbSession.shepherd_socket,
+          dbSession.shepherd_pid!,
+          dbSession.shepherd_start_time!,
+          restartOptions,
+        );
+        if (client) {
+          const replayData = client.getReplayData() ?? Buffer.alloc(0);
+          const label = dbSession.type === 'architect' ? 'Architect' : `${dbSession.type} ${dbSession.role_id || dbSession.id}`;
+          const newSession = manager.createSessionRaw({ label, cwd: dbSession.project_path });
+          const ptySession = manager.getSession(newSession.id);
+          if (ptySession) {
+            ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
+
+            // Clean up on exit (same as startup reconciliation path)
+            ptySession.on('exit', () => {
+              const currentEntry = getProjectTerminalsEntry(dbSession.project_path);
+              if (dbSession.type === 'architect' && currentEntry.architect === newSession.id) {
+                currentEntry.architect = undefined;
+              }
+              deleteTerminalSession(newSession.id);
+            });
+          }
+          deleteTerminalSession(dbSession.id);
+          saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
+            dbSession.shepherd_socket, dbSession.shepherd_pid, dbSession.shepherd_start_time);
+          dbSession.id = newSession.id;
+          session = manager.getSession(newSession.id);
+          log('INFO', `Reconnected to shepherd on-the-fly → ${newSession.id}`);
+        }
       } catch (err) {
-        log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message} — will retry on next poll`);
-        continue;
+        log('WARN', `Failed shepherd on-the-fly reconnect for ${dbSession.id}: ${(err as Error).message}`);
       }
-    } else if (!session) {
-      // Stale row in SQLite, no tmux to reconnect — clean it up
+    }
+
+    if (!session) {
+      // Stale row, nothing to reconnect — clean up
       deleteTerminalSession(dbSession.id);
       continue;
     }
@@ -1340,60 +1231,6 @@ async function getTerminalsForProject(
           });
         }
       }
-    }
-  }
-
-  // Phase 3: tmux discovery — find tmux sessions for this project that are
-  // missing from both SQLite and the in-memory cache.
-  // This is the safety net: if SQLite rows got deleted but tmux survived,
-  // the session will still appear in the dashboard.
-  const projectBasename = sanitizeTmuxSessionName(path.basename(normalizedPath));
-  const liveTmux = listCodevTmuxSessions();
-  for (const { tmuxName, parsed } of liveTmux) {
-    // Skip sessions we couldn't fully parse (no projectBasename to match)
-    if (!parsed) continue;
-    // Only process sessions whose sanitized project basename matches
-    if (parsed.projectBasename !== projectBasename) continue;
-
-    // Skip if we already have this session registered (from SQLite or in-memory)
-    const alreadyRegistered =
-      (parsed.type === 'architect' && freshEntry.architect) ||
-      (parsed.type === 'builder' && parsed.roleId && freshEntry.builders.has(parsed.roleId)) ||
-      (parsed.type === 'shell' && parsed.roleId && freshEntry.shells.has(parsed.roleId));
-    if (alreadyRegistered) continue;
-
-    // Orphaned tmux session — reconnect it.
-    // Skip architect sessions: launchInstance handles creation/reconnection.
-    if (parsed.type === 'architect') continue;
-
-    try {
-      const label = `${parsed.type} ${parsed.roleId || 'unknown'}`;
-      const newSession = await manager.createSession({
-        command: 'tmux',
-        args: ['attach-session', '-t', tmuxName],
-        cwd: normalizedPath,
-        label,
-      });
-
-      const roleId = parsed.roleId;
-      if (parsed.type === 'builder' && roleId) {
-        freshEntry.builders.set(roleId, newSession.id);
-        terminals.push({ type: 'builder', id: roleId, label: `Builder ${roleId}`, url: `${proxyUrl}?tab=builder-${roleId}`, active: true });
-      } else if (parsed.type === 'shell' && roleId) {
-        freshEntry.shells.set(roleId, newSession.id);
-        terminals.push({ type: 'shell', id: roleId, label: `Shell ${roleId.replace('shell-', '')}`, url: `${proxyUrl}?tab=shell-${roleId}`, active: true });
-      }
-
-      // Ensure correct tmux options on recovered sessions
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'alternate-screen', 'off'], { stdio: 'ignore' });
-      spawnSync('tmux', ['set-option', '-t', tmuxName, 'history-limit', '50000'], { stdio: 'ignore' });
-
-      // Persist to SQLite so future polls find it directly
-      saveTerminalSession(newSession.id, normalizedPath, parsed.type, roleId, newSession.pid, tmuxName);
-      log('INFO', `[tmux-discovery] Recovered orphaned tmux "${tmuxName}" → ${newSession.id} (${parsed.type})`);
-    } catch (err) {
-      log('WARN', `[tmux-discovery] Failed to recover tmux "${tmuxName}": ${(err as Error).message}`);
     }
   }
 
@@ -1623,64 +1460,96 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
       try {
         // Parse command string to separate command and args
         const cmdParts = architectCmd.split(/\s+/);
-        let cmd = cmdParts[0];
-        let cmdArgs = cmdParts.slice(1);
+        const cmd = cmdParts[0];
+        const cmdArgs = cmdParts.slice(1);
 
-        // Wrap in tmux for session persistence across Tower restarts
-        const tmuxName = `architect-${path.basename(projectPath)}`;
-        const sanitizedTmuxName = sanitizeTmuxSessionName(tmuxName);
-        let activeTmuxSession: string | null = null;
+        // Build env with CLAUDECODE removed so spawned Claude processes
+        // don't detect a nested session
+        const cleanEnv = { ...process.env } as Record<string, string>;
+        delete cleanEnv['CLAUDECODE'];
 
-        if (tmuxAvailable) {
-          // Reuse existing tmux session if it's still alive (e.g., after
-          // disconnect timeout killed the `tmux attach` process but the
-          // architect process inside tmux kept running).
-          if (tmuxSessionExists(sanitizedTmuxName)) {
-            cmd = 'tmux';
-            cmdArgs = ['attach-session', '-t', sanitizedTmuxName];
-            activeTmuxSession = sanitizedTmuxName;
-            log('INFO', `Reconnecting to existing tmux session "${sanitizedTmuxName}" for architect`);
-          } else {
-            // Wrap architect in a restart loop inside tmux so it auto-restarts
-            // when the user exits Claude Code (e.g., /exit). The loop runs
-            // inside tmux itself, independent of Tower's node-pty exit handler.
-            const innerCmd = [cmd, ...cmdArgs].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-            const loopCmd = `while true; do ${innerCmd}; echo "Architect exited. Restarting in 2s..."; sleep 2; done`;
-            const createdName = createTmuxSession(tmuxName, 'sh', ['-c', loopCmd], projectPath, 200, 50);
-            if (createdName) {
-              cmd = 'tmux';
-              cmdArgs = ['attach-session', '-t', createdName];
-              activeTmuxSession = createdName;
-              log('INFO', `Created tmux session "${createdName}" for architect (with restart loop)`);
+        // Try shepherd first for persistent session with auto-restart
+        let shepherdCreated = false;
+        if (shepherdManager) {
+          try {
+            const sessionId = crypto.randomUUID();
+            const client = await shepherdManager.createSession({
+              sessionId,
+              command: cmd,
+              args: cmdArgs,
+              cwd: projectPath,
+              env: cleanEnv,
+              cols: 200,
+              rows: 50,
+              restartOnExit: true,
+              restartDelay: 2000,
+              maxRestarts: 50,
+            });
+
+            // Get replay data and shepherd info
+            const replayData = client.getReplayData() ?? Buffer.alloc(0);
+            const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+
+            // Create a PtySession backed by the shepherd client
+            const session = manager.createSessionRaw({
+              label: 'Architect',
+              cwd: projectPath,
+            });
+            const ptySession = manager.getSession(session.id);
+            if (ptySession) {
+              ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
             }
+
+            entry.architect = session.id;
+            saveTerminalSession(session.id, resolvedPath, 'architect', null, shepherdInfo.pid,
+              shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+
+            // Clean up cache/SQLite when the shepherd session exits
+            if (ptySession) {
+              ptySession.on('exit', () => {
+                const currentEntry = getProjectTerminalsEntry(resolvedPath);
+                if (currentEntry.architect === session.id) {
+                  currentEntry.architect = undefined;
+                }
+                deleteTerminalSession(session.id);
+                log('INFO', `Architect shepherd session exited for ${projectPath}`);
+              });
+            }
+
+            shepherdCreated = true;
+            log('INFO', `Created shepherd-backed architect session for project: ${projectPath}`);
+          } catch (shepherdErr) {
+            log('WARN', `Shepherd creation failed for architect, falling back: ${(shepherdErr as Error).message}`);
           }
         }
 
-        const session = await manager.createSession({
-          command: cmd,
-          args: cmdArgs,
-          cwd: projectPath,
-          label: 'Architect',
-          env: process.env as Record<string, string>,
-        });
-
-        entry.architect = session.id;
-
-        // TICK-001: Save to SQLite for persistence (with tmux session name)
-        saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
-
-        // Clean up cache/SQLite when the node-pty session exits.
-        // Restart is handled by the while-true loop inside tmux (not here).
-        const ptySession = manager.getSession(session.id);
-        if (ptySession) {
-          ptySession.on('exit', () => {
-            const currentEntry = getProjectTerminalsEntry(resolvedPath);
-            if (currentEntry.architect === session.id) {
-              currentEntry.architect = undefined;
-            }
-            deleteTerminalSession(session.id);
-            log('INFO', `Architect pty exited for ${projectPath} (tmux loop handles restart)`);
+        // Fallback: non-persistent session (graceful degradation per plan)
+        // Shepherd is the only persistence backend for new sessions.
+        if (!shepherdCreated) {
+          const session = await manager.createSession({
+            command: cmd,
+            args: cmdArgs,
+            cwd: projectPath,
+            label: 'Architect',
+            env: cleanEnv,
           });
+
+          entry.architect = session.id;
+          saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid);
+
+          const ptySession = manager.getSession(session.id);
+          if (ptySession) {
+            ptySession.on('exit', () => {
+              const currentEntry = getProjectTerminalsEntry(resolvedPath);
+              if (currentEntry.architect === session.id) {
+                currentEntry.architect = undefined;
+              }
+              deleteTerminalSession(session.id);
+              log('INFO', `Architect pty exited for ${projectPath}`);
+            });
+          }
+
+          log('WARN', `Architect terminal for ${projectPath} is non-persistent (shepherd unavailable)`);
         }
 
         log('INFO', `Created architect terminal for project: ${projectPath}`);
@@ -1694,6 +1563,24 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
   } catch (err) {
     return { success: false, error: `Failed to launch: ${(err as Error).message}` };
   }
+}
+
+/**
+ * Kill a terminal session, including its shepherd auto-restart if applicable.
+ * For shepherd-backed sessions, calls SessionManager.killSession() which clears
+ * the restart timer and removes the session before sending SIGTERM, preventing
+ * the shepherd from auto-restarting the process.
+ */
+async function killTerminalWithShepherd(manager: ReturnType<typeof getTerminalManager>, terminalId: string): Promise<boolean> {
+  const session = manager.getSession(terminalId);
+  if (!session) return false;
+
+  // If shepherd-backed, disable auto-restart via SessionManager before killing the PtySession
+  if (session.shepherdBacked && session.shepherdSessionId && shepherdManager) {
+    await shepherdManager.killSession(session.shepherdSessionId);
+  }
+
+  return manager.killSession(terminalId);
 }
 
 /**
@@ -1718,42 +1605,31 @@ async function stopInstance(projectPath: string): Promise<{ success: boolean; er
   const entry = projectTerminals.get(resolvedPath) || projectTerminals.get(projectPath);
 
   if (entry) {
-    // Query SQLite for tmux session names BEFORE deleting rows
-    const dbSessions = getTerminalSessionsForProject(resolvedPath);
-    const tmuxSessions = dbSessions
-      .filter(s => s.tmux_session)
-      .map(s => s.tmux_session as string);
-
-    // Kill architect
+    // Kill architect (disable shepherd auto-restart if applicable)
     if (entry.architect) {
       const session = manager.getSession(entry.architect);
       if (session) {
-        manager.killSession(entry.architect);
+        await killTerminalWithShepherd(manager, entry.architect);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all shells
+    // Kill all shells (disable shepherd auto-restart if applicable)
     for (const terminalId of entry.shells.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        manager.killSession(terminalId);
+        await killTerminalWithShepherd(manager, terminalId);
         stopped.push(session.pid);
       }
     }
 
-    // Kill all builders
+    // Kill all builders (disable shepherd auto-restart if applicable)
     for (const terminalId of entry.builders.values()) {
       const session = manager.getSession(terminalId);
       if (session) {
-        manager.killSession(terminalId);
+        await killTerminalWithShepherd(manager, terminalId);
         stopped.push(session.pid);
       }
-    }
-
-    // Kill tmux sessions (node-pty kill only detaches, tmux keeps running)
-    for (const tmuxName of tmuxSessions) {
-      killTmuxSession(tmuxName);
     }
 
     // Clear project from registry
@@ -2105,60 +1981,81 @@ const server = http.createServer(async (req, res) => {
         const env = typeof body.env === 'object' && body.env !== null ? (body.env as Record<string, string>) : undefined;
         const label = typeof body.label === 'string' ? body.label : undefined;
 
-        // Optional tmux wrapping: create tmux session, then node-pty attaches to it
-        const tmuxSession = typeof body.tmuxSession === 'string' ? body.tmuxSession : null;
-        let activeTmuxSession: string | null = null;
-
-        if (tmuxSession && tmuxAvailable && command && cwd) {
-          const sanitizedName = createTmuxSession(
-            tmuxSession,
-            command,
-            args || [],
-            cwd,
-            cols || 200,
-            rows || 50
-          );
-          if (sanitizedName) {
-            // Override: node-pty attaches to the tmux session (use sanitized name)
-            command = 'tmux';
-            args = ['attach-session', '-t', sanitizedName];
-            activeTmuxSession = sanitizedName;
-            log('INFO', `Created tmux session "${sanitizedName}" for terminal`);
-          }
-          // If tmux creation failed, fall through to bare node-pty
-        }
-
-        let info;
-        try {
-          info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
-        } catch (createErr) {
-          // Clean up orphaned tmux session if node-pty creation failed
-          if (activeTmuxSession) {
-            killTmuxSession(activeTmuxSession);
-            log('WARN', `Cleaned up orphaned tmux session "${activeTmuxSession}" after node-pty failure`);
-          }
-          throw createErr;
-        }
-
-        // Optional project association: register terminal with project state
+        // Optional session persistence via shepherd
         const projectPath = typeof body.projectPath === 'string' ? body.projectPath : null;
         const termType = typeof body.type === 'string' && ['builder', 'shell'].includes(body.type) ? body.type as 'builder' | 'shell' : null;
         const roleId = typeof body.roleId === 'string' ? body.roleId : null;
+        const requestPersistence = body.persistent === true;
 
-        if (projectPath && termType && roleId) {
-          const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
-          if (termType === 'builder') {
-            entry.builders.set(roleId, info.id);
-          } else {
-            entry.shells.set(roleId, info.id);
+        let info: PtySessionInfo | undefined;
+        let persistent = false;
+
+        // Try shepherd if persistence was requested
+        if (requestPersistence && shepherdManager && command && cwd) {
+          try {
+            const sessionId = crypto.randomUUID();
+            const client = await shepherdManager.createSession({
+              sessionId,
+              command,
+              args: args || [],
+              cwd,
+              env: env || process.env as Record<string, string>,
+              cols: cols || 200,
+              rows: 50,
+              restartOnExit: false,
+            });
+
+            const replayData = client.getReplayData() ?? Buffer.alloc(0);
+            const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+
+            const session = manager.createSessionRaw({
+              label: label || `terminal-${sessionId.slice(0, 8)}`,
+              cwd,
+            });
+            const ptySession = manager.getSession(session.id);
+            if (ptySession) {
+              ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+            }
+
+            info = session;
+            persistent = true;
+
+            if (projectPath && termType && roleId) {
+              const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+              if (termType === 'builder') {
+                entry.builders.set(roleId, session.id);
+              } else {
+                entry.shells.set(roleId, session.id);
+              }
+              saveTerminalSession(session.id, projectPath, termType, roleId, shepherdInfo.pid,
+                shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+              log('INFO', `Registered shepherd terminal ${session.id} as ${termType} "${roleId}" for project ${projectPath}`);
+            }
+          } catch (shepherdErr) {
+            log('WARN', `Shepherd creation failed for terminal, falling back: ${(shepherdErr as Error).message}`);
           }
-          saveTerminalSession(info.id, projectPath, termType, roleId, info.pid, activeTmuxSession);
-          log('INFO', `Registered terminal ${info.id} as ${termType} "${roleId}" for project ${projectPath}${activeTmuxSession ? ` (tmux: ${activeTmuxSession})` : ''}`);
         }
 
-        // Return tmuxSession so caller knows whether tmux is backing this terminal
+        // Fallback: non-persistent session (graceful degradation per plan)
+        // Shepherd is the only persistence backend for new sessions.
+        if (!info) {
+          info = await manager.createSession({ command, args, cols, rows, cwd, env, label });
+          persistent = false;
+
+          if (projectPath && termType && roleId) {
+            const entry = getProjectTerminalsEntry(normalizeProjectPath(projectPath));
+            if (termType === 'builder') {
+              entry.builders.set(roleId, info.id);
+            } else {
+              entry.shells.set(roleId, info.id);
+            }
+            saveTerminalSession(info.id, projectPath, termType, roleId, info.pid);
+            log('WARN', `Terminal ${info.id} for ${projectPath} is non-persistent (shepherd unavailable)`);
+          }
+        }
+
         res.writeHead(201, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}`, tmuxSession: activeTmuxSession }));
+        res.end(JSON.stringify({ ...info, wsPath: `/ws/terminal/${info.id}`, persistent }));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         log('ERROR', `Failed to create terminal: ${message}`);
@@ -2196,9 +2093,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // DELETE /api/terminals/:id - Kill terminal
+      // DELETE /api/terminals/:id - Kill terminal (disable shepherd auto-restart if applicable)
       if (req.method === 'DELETE' && (!subpath || subpath === '')) {
-        if (!manager.killSession(terminalId)) {
+        if (!(await killTerminalWithShepherd(manager, terminalId))) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
           return;
@@ -2209,6 +2106,31 @@ const server = http.createServer(async (req, res) => {
 
         res.writeHead(204);
         res.end();
+        return;
+      }
+
+      // POST /api/terminals/:id/write - Write data to terminal (Spec 0104)
+      if (req.method === 'POST' && subpath === '/write') {
+        try {
+          const body = await parseJsonBody(req);
+          if (typeof body.data !== 'string') {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'data must be a string' }));
+            return;
+          }
+          const session = manager.getSession(terminalId);
+          if (!session) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'NOT_FOUND', message: `Session ${terminalId} not found` }));
+            return;
+          }
+          session.write(body.data);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'INVALID_PARAMS', message: 'Invalid JSON body' }));
+        }
         return;
       }
 
@@ -2581,8 +2503,8 @@ const server = http.createServer(async (req, res) => {
 
         // GET /api/state - Return project state (architect, builders, shells)
         if (req.method === 'GET' && (apiPath === 'state' || apiPath === '')) {
-          // Refresh cache via getTerminalsForProject (handles SQLite sync,
-          // tmux reconnection, and tmux discovery in one place)
+          // Refresh cache via getTerminalsForProject (handles SQLite sync
+          // and shepherd reconnection in one place)
           const encodedPath = Buffer.from(projectPath).toString('base64url');
           const proxyUrl = `/project/${encodedPath}/`;
           const { gateStatus } = await getTerminalsForProject(projectPath, proxyUrl);
@@ -2591,9 +2513,9 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
           const state: {
-            architect: { port: number; pid: number; terminalId?: string } | null;
-            builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string }>;
-            utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string }>;
+            architect: { port: number; pid: number; terminalId?: string; persistent?: boolean } | null;
+            builders: Array<{ id: string; name: string; port: number; pid: number; status: string; phase: string; worktree: string; branch: string; type: string; terminalId?: string; persistent?: boolean }>;
+            utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
             annotations: Array<{ id: string; file: string; port: number; pid: number }>;
             projectName?: string;
             gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
@@ -2614,6 +2536,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId: entry.architect,
+                persistent: isSessionPersistent(entry.architect, session),
               };
             }
           }
@@ -2628,6 +2551,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId,
+                persistent: isSessionPersistent(terminalId, session),
               });
             }
           }
@@ -2647,6 +2571,7 @@ const server = http.createServer(async (req, res) => {
                 branch: '',
                 type: 'spec',
                 terminalId,
+                persistent: isSessionPersistent(terminalId, session),
               });
             }
           }
@@ -2671,45 +2596,82 @@ const server = http.createServer(async (req, res) => {
           try {
             const manager = getTerminalManager();
             const shellId = getNextShellId(projectPath);
+            const shellCmd = process.env.SHELL || '/bin/bash';
+            const shellArgs: string[] = [];
 
-            // Wrap in tmux for session persistence
-            let shellCmd = process.env.SHELL || '/bin/bash';
-            let shellArgs: string[] = [];
-            const tmuxName = `shell-${path.basename(projectPath)}-${shellId}`;
-            let activeTmuxSession: string | null = null;
+            let shellCreated = false;
 
-            if (tmuxAvailable) {
-              const sanitizedName = createTmuxSession(tmuxName, shellCmd, shellArgs, projectPath, 200, 50);
-              if (sanitizedName) {
-                shellCmd = 'tmux';
-                shellArgs = ['attach-session', '-t', sanitizedName];
-                activeTmuxSession = sanitizedName;
+            // Try shepherd first for persistent shell session
+            if (shepherdManager) {
+              try {
+                const sessionId = crypto.randomUUID();
+                const client = await shepherdManager.createSession({
+                  sessionId,
+                  command: shellCmd,
+                  args: shellArgs,
+                  cwd: projectPath,
+                  env: process.env as Record<string, string>,
+                  cols: 200,
+                  rows: 50,
+                  restartOnExit: false,
+                });
+
+                const replayData = client.getReplayData() ?? Buffer.alloc(0);
+                const shepherdInfo = shepherdManager.getSessionInfo(sessionId)!;
+
+                const session = manager.createSessionRaw({
+                  label: `Shell ${shellId.replace('shell-', '')}`,
+                  cwd: projectPath,
+                });
+                const ptySession = manager.getSession(session.id);
+                if (ptySession) {
+                  ptySession.attachShepherd(client, replayData, shepherdInfo.pid, sessionId);
+                }
+
+                const entry = getProjectTerminalsEntry(projectPath);
+                entry.shells.set(shellId, session.id);
+                saveTerminalSession(session.id, projectPath, 'shell', shellId, shepherdInfo.pid,
+                  shepherdInfo.socketPath, shepherdInfo.pid, shepherdInfo.startTime);
+
+                shellCreated = true;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  id: shellId,
+                  port: 0,
+                  name: `Shell ${shellId.replace('shell-', '')}`,
+                  terminalId: session.id,
+                  persistent: true,
+                }));
+              } catch (shepherdErr) {
+                log('WARN', `Shepherd creation failed for shell, falling back: ${(shepherdErr as Error).message}`);
               }
             }
 
-            // Create terminal session
-            const session = await manager.createSession({
-              command: shellCmd,
-              args: shellArgs,
-              cwd: projectPath,
-              label: `Shell ${shellId.replace('shell-', '')}`,
-              env: process.env as Record<string, string>,
-            });
+            // Fallback: non-persistent session (graceful degradation per plan)
+            // Shepherd is the only persistence backend for new sessions.
+            if (!shellCreated) {
+              const session = await manager.createSession({
+                command: shellCmd,
+                args: shellArgs,
+                cwd: projectPath,
+                label: `Shell ${shellId.replace('shell-', '')}`,
+                env: process.env as Record<string, string>,
+              });
 
-            // Register terminal with project
-            const entry = getProjectTerminalsEntry(projectPath);
-            entry.shells.set(shellId, session.id);
+              const entry = getProjectTerminalsEntry(projectPath);
+              entry.shells.set(shellId, session.id);
+              saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid);
+              log('WARN', `Shell ${shellId} for ${projectPath} is non-persistent (shepherd unavailable)`);
 
-            // TICK-001: Save to SQLite for persistence
-            saveTerminalSession(session.id, projectPath, 'shell', shellId, session.pid, activeTmuxSession);
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              id: shellId,
-              port: 0,
-              name: `Shell ${shellId.replace('shell-', '')}`,
-              terminalId: session.id,
-            }));
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                id: shellId,
+                port: 0,
+                name: `Shell ${shellId.replace('shell-', '')}`,
+                terminalId: session.id,
+                persistent: false,
+              }));
+            }
           } catch (err) {
             log('ERROR', `Failed to create shell: ${(err as Error).message}`);
             res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2980,7 +2942,8 @@ const server = http.createServer(async (req, res) => {
           }
 
           if (terminalId) {
-            manager.killSession(terminalId);
+            // Disable shepherd auto-restart if applicable, then kill the PtySession
+            await killTerminalWithShepherd(manager, terminalId);
 
             // TICK-001: Delete from SQLite
             deleteTerminalSession(terminalId);
@@ -2999,15 +2962,15 @@ const server = http.createServer(async (req, res) => {
           const entry = getProjectTerminalsEntry(projectPath);
           const manager = getTerminalManager();
 
-          // Kill all terminals
+          // Kill all terminals (disable shepherd auto-restart if applicable)
           if (entry.architect) {
-            manager.killSession(entry.architect);
+            await killTerminalWithShepherd(manager, entry.architect);
           }
           for (const terminalId of entry.shells.values()) {
-            manager.killSession(terminalId);
+            await killTerminalWithShepherd(manager, terminalId);
           }
           for (const terminalId of entry.builders.values()) {
-            manager.killSession(terminalId);
+            await killTerminalWithShepherd(manager, terminalId);
           }
 
           // Clear registry
@@ -3315,9 +3278,19 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, '127.0.0.1', async () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
 
-  // Check tmux availability once at startup
-  tmuxAvailable = checkTmux();
-  log('INFO', `tmux available: ${tmuxAvailable}${tmuxAvailable ? '' : ' (terminals will not persist across restarts)'}`);
+  // Initialize shepherd session manager for persistent terminals
+  const socketDir = path.join(homedir(), '.codev', 'run');
+  const shepherdScript = path.join(__dirname, '..', '..', 'terminal', 'shepherd-main.js');
+  shepherdManager = new SessionManager({
+    socketDir,
+    shepherdScript,
+    nodeExecutable: process.execPath,
+  });
+  const staleCleaned = await shepherdManager.cleanupStaleSockets();
+  if (staleCleaned > 0) {
+    log('INFO', `Cleaned up ${staleCleaned} stale shepherd socket(s)`);
+  }
+  log('INFO', 'Shepherd session manager initialized');
 
   // TICK-001: Reconcile terminal sessions from previous run
   await reconcileTerminalSessions();

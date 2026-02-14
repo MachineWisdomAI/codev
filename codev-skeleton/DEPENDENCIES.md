@@ -37,26 +37,6 @@ sudo apt install -y nodejs
 node --version  # Should show v18.x or higher
 ```
 
-### tmux
-
-| Requirement | Value |
-|-------------|-------|
-| Minimum Version | 3.0 |
-| Purpose | Terminal multiplexer for managing builder sessions |
-
-**Installation:**
-
-```bash
-# macOS
-brew install tmux
-
-# Ubuntu/Debian
-sudo apt install tmux
-
-# Verify
-tmux -V  # Should show tmux 3.x or higher
-```
-
 ### git
 
 | Requirement | Value |
@@ -169,7 +149,6 @@ codex --version
 | Dependency | Minimum Version | Required? |
 |------------|-----------------|-----------|
 | Node.js | 18.0.0 | Yes |
-| tmux | 3.0 | Yes |
 | git | 2.5.0 | Yes |
 | gh | latest | Yes |
 | Claude Code | latest | At least one AI CLI |
@@ -186,7 +165,7 @@ All dependencies are available via Homebrew:
 
 ```bash
 # Install all core dependencies at once
-brew install node tmux gh
+brew install node gh
 
 # Git is included with Xcode command line tools
 xcode-select --install
@@ -198,7 +177,7 @@ Most dependencies are available via apt:
 
 ```bash
 # Core dependencies
-sudo apt install nodejs npm tmux git
+sudo apt install nodejs npm git
 
 # gh requires adding GitHub's apt repository (see above)
 ```
@@ -228,17 +207,6 @@ echo $PATH
 
 # Common fix: add npm global bin to PATH
 export PATH="$PATH:$(npm config get prefix)/bin"
-```
-
-### tmux version too old
-
-Ubuntu LTS versions often have older tmux. Install from source or use a PPA:
-
-```bash
-# Add tmux PPA for newer versions
-sudo add-apt-repository ppa:pi-rho/dev
-sudo apt update
-sudo apt install tmux
 ```
 
 ### Terminal connection issues

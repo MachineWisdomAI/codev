@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-// Schema for terminal_sessions table
+// Schema for terminal_sessions table (updated for Spec 0104 — shepherd replaces tmux)
 const TERMINAL_SESSIONS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS terminal_sessions (
   id TEXT PRIMARY KEY,
@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,
   pid INTEGER,
-  tmux_session TEXT,
+  shepherd_socket TEXT,
+  shepherd_pid INTEGER,
+  shepherd_start_time INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
@@ -43,7 +45,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   describe('saveTerminalSession', () => {
     it('should insert a new terminal session', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
+        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -66,7 +68,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
     it('should replace existing session with same ID', () => {
       const stmt = db.prepare(`
-        INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
+        INSERT OR REPLACE INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -82,7 +84,7 @@ describe('Terminal Session Persistence (TICK-001)', () => {
 
     it('should enforce type constraint', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
+        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
@@ -140,25 +142,25 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   describe('reconciliation queries', () => {
     it('should retrieve all sessions for reconciliation', () => {
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, tmux_session)
+        INSERT INTO terminal_sessions (id, project_path, type, role_id, pid, shepherd_socket)
         VALUES (?, ?, ?, ?, ?, ?)
       `);
 
-      stmt.run('term-1', '/project-a', 'architect', null, 1001, 'tmux-session-a');
+      stmt.run('term-1', '/project-a', 'architect', null, 1001, '/tmp/shepherd-1.sock');
       stmt.run('term-2', '/project-b', 'shell', 'shell-1', 1002, null);
 
       const sessions = db.prepare('SELECT * FROM terminal_sessions').all() as Array<{
         id: string;
         project_path: string;
         type: string;
-        tmux_session: string | null;
+        shepherd_socket: string | null;
         pid: number | null;
       }>;
 
       expect(sessions).toHaveLength(2);
 
-      const tmuxSession = sessions.find(s => s.tmux_session !== null);
-      expect(tmuxSession?.tmux_session).toBe('tmux-session-a');
+      const shepherdSession = sessions.find(s => s.shepherd_socket !== null);
+      expect(shepherdSession?.shepherd_socket).toBe('/tmp/shepherd-1.sock');
     });
 
     it('should retrieve sessions by project path', () => {
@@ -179,30 +181,34 @@ describe('Terminal Session Persistence (TICK-001)', () => {
   });
 
   describe('migration compatibility', () => {
-    it('should handle sessions without tmux_session (node-pty only)', () => {
+    it('should handle sessions without shepherd (non-persistent)', () => {
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, tmux_session)
+        INSERT INTO terminal_sessions (id, project_path, type, pid, shepherd_socket)
         VALUES ('term-1', '/project', 'shell', 1234, NULL)
       `).run();
 
       const row = db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get('term-1') as {
-        tmux_session: string | null;
+        shepherd_socket: string | null;
       };
-      expect(row.tmux_session).toBeNull();
+      expect(row.shepherd_socket).toBeNull();
     });
 
-    it('should handle sessions without pid (tmux only)', () => {
+    it('should handle shepherd-backed sessions', () => {
       db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, tmux_session)
-        VALUES ('term-1', '/project', 'architect', NULL, 'af-architect-4201')
+        INSERT INTO terminal_sessions (id, project_path, type, pid, shepherd_socket, shepherd_pid, shepherd_start_time)
+        VALUES ('term-1', '/project', 'architect', NULL, '/tmp/shepherd-1.sock', 12345, 1700000000)
       `).run();
 
       const row = db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get('term-1') as {
         pid: number | null;
-        tmux_session: string | null;
+        shepherd_socket: string | null;
+        shepherd_pid: number | null;
+        shepherd_start_time: number | null;
       };
       expect(row.pid).toBeNull();
-      expect(row.tmux_session).toBe('af-architect-4201');
+      expect(row.shepherd_socket).toBe('/tmp/shepherd-1.sock');
+      expect(row.shepherd_pid).toBe(12345);
+      expect(row.shepherd_start_time).toBe(1700000000);
     });
   });
 
@@ -279,13 +285,13 @@ describe('Terminal Session Persistence (TICK-001)', () => {
     it('should clean up all rows during reconciliation (fresh start)', () => {
       // Insert sessions that survived a crash
       const stmt = db.prepare(`
-        INSERT INTO terminal_sessions (id, project_path, type, pid, tmux_session)
+        INSERT INTO terminal_sessions (id, project_path, type, pid, shepherd_socket)
         VALUES (?, ?, ?, ?, ?)
       `);
 
-      stmt.run('arch-1', '/project-a', 'architect', 1001, 'tmux-a');
+      stmt.run('arch-1', '/project-a', 'architect', 1001, '/tmp/shepherd-a.sock');
       stmt.run('shell-1', '/project-a', 'shell', 1002, null);
-      stmt.run('arch-2', '/project-b', 'architect', 2001, 'tmux-b');
+      stmt.run('arch-2', '/project-b', 'architect', 2001, '/tmp/shepherd-b.sock');
 
       expect(db.prepare('SELECT COUNT(*) as count FROM terminal_sessions').get())
         .toEqual({ count: 3 });

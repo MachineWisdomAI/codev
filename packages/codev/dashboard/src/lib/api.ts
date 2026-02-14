@@ -9,10 +9,10 @@ export interface Builder {
   phase: string;
   worktree: string;
   branch: string;
-  tmuxSession?: string;
   type: string;
   projectId?: string;
   terminalId?: string;
+  persistent?: boolean;
 }
 
 export interface UtilTerminal {
@@ -20,8 +20,8 @@ export interface UtilTerminal {
   name: string;
   port: number;
   pid: number;
-  tmuxSession?: string;
   terminalId?: string;
+  persistent?: boolean;
 }
 
 export interface Annotation {
@@ -35,8 +35,8 @@ export interface Annotation {
 export interface ArchitectState {
   port: number;
   pid: number;
-  tmuxSession?: string;
   terminalId?: string;
+  persistent?: boolean;
 }
 
 // Mirrors GateStatus from packages/codev/src/agent-farm/utils/gate-status.ts

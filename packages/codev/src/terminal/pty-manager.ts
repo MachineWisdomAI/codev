@@ -67,8 +67,7 @@ export class TerminalManager {
       HOME: process.env.HOME ?? '/tmp',
       SHELL: shell,
       TERM: 'xterm-256color',
-      // UTF-8 locale is required for tmux to send Unicode characters (block elements,
-      // powerline symbols, etc.) to the client. Without this, tmux falls back to ASCII.
+      // UTF-8 locale for proper Unicode character rendering
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       LC_ALL: process.env.LC_ALL ?? '',
     };
@@ -105,6 +104,49 @@ export class TerminalManager {
     await session.spawn();
     this.sessions.set(id, session);
 
+    return session.info;
+  }
+
+  /**
+   * Create a PtySession without spawning a process.
+   * Used for shepherd-backed sessions where attachShepherd() will be called
+   * instead of spawn().
+   */
+  createSessionRaw(opts: { label: string; cwd: string }): PtySessionInfo {
+    if (this.sessions.size >= this.config.maxSessions) {
+      throw new ManagerError('MAX_SESSIONS', `Maximum ${this.config.maxSessions} sessions reached`);
+    }
+
+    const id = randomUUID();
+    const sessionConfig: PtySessionConfig = {
+      id,
+      command: '', // Not used for shepherd-backed sessions
+      args: [],
+      cols: 200,
+      rows: 50,
+      cwd: opts.cwd,
+      env: {},
+      label: opts.label,
+      logDir: this.config.logDir,
+      ringBufferLines: this.config.ringBufferLines,
+      diskLogEnabled: this.config.diskLogEnabled,
+      diskLogMaxBytes: this.config.diskLogMaxBytes,
+      reconnectTimeoutMs: this.config.reconnectTimeoutMs,
+    };
+
+    const session = new PtySession(sessionConfig);
+
+    session.on('exit', () => {
+      setTimeout(() => {
+        this.sessions.delete(id);
+      }, 30_000);
+    });
+
+    session.on('timeout', () => {
+      this.sessions.delete(id);
+    });
+
+    this.sessions.set(id, session);
     return session.info;
   }
 
@@ -371,6 +413,13 @@ export class TerminalManager {
   /** Kill all sessions and clean up. */
   shutdown(): void {
     for (const session of this.sessions.values()) {
+      if (session.shepherdBacked) {
+        // Shepherd-backed sessions survive Tower restart. Detach listeners
+        // so that SessionManager.shutdown() disconnecting the client doesn't
+        // cascade into exit events and SQLite row deletion.
+        session.detachShepherd();
+        continue;
+      }
       session.kill();
     }
     this.sessions.clear();

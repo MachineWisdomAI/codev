@@ -16,13 +16,15 @@ interface TerminalProps {
   wsPath: string;
   /** Callback when user clicks a file path in terminal output (Spec 0092, 0101) */
   onFileOpen?: (path: string, line?: number, column?: number, terminalId?: string) => void;
+  /** Whether this session is backed by a persistent shepherd process (Spec 0104) */
+  persistent?: boolean;
 }
 
 /**
  * Terminal component — renders an xterm.js instance connected to the
  * node-pty backend via WebSocket using the hybrid binary protocol.
  */
-export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
+export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -161,10 +163,11 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
-    // Filter DA (Device Attribute) response sequences that tmux echoes as visible
-    // text when attaching to an existing session. Buffer the first 500ms of data
-    // to catch fragmented DA sequences, then flush and switch to direct writes.
-    // Uses a fixed deadline (not reset per frame) so active terminals don't starve.
+    // Filter DA (Device Attribute) response sequences that can appear as visible
+    // text when reconnecting to an existing shepherd session. Buffer the first
+    // 500ms of data to catch fragmented DA sequences, then flush and switch to
+    // direct writes. Uses a fixed deadline (not reset per frame) so active
+    // terminals don't starve.
     let initialBuffer = '';
     let initialPhase = true;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -233,7 +236,7 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     term.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
       // During initial handshake, filter automatic terminal responses
-      // (DA, DSR, mode reports) that xterm.js sends in reply to tmux queries.
+      // (DA, DSR, mode reports) that xterm.js sends during connection.
       // These would otherwise be interpreted as keyboard input by the shell.
       if (initialPhase) {
         const filtered = data
@@ -254,10 +257,9 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
     });
 
     // Scroll: no custom wheel handler. In normal buffer, xterm.js handles
-    // scrollback natively. In alternate buffer (tmux), scroll wheel is a known
-    // limitation (#220) — tmux mouse mode is OFF to preserve text selection
-    // and Cmd+C/Cmd+V clipboard. Arrow keys and Page Up/Down both cause
-    // undesirable side effects (command history, copy mode).
+    // scrollback natively. In alternate buffer, scroll wheel is a known
+    // limitation (#220). Arrow keys and Page Up/Down both cause undesirable
+    // side effects (command history, scrollback navigation).
 
     // Handle window resize (debounced to prevent resize storms)
     const resizeObserver = new ResizeObserver(debouncedFit);
@@ -286,15 +288,28 @@ export function Terminal({ wsPath, onFileOpen }: TerminalProps) {
   }, [wsPath]);
 
   return (
-    <div
-      ref={containerRef}
-      className="terminal-container"
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#1a1a1a',
-      }}
-    />
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {persistent === false && (
+        <div style={{
+          backgroundColor: '#3a2a00',
+          color: '#ffcc00',
+          padding: '4px 12px',
+          fontSize: '12px',
+          flexShrink: 0,
+        }}>
+          Session persistence unavailable — this terminal will not survive a restart
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className="terminal-container"
+        style={{
+          width: '100%',
+          flex: 1,
+          backgroundColor: '#1a1a1a',
+        }}
+      />
+    </div>
   );
 }
 
