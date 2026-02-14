@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -30,6 +30,16 @@ import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protoc
 import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
 import { readCloudConfig, getCloudConfigPath, maskApiKey, type CloudConfig } from '../lib/cloud-config.js';
 import { SessionManager, type ReconnectRestartOptions } from '../../terminal/session-manager.js';
+import type { ProjectTerminals, SSEClient, TerminalEntry, InstanceStatus, DbTerminalSession } from './tower-types.js';
+import {
+  isRateLimited,
+  startRateLimitCleanup,
+  normalizeProjectPath,
+  getProjectName,
+  isTempDirectory,
+  MIME_TYPES,
+  serveStaticFile,
+} from './tower-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,54 +47,9 @@ const __dirname = path.dirname(__filename);
 // Default port for tower dashboard
 const DEFAULT_PORT = 4100;
 
-// Rate limiting for activation requests (Spec 0090 Phase 1)
-// Simple in-memory rate limiter: 10 activations per minute per client
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX = 10;
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const activationRateLimits = new Map<string, RateLimitEntry>();
-
-/**
- * Check if a client has exceeded the rate limit for activations
- * Returns true if rate limit exceeded, false if allowed
- */
-function isRateLimited(clientIp: string): boolean {
-  const now = Date.now();
-  const entry = activationRateLimits.get(clientIp);
-
-  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
-    // New window
-    activationRateLimits.set(clientIp, { count: 1, windowStart: now });
-    return false;
-  }
-
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return true;
-  }
-
-  entry.count++;
-  return false;
-}
-
-/**
- * Clean up old rate limit entries periodically
- */
-function cleanupRateLimits(): void {
-  const now = Date.now();
-  for (const [ip, entry] of activationRateLimits.entries()) {
-    if (now - entry.windowStart >= RATE_LIMIT_WINDOW_MS * 2) {
-      activationRateLimits.delete(ip);
-    }
-  }
-}
-
-// Cleanup stale rate limit entries every 5 minutes
-setInterval(cleanupRateLimits, 5 * 60 * 1000);
+// Rate limiting: imported from ./tower-utils.ts
+// Start cleanup interval — store handle for graceful shutdown
+const rateLimitCleanupInterval = startRateLimitCleanup();
 
 // ============================================================================
 // Cloud Tunnel Client (Spec 0097 Phase 4)
@@ -284,12 +249,7 @@ let terminalManager: TerminalManager | null = null;
 // Map<projectPath, { architect?: terminalId, builders: Map<builderId, terminalId>, shells: Map<shellId, terminalId> }>
 // FileTab type is imported from utils/file-tabs.ts
 
-interface ProjectTerminals {
-  architect?: string;
-  builders: Map<string, string>;
-  shells: Map<string, string>;
-  fileTabs: Map<string, FileTab>;
-}
+// ProjectTerminals interface: imported from ./tower-types.ts
 const projectTerminals = new Map<string, ProjectTerminals>();
 
 /**
@@ -374,30 +334,9 @@ function getTerminalManager(): TerminalManager {
 // TICK-001: Terminal Session Persistence and Reconciliation (Spec 0090)
 // ============================================================================
 
-interface DbTerminalSession {
-  id: string;
-  project_path: string;
-  type: 'architect' | 'builder' | 'shell';
-  role_id: string | null;
-  pid: number | null;
-  shepherd_socket: string | null;
-  shepherd_pid: number | null;
-  shepherd_start_time: number | null;
-  created_at: string;
-}
+// DbTerminalSession interface: imported from ./tower-types.ts
 
-/**
- * Normalize a project path to its canonical form for consistent SQLite storage.
- * Uses realpath to resolve symlinks and relative paths.
- */
-function normalizeProjectPath(projectPath: string): string {
-  try {
-    return fs.realpathSync(projectPath);
-  } catch {
-    // Path doesn't exist yet, normalize without realpath
-    return path.resolve(projectPath);
-  }
-}
+// normalizeProjectPath: imported from ./tower-utils.ts
 
 /**
  * Save a terminal session to SQLite.
@@ -891,11 +830,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
     log('INFO', 'Shepherd sessions will continue running (sockets close on process exit)');
   }
 
-  // 4. Stop gate watcher
+  // 4. Stop gate watcher and rate limit cleanup
   if (gateWatcherInterval) {
     clearInterval(gateWatcherInterval);
     gateWatcherInterval = null;
   }
+  clearInterval(rateLimitCleanupInterval);
 
   // 5. Disconnect tunnel (Spec 0097 Phase 4)
   stopMetadataRefresh();
@@ -923,25 +863,7 @@ log('INFO', `Tower server starting on port ${port}`);
 
 // GateStatus type is imported from utils/gate-status.ts
 
-// Interface for terminal entry in tower UI
-interface TerminalEntry {
-  type: 'architect' | 'builder' | 'shell' | 'file';
-  id: string;
-  label: string;
-  url: string;
-  active: boolean;
-}
-
-// Interface for instance status returned to UI
-interface InstanceStatus {
-  projectPath: string;
-  projectName: string;
-  running: boolean;
-  proxyUrl: string; // Tower proxy URL for dashboard
-  architectUrl: string; // Direct URL to architect terminal
-  terminals: TerminalEntry[]; // All available terminals
-  gateStatus?: GateStatus;
-}
+// TerminalEntry, InstanceStatus: imported from ./tower-types.ts
 
 /**
  * Register a project in the known_projects table so it persists across restarts
@@ -996,12 +918,7 @@ function getKnownProjectPaths(): string[] {
   return Array.from(projectPaths);
 }
 
-/**
- * Get project name from path
- */
-function getProjectName(projectPath: string): string {
-  return path.basename(projectPath);
-}
+// getProjectName: imported from ./tower-utils.ts
 
 // Spec 0100: Gate watcher for af send notifications
 const gateWatcher = new GateWatcher(log);
@@ -1023,10 +940,7 @@ function startGateWatcher(): void {
 
 
 // SSE (Server-Sent Events) infrastructure for push notifications
-interface SSEClient {
-  res: http.ServerResponse;
-  id: string;
-}
+// SSEClient interface: imported from ./tower-types.ts
 
 const sseClients: SSEClient[] = [];
 let notificationIdCounter = 0;
@@ -1246,24 +1160,7 @@ async function getTerminalsForProject(
   return { terminals, gateStatus };
 }
 
-// Resolve once at module load: both symlinked and real temp dir paths
-const _tmpDir = tmpdir();
-const _tmpDirResolved = (() => {
-  try {
-    return fs.realpathSync(_tmpDir);
-  } catch {
-    return _tmpDir;
-  }
-})();
-
-function isTempDirectory(projectPath: string): boolean {
-  return (
-    projectPath.startsWith(_tmpDir + '/') ||
-    projectPath.startsWith(_tmpDirResolved + '/') ||
-    projectPath.startsWith('/tmp/') ||
-    projectPath.startsWith('/private/tmp/')
-  );
-}
+// isTempDirectory: imported from ./tower-utils.ts
 
 /**
  * Get all instances with their status
@@ -1687,43 +1584,7 @@ if (hasReactDashboard) {
   log('WARN', 'React dashboard not found - project dashboards will not work');
 }
 
-// MIME types for static file serving
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.map': 'application/json',
-};
-
-/**
- * Serve a static file from the React dashboard dist
- */
-function serveStaticFile(filePath: string, res: http.ServerResponse): boolean {
-  if (!fs.existsSync(filePath)) {
-    return false;
-  }
-
-  const ext = path.extname(filePath);
-  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-  try {
-    const content = fs.readFileSync(filePath);
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(content);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// MIME_TYPES, serveStaticFile: imported from ./tower-utils.ts
 
 /**
  * Handle tunnel management endpoints (Spec 0097 Phase 4).
