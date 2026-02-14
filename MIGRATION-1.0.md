@@ -33,7 +33,6 @@ codev doctor
 
 # Or check manually
 which node && node --version    # Need 18+
-which ttyd && ttyd --version    # Need 1.7+
 which git && git --version      # Need 2.5+
 which gh && gh auth status      # Need authenticated
 which claude || which gemini || which codex  # Need at least one
@@ -85,7 +84,6 @@ Migration should be performed by an AI assistant (Claude, etc.) that can:
 
 ```bash
 pkill -f 'agent-farm' 2>/dev/null
-pkill -f 'ttyd.*42' 2>/dev/null
 # (session cleanup no longer needed — shepherd processes are self-managing)
 ```
 
