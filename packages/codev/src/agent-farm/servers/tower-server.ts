@@ -41,7 +41,6 @@ import {
   getTerminalsForProject,
   reconcileTerminalSessions,
   startGateWatcher,
-  stopGateWatcher,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -307,12 +306,3 @@ terminalWss = new WebSocketServer({ noServer: true });
 // Spec 0105 Phase 5: WebSocket upgrade handler extracted to tower-websocket.ts
 setupUpgradeHandler(server, terminalWss, port);
 
-// Handle uncaught errors
-process.on('uncaughtException', (err) => {
-  log('ERROR', `Uncaught exception: ${err.message}\n${err.stack}`);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason) => {
-  log('ERROR', `Unhandled rejection: ${reason}`);
-});
