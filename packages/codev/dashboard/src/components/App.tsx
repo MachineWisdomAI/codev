@@ -49,12 +49,13 @@ export function App() {
     }
   }, [state?.projectName]);
 
-  // Check for fullscreen mode from URL
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  useEffect(() => {
+  // Check for fullscreen mode from URL — read synchronously to avoid a
+  // layout switch (desktop → fullscreen) that unmounts/remounts Terminal
+  // components, killing in-flight WebSocket handshakes.
+  const [isFullscreen] = useState(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    setIsFullscreen(urlParams.get('fullscreen') === '1');
-  }, []);
+    return urlParams.get('fullscreen') === '1';
+  });
 
   // Bugfix #205: Mark terminal tabs as activated when first selected
   useEffect(() => {
@@ -124,13 +125,21 @@ export function App() {
     );
   };
 
-  // Fullscreen mode: show only the active terminal, no chrome
-  if (isFullscreen && activeTab && (activeTab.type === 'architect' || activeTab.type === 'builder' || activeTab.type === 'shell')) {
-    return (
-      <div className="fullscreen-terminal">
-        {renderTerminal(activeTab)}
-      </div>
-    );
+  // Fullscreen mode: show only the active terminal, no chrome.
+  // Render nothing until the correct tab is selected to avoid a brief
+  // desktop-layout render that mounts a Terminal (creating a WebSocket)
+  // only to unmount it one frame later when activeTabId switches,
+  // killing the WebSocket before its handshake completes.
+  if (isFullscreen) {
+    if (activeTab && (activeTab.type === 'architect' || activeTab.type === 'builder' || activeTab.type === 'shell')) {
+      return (
+        <div className="fullscreen-terminal">
+          {renderTerminal(activeTab)}
+        </div>
+      );
+    }
+    // Waiting for tab selection — render empty container to avoid layout flash
+    return <div className="fullscreen-terminal" />;
   }
 
   if (isMobile) {

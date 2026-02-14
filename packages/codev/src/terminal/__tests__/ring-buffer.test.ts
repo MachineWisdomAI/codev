@@ -57,7 +57,60 @@ describe('RingBuffer', () => {
   it('pushData splits on newlines', () => {
     const buf = new RingBuffer(10);
     buf.pushData('line1\nline2\nline3');
+    // "line3" has no trailing \n, so it's held as a partial
     expect(buf.getAll()).toEqual(['line1', 'line2', 'line3']);
+  });
+
+  it('pushData does not create blank lines from trailing newlines', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('hello\n');
+    buf.pushData('world\n');
+    // Before fix: ["hello", "", "world", ""] → join → "hello\n\nworld\n" (extra blanks)
+    // After fix: ["hello", "world"] → join → "hello\nworld" (correct)
+    expect(buf.getAll()).toEqual(['hello', 'world']);
+  });
+
+  it('pushData handles partial lines across chunk boundaries', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('hel');
+    buf.pushData('lo\nworld\n');
+    // "hel" is incomplete — held as partial, prepended to next chunk
+    expect(buf.getAll()).toEqual(['hello', 'world']);
+  });
+
+  it('pushData handles multiple chunks ending with newlines', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('prompt % \n');
+    buf.pushData('ls\n');
+    buf.pushData('file1\nfile2\n');
+    const lines = buf.getAll();
+    expect(lines).toEqual(['prompt % ', 'ls', 'file1', 'file2']);
+    // Replay round-trip should not have extra blank lines
+    expect(lines.join('\n')).toBe('prompt % \nls\nfile1\nfile2');
+  });
+
+  it('pushData preserves trailing partial for getAll and getSince', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('complete\npartial');
+    expect(buf.getAll()).toEqual(['complete', 'partial']);
+    // "partial" hasn't been assigned a seq, but is included in results
+    expect(buf.getSince(0)).toEqual(['complete', 'partial']);
+  });
+
+  it('pushData empty string is a no-op', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('hello\n');
+    buf.pushData('');
+    buf.pushData('world\n');
+    expect(buf.getAll()).toEqual(['hello', 'world']);
+  });
+
+  it('pushData bare newline creates empty line', () => {
+    const buf = new RingBuffer(10);
+    buf.pushData('hello\n');
+    buf.pushData('\n');
+    buf.pushData('world\n');
+    expect(buf.getAll()).toEqual(['hello', '', 'world']);
   });
 
   it('clear resets content but keeps seq', () => {

@@ -8,12 +8,13 @@ export class RingBuffer {
   private head: number = 0;
   private count: number = 0;
   private seq: number = 0; // monotonically increasing sequence number
+  private partial: string = ''; // incomplete line from previous pushData call
 
   constructor(private readonly capacity: number = 1000) {
     this.buffer = new Array(capacity);
   }
 
-  /** Push a line into the buffer. Returns the assigned sequence number. */
+  /** Push a complete line into the buffer. Returns the assigned sequence number. */
   push(line: string): number {
     const index = (this.head + this.count) % this.capacity;
     this.buffer[index] = line;
@@ -25,21 +26,38 @@ export class RingBuffer {
     return ++this.seq;
   }
 
-  /** Push raw data, splitting on newlines. Returns last sequence number. */
+  /**
+   * Push raw data, splitting on newlines. Handles partial lines across
+   * chunk boundaries: if data doesn't end with \n, the trailing fragment
+   * is held and prepended to the next pushData call.
+   *
+   * Returns last sequence number.
+   */
   pushData(data: string): number {
-    const lines = data.split('\n');
+    const combined = this.partial + data;
+    const parts = combined.split('\n');
+
+    // Last element is either:
+    // - "" if data ended with \n (all lines complete)
+    // - non-empty if data ended mid-line (incomplete line)
+    // Either way, save it as the new partial.
+    this.partial = parts.pop()!;
+
     let lastSeq = this.seq;
-    for (const line of lines) {
+    for (const line of parts) {
       lastSeq = this.push(line);
     }
     return lastSeq;
   }
 
-  /** Get all stored lines in order. */
+  /** Get all stored lines in order, including any incomplete trailing line. */
   getAll(): string[] {
     const result: string[] = [];
     for (let i = 0; i < this.count; i++) {
       result.push(this.buffer[(this.head + i) % this.capacity]);
+    }
+    if (this.partial) {
+      result.push(this.partial);
     }
     return result;
   }
@@ -55,6 +73,9 @@ export class RingBuffer {
     const result: string[] = [];
     for (let i = skip; i < this.count; i++) {
       result.push(this.buffer[(this.head + i) % this.capacity]);
+    }
+    if (this.partial) {
+      result.push(this.partial);
     }
     return result;
   }
@@ -74,6 +95,7 @@ export class RingBuffer {
     this.buffer = [];
     this.head = 0;
     this.count = 0;
+    this.partial = '';
     // Don't reset seq — it should be monotonic
   }
 }

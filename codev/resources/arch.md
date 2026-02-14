@@ -250,6 +250,21 @@ Architect sessions use `restartOnExit: true` in `SessionManager.createSession()`
 - `maxRestarts` (default: 50) prevents infinite restart loops
 - Counter resets after `restartResetAfter` (default: 5min) of stable operation
 
+#### Known Issue: Hardcoded Initial Dimensions (cols: 200, rows: 50)
+
+All shepherd sessions are spawned with `cols: 200, rows: 50` in `tower-server.ts` before the browser connects. This creates a **scrollback gap**: the shell draws its prompt at row 50 of a 50-row terminal, then the browser connects and resizes to its actual size (e.g., ~35 rows). The original 50 rows of mostly-blank output end up in the scrollback, causing visible empty space when scrolling up.
+
+**Symptom**: Large blank area above the first few prompts when scrolling up in a newly opened terminal.
+
+**Root cause**: Shepherd spawns the PTY before the browser's actual dimensions are known (chicken-and-egg: browser can't send resize until WebSocket connects, but shepherd needs cols/rows at spawn time).
+
+**Potential fixes**:
+1. Use smaller defaults (e.g., `cols: 80, rows: 24`) to minimize the gap
+2. Lazy spawn: defer PTY creation until the first RESIZE frame arrives from Tower
+3. Send a clear screen sequence (`ESC[2J ESC[H`) after the first resize
+
+**Affected code**: `tower-server.ts` lines calling `shepherdManager.createSession()` — search for `cols: 200`.
+
 #### Security
 
 - **Unix socket permissions**: `~/.codev/run/` is `0700` (owner-only). Socket files are `0600`.
@@ -435,11 +450,11 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │  │                     │    │                     │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Architect     │  │    │  │ Architect     │  │                         │
-│  │  │ (node-pty)    │  │    │  │ (node-pty)    │  │                         │
+│  │  │ (shepherd)    │  │    │  │ (shepherd)    │  │                         │
 │  │  └───────────────┘  │    │  └───────────────┘  │                         │
 │  │  ┌───────────────┐  │    │  ┌───────────────┐  │                         │
 │  │  │ Shells        │  │    │  │ Builders      │  │                         │
-│  │  │ (node-pty)    │  │    │  │ (node-pty)    │  │                         │
+│  │  │ (shepherd)    │  │    │  │ (shepherd)    │  │                         │
 │  │  └───────────────┘  │    │  └───────────────┘  │                         │
 │  └─────────────────────┘    └─────────────────────┘                         │
 │                                                                              │
@@ -2239,12 +2254,12 @@ Based on consultation with external models, these scenarios MUST be tested:
    - Connect to architect terminal via WebSocket
    - Verify terminal receives output
 
-4. **State Persistence Test**
-   - Activate project
+4. **State Persistence Test** (Shepherd, Spec 0104)
+   - Activate project (creates shepherd-backed architect terminal)
    - Restart Tower
-   - Verify project shows as inactive (expected - terminals are ephemeral)
-   - Re-activate project
-   - Verify terminals work
+   - Verify project reconnects to surviving shepherd process
+   - Verify architect terminal shows replay data (output continuity)
+   - Verify terminal is interactive (keystrokes reach shell)
 
 ### Running Integration Tests
 
@@ -2270,6 +2285,6 @@ npm run test:e2e -- --grep "tower" --headed
 
 ---
 
-**Last Updated**: 2026-02-13
+**Last Updated**: 2026-02-14
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Updated for Spec 0104 Phase 4 (tmux removal). Removed all tmux references, updated reconciliation from triple-source to dual-source, removed tmux from dependencies/glossary, deleted terminal-tmux.md.
+**Changes**: Updated Tower diagram labels from (node-pty) to (shepherd), updated State Persistence Test for shepherd reconnection, documented known hardcoded dimensions issue (cols:200, rows:50) causing scrollback gap.
