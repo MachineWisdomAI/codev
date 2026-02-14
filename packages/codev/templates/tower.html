@@ -1963,8 +1963,8 @@
         const data = await res.json();
         if (data.authUrl) {
           window.location.href = data.authUrl;
-        } else if (data.error) {
-          errorEl.textContent = data.error;
+        } else {
+          errorEl.textContent = data.error || 'Unexpected response from server';
           errorEl.style.display = 'block';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Connect';
