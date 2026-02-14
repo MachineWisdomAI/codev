@@ -414,9 +414,13 @@ export class TerminalManager {
   /** Kill all sessions and clean up. */
   shutdown(): void {
     for (const session of this.sessions.values()) {
-      // Shepherd-backed sessions survive Tower restart — only disconnect,
-      // don't send SIGTERM to the shepherd process.
-      if (session.shepherdBacked) continue;
+      if (session.shepherdBacked) {
+        // Shepherd-backed sessions survive Tower restart. Detach listeners
+        // so that SessionManager.shutdown() disconnecting the client doesn't
+        // cascade into exit events and SQLite row deletion.
+        session.detachShepherd();
+        continue;
+      }
       session.kill();
     }
     this.sessions.clear();

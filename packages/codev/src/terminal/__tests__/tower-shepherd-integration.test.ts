@@ -318,4 +318,34 @@ describe('TerminalManager.shutdown() shepherd handling', () => {
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it('detaches listeners so client close does not trigger exit event', async () => {
+    const { TerminalManager } = await import('../pty-manager.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detach-test-'));
+
+    const manager = new TerminalManager({
+      projectRoot: tmpDir,
+    });
+
+    const info = manager.createSessionRaw({
+      label: 'Shepherd Detach Test',
+      cwd: tmpDir,
+    });
+    const session = manager.getSession(info.id)!;
+    const client = new MockShepherdClient();
+    session.attachShepherd(client, Buffer.alloc(0), 8888);
+
+    const exitSpy = vi.fn();
+    session.on('exit', exitSpy);
+
+    // Simulate Tower shutdown: detachShepherd then client disconnect
+    manager.shutdown();
+    // After shutdown, simulate the client disconnect (as SessionManager.shutdown() does)
+    client.simulateClose();
+
+    // The exit event should NOT have fired — listeners were removed by detachShepherd()
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });

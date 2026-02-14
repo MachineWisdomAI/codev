@@ -155,6 +155,19 @@ export class PtySession extends EventEmitter {
     return this._shepherdBacked;
   }
 
+  /**
+   * Detach from shepherd client during Tower shutdown.
+   * Removes all event listeners so that SessionManager.shutdown() disconnecting
+   * the client doesn't cascade into exit events and SQLite row deletion.
+   */
+  detachShepherd(): void {
+    if (this.shepherdClient) {
+      this.shepherdClient.removeAllListeners();
+      this.shepherdClient = null;
+    }
+    this.cleanupShepherd();
+  }
+
   private cleanupShepherd(): void {
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer);
