@@ -10,7 +10,7 @@ This creates real problems:
 - **Regression risk**: Unrelated changes (e.g., tunnel config) can break terminal lifecycle because everything shares one scope
 - **Context window pressure**: AI builders burn significant context just reading the file
 
-Secondary targets (> 700 lines): `commands/spawn.ts` (1,405), `commands/consult/index.ts` (871), `commands/porch/next.ts` (713).
+Secondary targets (> 700 lines): `commands/spawn.ts` (1,405), `commands/consult/index.ts` (871), `commands/porch/next.ts` (713). Note: `consult/index.ts` and `porch/next.ts` are out of scope for this spec — they are below 900 lines and do not share the "god object" problem. They may be addressed in a future spec if needed.
 
 ## Goals
 
@@ -84,6 +84,7 @@ packages/codev/src/agent-farm/servers/
 
 **tower-terminals.ts** (~400 lines)
 - Terminal session CRUD (in-memory + SQLite sync)
+- File tab persistence (save, delete, load for project)
 - tmux session management (create, kill, exists, list, sanitize)
 - `reconcileTerminalSessions()` — startup reconnection
 - `getTerminalsForProject()` — build terminal list for API
@@ -93,14 +94,14 @@ packages/codev/src/agent-farm/servers/
 - `connectTunnel()`, `disconnectTunnel()`
 - Config file watching
 - Metadata gathering and refresh
-- Tunnel endpoint handler (`/api/tunnel/*`)
+- Tunnel endpoint handler (`/api/tunnel/*`) — `tower-routes.ts` delegates `/api/tunnel/*` requests to this module (one-way dependency, no circular import)
 
 **tower-websocket.ts** (~100 lines)
 - `handleTerminalWebSocket()` — bidirectional WS ↔ PTY
 - Frame encoding/decoding delegation
 
 **tower-utils.ts** (~100 lines)
-- Rate limiting
+- Rate limiting (note: the current `setInterval(cleanupRateLimits, ...)` side effect at module scope must be converted to an explicit `startRateLimitCleanup()` call managed by the orchestrator)
 - Path normalization
 - Temp directory detection
 - MIME type / language detection
@@ -115,11 +116,15 @@ interface TowerContext {
   port: number;
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   terminalManager: TerminalManager;
+  shepherdManager: SessionManager | null;
+  projectTerminals: Map<string, ProjectTerminals>;
   db: GlobalDb;
   gateWatcher: GateWatcher;
   broadcastNotification: (n: Notification) => void;
   tunnelClient: TunnelClient | null;
   knownProjects: Set<string>;
+  server: http.Server;       // needed for graceful shutdown
+  terminalWss: WebSocketServer; // needed for graceful shutdown
 }
 ```
 
@@ -149,7 +154,7 @@ interface TowerContext {
 ### Size targets
 - [ ] `tower-server.ts` is ≤ 400 lines
 - [ ] `spawn.ts` is ≤ 600 lines
-- [ ] No file in `packages/codev/src/` exceeds 900 lines (excluding test files)
+- [ ] No file in `packages/codev/src/agent-farm/servers/` exceeds 900 lines (excluding test files)
 - [ ] If a module exceeds its target line count while preserving cohesion, document the reason — cohesion trumps arbitrary limits
 
 ### Build and test
@@ -175,7 +180,7 @@ interface TowerContext {
 | Risk | Mitigation |
 |------|-----------|
 | ~~Merge conflict with builder 0104~~ | ~~Merge 0104 first, then decompose~~ **RESOLVED** |
-| Circular dependencies between modules | TowerContext pattern avoids circular imports |
+| Circular dependencies between modules | TowerContext pattern avoids circular imports; if shared types are needed between modules, extract a `tower-types.ts` for interfaces |
 | Shared mutable state (globals) | Audit all `let` declarations at module scope — pass through context |
 | Performance regression from module boundaries | Negligible — these are function calls, not RPC |
 | ~~Missing re-exports break consumers~~ | ~~Grep for all imports of tower-server.ts before starting~~ **VERIFIED**: No external imports exist |
