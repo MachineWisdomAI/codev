@@ -139,30 +139,36 @@ These files are NOT renamed but contain shepherd references that must be updated
 
 ### SQLite Migration
 
-A new migration (v8) must:
+A new migration (v8) must use the **table-rebuild pattern** (consistent with v7) to rename columns:
 
-1. **Rename columns**:
-   - `shepherd_socket` → `shellper_socket`
-   - `shepherd_pid` → `shellper_pid`
-   - `shepherd_start_time` → `shellper_start_time`
+1. **Rebuild the `terminal_sessions` table** with new column names:
+   - Create `terminal_sessions_new` with `shellper_socket`, `shellper_pid`, `shellper_start_time`
+   - INSERT from old table, mapping `shepherd_*` → `shellper_*` columns
+   - DROP old table, RENAME new table
+   - Recreate indexes
 
-2. **Update stored socket path values**: Replace `shepherd-` with `shellper-` in the `shellper_socket` column values so existing paths match the new naming convention:
+2. **Update stored socket path values** in the same migration:
    ```sql
    UPDATE terminal_sessions SET shellper_socket = REPLACE(shellper_socket, 'shepherd-', 'shellper-');
    ```
 
-3. **Rename physical socket files**: During migration or at startup, rename existing `~/.codev/run/shepherd-*.sock` files to `~/.codev/run/shellper-*.sock` on disk.
+3. **Rename physical socket files on disk** in the same migration function (after DB changes):
+   - Scan `~/.codev/run/` for `shepherd-*.sock` files
+   - Rename each to `shellper-*.sock`
+   - Skip any file that cannot be renamed (file missing, permissions, etc.)
 
-Note: Old migration code (v6 etc.) that references `shepherd_*` column names must remain as-is — those migrations ran against the old schema and are historically correct. The grep exclusion in AC #1 covers this.
+**Fresh install handling**: The migration system marks all migrations as done on fresh installs (they get current schema from GLOBAL_SCHEMA). Migration v8 is a no-op for fresh installs — they already have `shellper_*` columns from the updated GLOBAL_SCHEMA.
+
+**Old migration code** (v6/v7) that references `shepherd_*` column names must remain as-is — those migrations ran against the old schema and are historically correct. The grep exclusion in AC #1 covers this.
 
 ### Session Continuity
 
-**Clean break is acceptable.** This is a development tool where sessions are ephemeral. The migration should:
-- Rename columns and update stored path values (as above)
-- Rename socket files on disk where they exist
-- If a running shepherd process's socket cannot be renamed (e.g., process is actively using it), mark that session as stale — the user can restart it
+**Clean break is acceptable.** This is a development tool where sessions are ephemeral. The migration:
+- Rebuilds the table with new column names and updates stored path values
+- Renames socket files on disk where they exist
+- Silently skips any socket files that cannot be renamed
 
-No dual-path fallback logic or backward-compatibility shims are needed. The upgrade replaces all references atomically.
+No dual-path fallback logic or backward-compatibility shims are needed. Sessions connected to old sockets will naturally disconnect on upgrade; users restart them.
 
 ### Documentation Updates
 
