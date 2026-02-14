@@ -457,6 +457,8 @@ export class TunnelClient {
     const authority = headers[':authority'] as string || `localhost:${this.options.localPort}`;
     const path = headers[':path'] as string || '/';
 
+    console.log(`[tunnel-ws] CONNECT ${path} → localhost:${this.options.localPort}`);
+
     // Forward non-hop-by-hop headers from the H2 CONNECT to the local WS upgrade
     const forwardHeaders: Record<string, string | string[]> = {
       'Upgrade': 'websocket',
@@ -484,6 +486,7 @@ export class TunnelClient {
     });
 
     wsReq.on('upgrade', (_res, socket, head) => {
+      console.log(`[tunnel-ws] upgrade success for ${path}, responding 200 to H2`);
       // Respond 200 to the H2 CONNECT
       stream.respond({ ':status': 200 });
 
@@ -496,21 +499,27 @@ export class TunnelClient {
       socket.pipe(stream);
       stream.pipe(socket);
 
-      socket.on('error', () => stream.destroy());
-      stream.on('error', () => socket.destroy());
-      socket.on('close', () => { if (!stream.destroyed) stream.destroy(); });
-      stream.on('close', () => { if (!socket.destroyed) socket.destroy(); });
+      socket.on('error', (err) => { console.error(`[tunnel-ws] local socket error: ${err.message}`); stream.destroy(); });
+      stream.on('error', (err) => { console.error(`[tunnel-ws] H2 stream error: ${err.message}`); socket.destroy(); });
+      socket.on('close', () => { console.log(`[tunnel-ws] local socket closed for ${path}`); if (!stream.destroyed) stream.destroy(); });
+      stream.on('close', () => { console.log(`[tunnel-ws] H2 stream closed for ${path}`); if (!socket.destroyed) socket.destroy(); });
     });
 
     // Handle non-upgrade responses (e.g. 404 for missing terminal)
     wsReq.on('response', (res) => {
+      let body = '';
+      res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      res.on('end', () => {
+        console.error(`[tunnel-ws] HTTP ${res.statusCode} for ${path}: ${body || '(no body)'}`);
+      });
       if (!stream.destroyed) {
         stream.respond({ ':status': res.statusCode || 502 });
         res.pipe(stream);
       }
     });
 
-    wsReq.on('error', () => {
+    wsReq.on('error', (err) => {
+      console.error(`[tunnel-ws] request error for ${path}: ${err.message}`);
       if (!stream.destroyed) {
         stream.respond({ ':status': 502 });
         stream.end();
