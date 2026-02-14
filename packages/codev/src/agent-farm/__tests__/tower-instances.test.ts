@@ -218,8 +218,9 @@ describe('tower-instances', () => {
   // =========================================================================
 
   describe('getInstances', () => {
-    it('throws when module is not initialized', async () => {
-      await expect(getInstances()).rejects.toThrow('Instances module not initialized');
+    it('returns empty array when called before initInstances (startup guard)', async () => {
+      const instances = await getInstances();
+      expect(instances).toEqual([]);
     });
 
     it('returns empty array when no projects known', async () => {

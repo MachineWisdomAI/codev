@@ -138,7 +138,7 @@ export function getKnownProjectPaths(): string[] {
  * Get all instances with their status.
  */
 export async function getInstances(): Promise<InstanceStatus[]> {
-  if (!_deps) throw new Error('Instances module not initialized');
+  if (!_deps) return []; // Module not yet initialized (startup window)
 
   const knownPaths = getKnownProjectPaths();
   const instances: InstanceStatus[] = [];
