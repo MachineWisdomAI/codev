@@ -438,6 +438,23 @@ function saveTerminalSession(
 }
 
 /**
+ * Check if a terminal session is persistent (shepherd-backed or tmux-backed).
+ * A session is persistent if it can survive a Tower restart.
+ */
+function isSessionPersistent(terminalId: string, session: PtySession): boolean {
+  // Shepherd-backed sessions are always persistent
+  if (session.shepherdBacked) return true;
+  // Check SQLite for tmux_session — tmux sessions are also persistent
+  try {
+    const db = getGlobalDb();
+    const row = db.prepare('SELECT tmux_session FROM terminal_sessions WHERE id = ?').get(terminalId) as { tmux_session: string | null } | undefined;
+    return row?.tmux_session != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Delete a terminal session from SQLite
  */
 function deleteTerminalSession(terminalId: string): void {
@@ -1806,41 +1823,20 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
           }
         }
 
-        // Fallback: tmux or non-persistent session
+        // Fallback: non-persistent session (graceful degradation per plan)
+        // Note: tmux reconnection for existing sessions is handled in reconciliation.
+        // New sessions do NOT create tmux — shepherd is the only persistence backend.
         if (!shepherdCreated) {
-          let fallbackCmd = cmd;
-          let fallbackArgs = cmdArgs;
-          let activeTmuxSession: string | null = null;
-
-          if (tmuxAvailable) {
-            const tmuxName = `architect-${path.basename(projectPath)}`;
-            const sanitizedTmuxName = sanitizeTmuxSessionName(tmuxName);
-            if (tmuxSessionExists(sanitizedTmuxName)) {
-              fallbackCmd = 'tmux';
-              fallbackArgs = ['attach-session', '-t', sanitizedTmuxName];
-              activeTmuxSession = sanitizedTmuxName;
-            } else {
-              const innerCmd = [fallbackCmd, ...fallbackArgs].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-              const loopCmd = `while true; do ${innerCmd}; echo "Architect exited. Restarting in 2s..."; sleep 2; done`;
-              const createdName = createTmuxSession(tmuxName, 'sh', ['-c', loopCmd], projectPath, 200, 50);
-              if (createdName) {
-                fallbackCmd = 'tmux';
-                fallbackArgs = ['attach-session', '-t', createdName];
-                activeTmuxSession = createdName;
-              }
-            }
-          }
-
           const session = await manager.createSession({
-            command: fallbackCmd,
-            args: fallbackArgs,
+            command: cmd,
+            args: cmdArgs,
             cwd: projectPath,
             label: 'Architect',
             env: cleanEnv,
           });
 
           entry.architect = session.id;
-          saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, activeTmuxSession);
+          saveTerminalSession(session.id, resolvedPath, 'architect', null, session.pid, null);
 
           const ptySession = manager.getSession(session.id);
           if (ptySession) {
@@ -1854,9 +1850,7 @@ async function launchInstance(projectPath: string): Promise<{ success: boolean; 
             });
           }
 
-          if (!activeTmuxSession) {
-            log('WARN', `Architect terminal for ${projectPath} is non-persistent (no shepherd or tmux)`);
-          }
+          log('WARN', `Architect terminal for ${projectPath} is non-persistent (shepherd unavailable)`);
         }
 
         log('INFO', `Created architect terminal for project: ${projectPath}`);
@@ -2835,7 +2829,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId: entry.architect,
-                persistent: session.shepherdBacked,
+                persistent: isSessionPersistent(entry.architect, session),
               };
             }
           }
@@ -2850,7 +2844,7 @@ const server = http.createServer(async (req, res) => {
                 port: 0,
                 pid: session.pid || 0,
                 terminalId,
-                persistent: session.shepherdBacked,
+                persistent: isSessionPersistent(terminalId, session),
               });
             }
           }
@@ -2870,7 +2864,7 @@ const server = http.createServer(async (req, res) => {
                 branch: '',
                 type: 'spec',
                 terminalId,
-                persistent: session.shepherdBacked,
+                persistent: isSessionPersistent(terminalId, session),
               });
             }
           }
