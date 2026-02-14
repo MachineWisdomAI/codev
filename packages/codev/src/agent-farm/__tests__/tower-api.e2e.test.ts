@@ -287,9 +287,9 @@ describe('Tower API (Phase 1)', () => {
       expect(activateData.success).toBe(true);
 
       // Poll for project to appear in the projects list with terminals
-      // CI runners can be slow — allow up to 15s (60 × 250ms)
+      // CI runners can be slow — allow up to 60s (120 × 500ms)
       let project: any;
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 120; i++) {
         const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/projects`);
         expect(listRes.ok).toBe(true);
         const listData = await listRes.json();
@@ -297,7 +297,7 @@ describe('Tower API (Phase 1)', () => {
           p.path === testProjectDir || p.path.includes('tower-sqlite-test')
         );
         if (project?.terminals > 0) break;
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 500));
       }
       expect(project).toBeDefined();
       expect(project.terminals).toBeGreaterThan(0);

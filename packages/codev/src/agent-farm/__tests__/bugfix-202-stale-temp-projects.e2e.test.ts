@@ -12,8 +12,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, ChildProcess, execSync } from 'node:child_process';
-import { resolve, basename } from 'node:path';
+import { spawn, ChildProcess } from 'node:child_process';
+import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import net from 'node:net';
@@ -115,23 +115,22 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
     expect(activateRes.ok).toBe(true);
 
     // Step 3: Poll for project to appear in the project list
-    // CI runners can be slow — allow up to 15s (60 × 250ms)
+    // CI runners can be slow — allow up to 60s (120 × 500ms)
     let found1: any;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       const listRes1 = await fetch(`${base}/api/projects`);
       expect(listRes1.ok).toBe(true);
       const data1 = await listRes1.json();
       found1 = data1.projects.find((p: { path: string }) => p.path === tempProjectDir);
       if (found1) break;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 500));
     }
     expect(found1).toBeDefined();
 
     // Step 4: Deactivate the project (stops terminals)
     await fetch(`${base}/api/projects/${encodedPath}/deactivate`, { method: 'POST' });
 
-    // Step 5: Kill tmux session and delete the temp directory from disk (simulating E2E test teardown)
-    try { execSync(`tmux kill-session -t "architect-${basename(tempProjectDir)}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
+    // Step 5: Delete the temp directory from disk (simulating E2E test teardown)
     rmSync(tempProjectDir, { recursive: true, force: true });
 
     // Step 6: Verify it NO LONGER appears in the project list
@@ -175,7 +174,6 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
       );
       expect(found).toBeUndefined();
     } finally {
-      try { execSync(`tmux kill-session -t "architect-${basename(tempProjectDir)}" 2>/dev/null`, { stdio: 'ignore' }); } catch { /* ignore */ }
       rmSync(tempProjectDir, { recursive: true, force: true });
     }
   });
