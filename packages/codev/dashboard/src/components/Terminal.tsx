@@ -279,7 +279,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           }
           if (key === 'c') {
             const sel = term.getSelection();
-            if (sel) navigator.clipboard.writeText(sel).catch(() => {});
+            if (sel) navigator.clipboard?.writeText(sel).catch(() => {});
             mod.ctrl = false;
             mod.cmd = false;
             mod.clearCallback?.();
