@@ -42,7 +42,7 @@ Additionally, the CLI terminology ("register" / "deregister") is confusing. The 
 ### When Not Connected
 The cloud status area in the header shows "Codev Cloud" with a "Connect" button. Clicking it opens a dialog with:
 1. **Device name** input (default: machine hostname)
-2. **Service URL** input (default: `https://codevos.ai`)
+2. **Service URL** input (default: `https://cloud.codevos.ai`)
 3. A "Connect" button that starts the OAuth flow
 
 The OAuth flow navigates the current browser tab to codevos.ai. After authentication, the callback redirects back to Tower (not an ephemeral server), Tower exchanges the token, saves credentials, and connects the tunnel. The UI updates to show connected status.
@@ -57,6 +57,8 @@ The cloud status shows the green dot, device name, uptime, and a "Disconnect" bu
 
 ### Smart Connect
 If credentials exist but the tunnel is down (e.g., tunnel dropped, Tower restarted), Connect reconnects the tunnel without re-doing OAuth. Specifically: if `readCloudConfig()` returns a non-null config (all 4 required fields present as non-empty strings: `tower_id`, `tower_name`, `api_key`, `server_url`), POST `/api/tunnel/connect` with no body reconnects the existing tunnel. If the config file is missing, `readCloudConfig()` returns null and the full OAuth flow starts. If the config file exists but is malformed (invalid JSON or missing fields), `readCloudConfig()` returns null and the OAuth flow starts (the existing validation in `cloud-config.ts` handles this).
+
+**On Tower restart**: Tower automatically attempts to reconnect the tunnel on startup if a valid cloud config exists (this is the existing behavior). If the config is missing, malformed, or the reconnect fails (e.g., revoked API key, network error), Tower simply shows as disconnected — no automatic OAuth flow, no error dialogs. The user can click "Connect" to initiate a fresh connection when ready.
 
 ## Approach
 
@@ -107,7 +109,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 1. **When not connected**: Cloud status shows "Codev Cloud" with a "Connect" button (replacing the current empty/hidden state)
 2. Clicking "Connect" opens a modal dialog with:
    - Device name input (default: machine hostname from `/api/status`, validated: 1-63 chars, lowercase alphanumeric + hyphens, must start/end with letter or digit)
-   - Service URL input (default: `https://codevos.ai`)
+   - Service URL input (default: `https://cloud.codevos.ai`)
    - "Connect" and "Cancel" buttons
 3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If the normalized result is empty or still fails validation (e.g., starts/ends with hyphen, exceeds 63 chars, all-hyphens), show inline error: "Invalid device name. Use letters, numbers, and hyphens (must start and end with a letter or number)."
 4. POST to `/api/tunnel/connect` with `{ name, serverUrl, origin: window.location.origin }`, receive `{ authUrl }`
@@ -169,7 +171,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 
 ### Integration/E2E Tests
 - **CLI aliases**: `af tower connect` and `af tower disconnect` execute correctly; `af tower register` and `af tower deregister` still work as hidden aliases
-- **Connect dialog UI**: renders when not connected, device name defaults to hostname, service URL defaults to `https://codevos.ai`, validation errors display inline
+- **Connect dialog UI**: renders when not connected, device name defaults to hostname, service URL defaults to `https://cloud.codevos.ai`, validation errors display inline
 - **Disconnect UI**: confirmation dialog appears, connected status updates to disconnected after successful disconnect
 
 ### Not Tested (intentional)
@@ -180,7 +182,7 @@ The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and com
 
 - OAuth callback must come to Tower's own HTTP server (port 4100 default)
 - Device name: 1-63 characters, lowercase alphanumeric + hyphens, must start and end with a letter or digit
-- Default service URL: `https://codevos.ai`
+- Default service URL: `https://cloud.codevos.ai`
 - Cloud config permissions (0o600) must be maintained
 - Callback URL constructed from UI-provided origin (supports LAN access). The `origin` is not a security boundary — nonce validation provides security. Origin is validated as a well-formed URL but not allowlisted (Tower is a local-first tool accessed from trusted networks).
 
