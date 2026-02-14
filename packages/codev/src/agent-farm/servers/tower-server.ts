@@ -1248,6 +1248,10 @@ async function getTerminalsForProject(
         saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, newSession.pid, sanitizedTmux);
         dbSession.id = newSession.id;
         session = manager.getSession(newSession.id);
+        // Ensure correct tmux options on reconnected sessions
+        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'mouse', 'off'], { stdio: 'ignore' });
+        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'alternate-screen', 'off'], { stdio: 'ignore' });
+        spawnSync('tmux', ['set-option', '-t', sanitizedTmux, 'history-limit', '50000'], { stdio: 'ignore' });
         log('INFO', `Reconnected to tmux "${sanitizedTmux}" on-the-fly → ${newSession.id}`);
       } catch (err) {
         log('WARN', `Failed to reconnect to tmux "${dbSession.tmux_session}": ${(err as Error).message} — will retry on next poll`);
@@ -1379,6 +1383,11 @@ async function getTerminalsForProject(
         freshEntry.shells.set(roleId, newSession.id);
         terminals.push({ type: 'shell', id: roleId, label: `Shell ${roleId.replace('shell-', '')}`, url: `${proxyUrl}?tab=shell-${roleId}`, active: true });
       }
+
+      // Ensure correct tmux options on recovered sessions
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'mouse', 'off'], { stdio: 'ignore' });
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'alternate-screen', 'off'], { stdio: 'ignore' });
+      spawnSync('tmux', ['set-option', '-t', tmuxName, 'history-limit', '50000'], { stdio: 'ignore' });
 
       // Persist to SQLite so future polls find it directly
       saveTerminalSession(newSession.id, normalizedPath, parsed.type, roleId, newSession.pid, tmuxName);
