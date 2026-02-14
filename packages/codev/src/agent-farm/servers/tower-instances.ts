@@ -280,7 +280,7 @@ export async function getDirectorySuggestions(inputPath: string): Promise<{ path
  * Auto-adopts non-codev directories and creates architect terminal.
  */
 export async function launchInstance(projectPath: string): Promise<{ success: boolean; error?: string; adopted?: boolean }> {
-  if (!_deps) throw new Error('Instances module not initialized');
+  if (!_deps) return { success: false, error: 'Tower is still starting up. Try again shortly.' };
 
   // Validate path exists
   if (!fs.existsSync(projectPath)) {
@@ -474,7 +474,7 @@ export async function killTerminalWithShepherd(manager: TerminalManager, termina
  * Phase 4 (Spec 0090): Tower manages terminals directly.
  */
 export async function stopInstance(projectPath: string): Promise<{ success: boolean; error?: string; stopped: number[] }> {
-  if (!_deps) throw new Error('Instances module not initialized');
+  if (!_deps) return { success: false, error: 'Tower is still starting up. Try again shortly.', stopped: [] };
 
   const stopped: number[] = [];
   const manager = _deps.getTerminalManager();

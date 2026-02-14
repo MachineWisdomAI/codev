@@ -362,8 +362,10 @@ describe('tower-instances', () => {
   // =========================================================================
 
   describe('launchInstance', () => {
-    it('throws when module is not initialized', async () => {
-      await expect(launchInstance('/some/path')).rejects.toThrow('Instances module not initialized');
+    it('returns error when called before initInstances (startup guard)', async () => {
+      const result = await launchInstance('/some/path');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/still starting/i);
     });
 
     it('returns error for non-existent path', async () => {
@@ -469,8 +471,11 @@ describe('tower-instances', () => {
   // =========================================================================
 
   describe('stopInstance', () => {
-    it('throws when module is not initialized', async () => {
-      await expect(stopInstance('/some/path')).rejects.toThrow('Instances module not initialized');
+    it('returns error when called before initInstances (startup guard)', async () => {
+      const result = await stopInstance('/some/path');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/still starting/i);
+      expect(result.stopped).toEqual([]);
     });
 
     it('returns success with empty stopped when no terminals found', async () => {
