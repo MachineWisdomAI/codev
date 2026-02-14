@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import net from 'node:net';
 
 // Test configuration - use high ports to avoid conflicts
@@ -103,7 +103,10 @@ async function stopServer(proc: ChildProcess | null): Promise<void> {
  * Create a test project directory with minimal codev structure
  */
 function createTestProject(): string {
-  const projectPath = mkdtempSync(resolve(tmpdir(), 'codev-baseline-test-'));
+  // Create inside the test directory (not OS temp) to avoid isTempDirectory filtering
+  const testBase = resolve(import.meta.dirname, '.test-projects');
+  mkdirSync(testBase, { recursive: true });
+  const projectPath = mkdtempSync(resolve(testBase, 'codev-baseline-test-'));
 
   mkdirSync(resolve(projectPath, 'codev'), { recursive: true });
   mkdirSync(resolve(projectPath, '.agent-farm'), { recursive: true });

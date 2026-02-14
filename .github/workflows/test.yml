@@ -29,6 +29,8 @@ jobs:
       - name: Run unit tests with coverage
         working-directory: packages/codev
         run: npx vitest run --coverage
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
 
   integration:
     name: Tower Integration Tests

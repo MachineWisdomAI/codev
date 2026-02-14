@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { spawn, ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import net from 'node:net';
 
 // Test configuration
@@ -111,7 +111,10 @@ function encodeProjectPath(projectPath: string): string {
  * Create a test project directory
  */
 function createTestProject(): string {
-  const projectPath = mkdtempSync(resolve(tmpdir(), 'codev-api-test-'));
+  // Create inside the test directory (not OS temp) to avoid isTempDirectory filtering
+  const testBase = resolve(import.meta.dirname, '.test-projects');
+  mkdirSync(testBase, { recursive: true });
+  const projectPath = mkdtempSync(resolve(testBase, 'codev-api-test-'));
   mkdirSync(resolve(projectPath, 'codev'), { recursive: true });
   mkdirSync(resolve(projectPath, '.agent-farm'), { recursive: true });
   writeFileSync(
@@ -262,11 +265,13 @@ describe('Tower API (Phase 1)', () => {
     let encodedPath: string;
 
     beforeEach(() => {
-      // Create a temporary test project
-      testProjectDir = mkdtempSync(resolve(tmpdir(), 'tower-sqlite-test-'));
+      // Create test project inside the test directory (not OS temp) to avoid isTempDirectory filtering
+      const testBase = resolve(import.meta.dirname, '.test-projects');
+      mkdirSync(testBase, { recursive: true });
+      testProjectDir = mkdtempSync(resolve(testBase, 'tower-sqlite-test-'));
       mkdirSync(resolve(testProjectDir, 'codev'), { recursive: true });
       writeFileSync(resolve(testProjectDir, 'af-config.json'), JSON.stringify({
-        shell: { architect: 'echo test', builder: 'echo builder', shell: 'bash' }
+        shell: { architect: 'bash', builder: 'bash', shell: 'bash' }
       }));
       encodedPath = encodeProjectPath(testProjectDir);
     });

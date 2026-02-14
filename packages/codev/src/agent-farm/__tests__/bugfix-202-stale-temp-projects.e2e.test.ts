@@ -96,10 +96,11 @@ describe('Bugfix #202: Stale temp project directories filtered from project list
   it('does not list projects whose directories have been deleted', async () => {
     const base = `http://localhost:${TEST_TOWER_PORT}`;
 
-    // Step 1: Create a temp project directory (simulating what E2E tests do)
-    // Use realpathSync to resolve macOS symlinks (/var → /private/var) to match
-    // the tower's normalizeProjectPath behavior
-    const tempProjectDir = realpathSync(mkdtempSync(resolve(tmpdir(), 'bugfix-202-')));
+    // Step 1: Create a project directory OUTSIDE OS temp (to avoid isTempDirectory filtering)
+    // This test verifies the "deleted directory" filter, not the temp directory filter.
+    const testBase = resolve(import.meta.dirname, '.test-projects');
+    mkdirSync(testBase, { recursive: true });
+    const tempProjectDir = realpathSync(mkdtempSync(resolve(testBase, 'bugfix-202-')));
     mkdirSync(resolve(tempProjectDir, 'codev'), { recursive: true });
     writeFileSync(
       resolve(tempProjectDir, 'af-config.json'),
