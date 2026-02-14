@@ -189,11 +189,22 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   console.log('');
   console.log(chalk.green.bold('✓'), `Created ${fileCount} files`);
   console.log('');
+
+  // Run doctor to check dependencies
+  console.log(chalk.bold('Checking environment...'));
+  console.log('');
+  try {
+    const { execSync } = await import('node:child_process');
+    execSync('codev doctor', { cwd: targetDir, stdio: 'inherit' });
+  } catch {
+    // doctor returns exit code 1 on failures, but init should still succeed
+  }
+
+  console.log('');
   console.log(chalk.bold('Next steps:'));
   console.log('');
   console.log(`  cd ${projectBaseName}`);
   console.log('  git remote add origin <url>  # Required for builders to create PRs');
-  console.log('  codev doctor                 # Check dependencies');
   console.log('  af tower start               # Start the Tower daemon');
   console.log('');
   console.log(chalk.dim('For more info, see: https://github.com/cluesmith/codev'));

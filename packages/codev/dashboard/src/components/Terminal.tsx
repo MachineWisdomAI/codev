@@ -6,6 +6,10 @@ import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { FilePathLinkProvider, FilePathDecorationManager } from '../lib/filePathLinkProvider.js';
+import { VirtualKeyboard, type ModifierState } from './VirtualKeyboard.js';
+import { useMediaQuery } from '../hooks/useMediaQuery.js';
+import { MOBILE_BREAKPOINT } from '../lib/constants.js';
+import { uploadPasteImage } from '../lib/api.js';
 
 /** WebSocket frame prefixes matching packages/codev/src/terminal/ws-protocol.ts */
 const FRAME_CONTROL = 0x00;
@@ -20,6 +24,81 @@ interface TerminalProps {
   persistent?: boolean;
 }
 
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
+
+/**
+ * Try to read an image from the clipboard and upload it. Returns true if an
+ * image was found and handled, false otherwise (caller should fall back to text).
+ */
+async function tryPasteImage(term: XTerm): Promise<boolean> {
+  if (!navigator.clipboard?.read) return false;
+  let imageFound = false;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const imageType = item.types.find((t) => IMAGE_TYPES.includes(t));
+      if (imageType) {
+        imageFound = true;
+        const blob = await item.getType(imageType);
+        term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
+        const { path } = await uploadPasteImage(blob);
+        term.write('\r\x1b[2K');
+        term.paste(path);
+        return true;
+      }
+    }
+  } catch {
+    if (imageFound) {
+      // Upload failed after image was detected — show error and clear status
+      term.write('\r\x1b[2K\x1b[31m[Image upload failed]\x1b[0m\r\n');
+      return true; // Don't fall back to text — the user intended to paste an image
+    }
+    // clipboard.read() denied or unavailable — fall back to text
+  }
+  return false;
+}
+
+/**
+ * Handle paste: try image first (via Clipboard API), fall back to text.
+ * Used by both the keyboard shortcut handler and the native paste event.
+ */
+async function handlePaste(term: XTerm): Promise<void> {
+  if (await tryPasteImage(term)) return;
+  // Fall back to text paste
+  try {
+    const text = await navigator.clipboard?.readText();
+    if (text) term.paste(text);
+  } catch {
+    // clipboard access denied
+  }
+}
+
+/**
+ * Handle a native paste event (e.g. from mobile long-press menu or context menu).
+ * Checks clipboardData for image files, then falls back to text.
+ */
+function handleNativePaste(event: ClipboardEvent, term: XTerm): void {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of Array.from(items)) {
+    if (IMAGE_TYPES.includes(item.type)) {
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      event.preventDefault();
+      term.write('\r\n\x1b[90m[Uploading image...]\x1b[0m');
+      uploadPasteImage(blob).then(({ path }) => {
+        term.write('\r\x1b[2K');
+        term.paste(path);
+      }).catch(() => {
+        term.write('\r\x1b[2K\x1b[31m[Image upload failed]\x1b[0m\r\n');
+      });
+      return;
+    }
+  }
+  // Text paste: let xterm.js handle it natively (no preventDefault)
+}
+
 /**
  * Terminal component — renders an xterm.js instance connected to the
  * node-pty backend via WebSocket using the hybrid binary protocol.
@@ -29,6 +108,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const modifierRef = useRef<ModifierState>({ ctrl: false, cmd: false, clearCallback: null });
+  const isMobile = useMediaQuery(`(max-width: ${MOBILE_BREAKPOINT}px)`);
 
 
   useEffect(() => {
@@ -115,6 +196,13 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.type !== 'keydown') return true;
 
+      // Shift+Enter: insert backslash + newline for line continuation
+      if (event.key === 'Enter' && event.shiftKey) {
+        event.preventDefault();
+        term.paste('\\\n');
+        return false;
+      }
+
       const modKey = isMac ? event.metaKey : event.ctrlKey && event.shiftKey;
       if (!modKey) return true;
 
@@ -131,14 +219,18 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
 
       if (event.key === 'v' || event.key === 'V') {
         event.preventDefault();
-        navigator.clipboard?.readText().then((text) => {
-          if (text) term.paste(text);
-        }).catch(() => {});
+        handlePaste(term);
         return false;
       }
 
       return true;
     });
+
+    // Native paste event listener for mobile browsers and context-menu paste.
+    // On mobile, users paste via long-press menu which fires a native paste event
+    // rather than a keyboard shortcut. This also handles image paste from context menu.
+    const onNativePaste = (e: Event) => handleNativePaste(e as ClipboardEvent, term);
+    containerRef.current.addEventListener('paste', onNativePaste);
 
     // Debounced fit: coalesce multiple fit() triggers into one resize event.
     // This prevents resize storms from multiple sources (initial fit, CSS
@@ -232,9 +324,44 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       term.write('\r\n\x1b[31m[WebSocket error]\x1b[0m\r\n');
     };
 
+    // Mobile IME deduplication: On mobile browsers, all keyboard input
+    // goes through IME composition. Some browsers fire both input and
+    // compositionend events, causing xterm.js to emit onData twice for
+    // the same keystroke. Track composition state and deduplicate.
+    const textarea = term.textarea;
+    let imeActive = false;
+    let imeResetTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastImeData = '';
+    let lastImeTime = 0;
+
+    const onCompositionStart = () => { imeActive = true; };
+    const onCompositionEnd = () => {
+      // Keep imeActive true briefly so the dedup window covers both
+      // the compositionend-triggered and input-triggered onData calls.
+      if (imeResetTimer) clearTimeout(imeResetTimer);
+      imeResetTimer = setTimeout(() => { imeActive = false; }, 100);
+    };
+
+    if (textarea) {
+      textarea.addEventListener('compositionstart', onCompositionStart);
+      textarea.addEventListener('compositionend', onCompositionEnd);
+    }
+
     // Send user input to the PTY
     term.onData((data) => {
       if (ws.readyState !== WebSocket.OPEN) return;
+
+      // During IME composition, skip exact duplicate onData calls
+      // that arrive within 100ms (caused by double event dispatch).
+      if (imeActive) {
+        const now = Date.now();
+        if (data === lastImeData && now - lastImeTime < 100) {
+          return;
+        }
+        lastImeData = data;
+        lastImeTime = now;
+      }
+
       // During initial handshake, filter automatic terminal responses
       // (DA, DSR, mode reports) that xterm.js sends during connection.
       // These would otherwise be interpreted as keyboard input by the shell.
@@ -246,6 +373,46 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         if (!filtered) return;
         data = filtered;
       }
+
+      // Sticky modifier handling for mobile virtual keyboard
+      const mod = modifierRef.current;
+      if ((mod.ctrl || mod.cmd) && data.length === 1) {
+        const charCode = data.charCodeAt(0);
+        if (mod.ctrl) {
+          // Ctrl+letter: convert to control character (a=0x01, z=0x1a)
+          if (charCode >= 0x61 && charCode <= 0x7a) {
+            data = String.fromCharCode(charCode - 96);
+          } else if (charCode >= 0x41 && charCode <= 0x5a) {
+            data = String.fromCharCode(charCode - 64);
+          }
+          mod.ctrl = false;
+          mod.cmd = false;
+          mod.clearCallback?.();
+        } else if (mod.cmd) {
+          const key = data.toLowerCase();
+          if (key === 'v') {
+            navigator.clipboard?.readText().then((text) => {
+              if (text) term.paste(text);
+            }).catch(() => {});
+            mod.ctrl = false;
+            mod.cmd = false;
+            mod.clearCallback?.();
+            return;
+          }
+          if (key === 'c') {
+            const sel = term.getSelection();
+            if (sel) navigator.clipboard?.writeText(sel).catch(() => {});
+            mod.ctrl = false;
+            mod.cmd = false;
+            mod.clearCallback?.();
+            return;
+          }
+          mod.ctrl = false;
+          mod.cmd = false;
+          mod.clearCallback?.();
+        }
+      }
+
       sendData(ws, data);
     });
 
@@ -275,8 +442,14 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       clearTimeout(refitTimer1);
       if (fitTimer) clearTimeout(fitTimer);
       if (flushTimer) clearTimeout(flushTimer);
+      if (imeResetTimer) clearTimeout(imeResetTimer);
+      if (textarea) {
+        textarea.removeEventListener('compositionstart', onCompositionStart);
+        textarea.removeEventListener('compositionend', onCompositionEnd);
+      }
       decorationManager?.dispose();
       linkProviderDisposable?.dispose();
+      containerRef.current?.removeEventListener('paste', onNativePaste);
       resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', handleVisibility);
       ws.close();
@@ -299,6 +472,9 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         }}>
           Session persistence unavailable — this terminal will not survive a restart
         </div>
+      )}
+      {isMobile && (
+        <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
       )}
       <div
         ref={containerRef}

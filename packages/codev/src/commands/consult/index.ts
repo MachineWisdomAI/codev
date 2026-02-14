@@ -29,6 +29,10 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
 // Models that use the Agent SDK instead of CLI subprocess
 const SDK_MODELS = ['claude'];
 
+// Claude Agent SDK turn limit. Claude explores the codebase with Read/Glob/Grep
+// tools before producing its verdict, so it needs a generous turn budget.
+const CLAUDE_MAX_TURNS = 200;
+
 // Model aliases
 const MODEL_ALIASES: Record<string, string> = {
   pro: 'gemini',
@@ -295,7 +299,7 @@ async function runClaudeConsultation(
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         model: 'claude-opus-4-6',
-        maxTurns: 10,
+        maxTurns: CLAUDE_MAX_TURNS,
         maxBudgetUsd: 25,
         cwd: projectRoot,
         env,
@@ -364,7 +368,7 @@ async function runConsultation(
       console.log(chalk.yellow(`[claude] Would invoke Agent SDK:`));
       console.log(`  Model: claude-opus-4-6`);
       console.log(`  Tools: Read, Glob, Grep`);
-      console.log(`  Max turns: 10`);
+      console.log(`  Max turns: ${CLAUDE_MAX_TURNS}`);
       console.log(`  Max budget: $25.00`);
       const promptPreview = query.substring(0, 200) + (query.length > 200 ? '...' : '');
       console.log(`  Prompt: ${promptPreview}`);
