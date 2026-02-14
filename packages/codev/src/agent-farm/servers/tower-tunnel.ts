@@ -366,7 +366,7 @@ export async function handleTunnelEndpoint(
       const body = rawBody.trim() ? JSON.parse(rawBody) : null;
 
       // OAuth initiation: body contains { name, serverUrl?, origin? }
-      if (body && body.name) {
+      if (body && 'name' in body) {
         const name = String(body.name);
         const serverUrl = String(body.serverUrl || DEFAULT_SERVER_URL);
         const origin = String(body.origin || `http://localhost:${_deps.port}`);

@@ -317,6 +317,20 @@ describe('tower-tunnel', () => {
         expect(mockCreatePendingRegistration).toHaveBeenCalledWith('staging-tower', 'https://staging.codevos.ai');
       });
 
+      it('returns 400 when name is present but empty', async () => {
+        mockValidateDeviceName.mockReturnValue({ valid: false, error: 'Device name is required.' });
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: '' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+      });
+
       it('returns 400 for invalid device name', async () => {
         mockValidateDeviceName.mockReturnValue({ valid: false, error: 'Device name must start and end with a letter or number.' });
 
