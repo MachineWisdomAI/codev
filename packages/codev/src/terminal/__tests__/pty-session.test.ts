@@ -177,6 +177,7 @@ describe('PtySession', () => {
     const seq = session.ringBuffer.currentSeq;
     dataCallback('e\nf');
     const replay = session.attachResume(client, seq);
-    expect(replay).toEqual(['e', 'f']);
+    // 'd' was a partial line from first pushData; combining with 'e\nf' yields 'de\nf'
+    expect(replay).toEqual(['de', 'f']);
   });
 });
