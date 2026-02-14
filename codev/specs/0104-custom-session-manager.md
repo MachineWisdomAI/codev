@@ -43,7 +43,7 @@ tmux provides features we don't use (windows, panes, copy-mode, status bar, key 
 ## Current Architecture
 
 ```
-Browser (xterm.js, scrollback: 10000)
+Browser (xterm.js, scrollback: 50000)
   ↓ WebSocket (binary hybrid protocol)
 Tower (node-pty → PtySession → RingBuffer: 1000 lines)
   ↓ node-pty spawns process
@@ -112,7 +112,7 @@ Shell / Claude / Builder process
 Instead of tmux, we use **direct node-pty processes that are managed to survive Tower restarts**. The key insight is that node-pty spawns real OS processes — if we can track their PIDs and PTY file descriptors, we can reconnect to them without tmux.
 
 ```
-Browser (xterm.js, scrollback: 10000)
+Browser (xterm.js, scrollback: 50000)
   ↓ WebSocket (binary hybrid protocol, unchanged)
 Tower (SessionManager → ManagedSession → RingBuffer)
   ↓ Unix Socket
