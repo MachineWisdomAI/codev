@@ -18,6 +18,7 @@ import {
   copyProjectlistArchive,
   copyConsultTypes,
   copyResourceTemplates,
+  copyRoles,
   copyProtocols,
   copySkills,
   copyRootFiles,
@@ -159,6 +160,17 @@ export async function adopt(options: AdoptOptions = {}): Promise<void> {
   }
   for (const file of consultTypesResult.copied) {
     console.log(chalk.green('  +'), `codev/consult-types/${file}`);
+    fileCount++;
+  }
+
+  // Copy role definitions - skip existing (preserve user customizations)
+  const rolesResult = copyRoles(targetDir, skeletonDir, { skipExisting: true });
+  if (rolesResult.directoryCreated) {
+    console.log(chalk.green('  +'), 'codev/roles/');
+    fileCount++;
+  }
+  for (const file of rolesResult.copied) {
+    console.log(chalk.green('  +'), `codev/roles/${file}`);
     fileCount++;
   }
 

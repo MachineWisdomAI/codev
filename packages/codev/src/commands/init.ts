@@ -17,6 +17,7 @@ import {
   copyProjectlistArchive,
   copyConsultTypes,
   copyResourceTemplates,
+  copyRoles,
   copyProtocols,
   copySkills,
   copyRootFiles,
@@ -123,6 +124,17 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   }
   for (const file of consultTypesResult.copied) {
     console.log(chalk.green('  +'), `codev/consult-types/${file}`);
+    fileCount++;
+  }
+
+  // Copy role definitions (architect, builder, consultant prompts)
+  const rolesResult = copyRoles(targetDir, skeletonDir);
+  if (rolesResult.directoryCreated) {
+    console.log(chalk.green('  +'), 'codev/roles/');
+    fileCount++;
+  }
+  for (const file of rolesResult.copied) {
+    console.log(chalk.green('  +'), `codev/roles/${file}`);
     fileCount++;
   }
 
