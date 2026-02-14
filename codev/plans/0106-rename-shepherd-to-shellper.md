@@ -77,12 +77,18 @@ Pure mechanical rename refactoring. Two phases: (1) rename all source files, upd
 **Step 3: Content updates in renamed files** — update all class names, exports, variable names, and comments within the 9 renamed files.
 
 **Step 4: Content updates in non-renamed source files:**
-- `terminal/pty-session.ts` (~49 refs) — methods, variables, comments, imports
-- `terminal/session-manager.ts` (~28 refs) — variable names, imports, socket path pattern
-- `terminal/pty-manager.ts` (~3 refs) — method call, comments
-- `agent-farm/servers/tower-server.ts` (~114 refs) — variables, DB column refs, comments
-- `agent-farm/commands/spawn.ts` (~1 ref) — comment
+- `terminal/pty-session.ts` (~55 refs) — methods, variables, comments, imports
+- `terminal/session-manager.ts` (~41 refs) — variable names, imports, socket path pattern
+- `terminal/pty-manager.ts` (~5 refs) — method call, comments
+- `agent-farm/servers/tower-server.ts` (~17 refs) — variables, DB column refs, comments
+- `agent-farm/servers/tower-terminals.ts` (~55 refs) — terminal session management, shepherd refs
+- `agent-farm/servers/tower-routes.ts` (~37 refs) — route handlers with shepherd refs
+- `agent-farm/servers/tower-instances.ts` (~34 refs) — instance management with shepherd refs
+- `agent-farm/servers/tower-types.ts` (~4 refs) — type definitions with shepherd refs
+- `agent-farm/commands/spawn-worktree.ts` (~1 ref) — comment
 - `agent-farm/utils/shell.ts` (~1 ref) — comment
+
+**Note on 0105 decomposition**: The original `tower-server.ts` (~114 refs) was decomposed by Spec 0105 into `tower-server.ts` (~17), `tower-terminals.ts` (~55), `tower-routes.ts` (~37), `tower-instances.ts` (~34), and `tower-types.ts` (~4). Similarly, `spawn.ts` shepherd refs moved to `spawn-worktree.ts`.
 
 **Note**: `agent-farm/db/index.ts` is intentionally NOT updated in this step — its shepherd references are all in old migration code (v6, v7) which is historically correct and must remain as-is.
 
@@ -103,8 +109,11 @@ Pure mechanical rename refactoring. Two phases: (1) rename all source files, upd
 
 **Step 7: Test file content updates:**
 - `agent-farm/__tests__/terminal-sessions.test.ts` (~28 refs) — schema refs, test data, assertions
-- `terminal/__tests__/session-manager.test.ts` (~115 refs) — variables, mock names, assertions
-- All 4 renamed test files — update their internal references
+- `agent-farm/__tests__/tower-instances.test.ts` (~19 refs) — instance management test refs
+- `agent-farm/__tests__/tower-routes.test.ts` (~2 refs) — route test refs
+- `agent-farm/__tests__/tower-terminals.test.ts` (~6 refs) — terminal test refs
+- `terminal/__tests__/session-manager.test.ts` (~128 refs) — variables, mock names, assertions
+- All 4 renamed test files — update their internal references (including `shepherd-client.test.ts` with ~48 refs)
 
 **Step 8: Dashboard component comments** (`packages/codev/dashboard/src/components/`):
 - `App.tsx` — update Spec 0104 shepherd comment
@@ -157,6 +166,8 @@ Pure mechanical rename refactoring. Two phases: (1) rename all source files, upd
 - `codev/projects/0104-*/` artifacts
 - `codev/projectlist.md` (0104 entry)
 - `codev/specs/0105-tower-server-decomposition.md` (historical reference)
+- `codev/plans/0105-tower-server-decomposition.md` (historical reference)
+- `codev/reviews/0105-tower-server-decomposition.md` (historical reference)
 
 #### Acceptance Criteria
 - [ ] `grep -ri shepherd` in living docs returns zero hits
@@ -188,7 +199,7 @@ Phase 1 (Source + Schema + Migration) ──→ Phase 2 (Docs)
 2. **After Phase 2**: Docs updated, final grep across living docs
 
 ## Notes
-- This is a mechanical rename with ~350+ individual replacements across ~15+ files
+- This is a mechanical rename with ~705 individual replacements across ~26 files
 - The grep-based acceptance criterion is the safety net — if anything is missed, it will be caught
 - Old migration code (v6, v7) in `db/index.ts` must retain shepherd references as they are historically correct
 - Reference counts in the spec/plan are approximate — the grep AC is authoritative
