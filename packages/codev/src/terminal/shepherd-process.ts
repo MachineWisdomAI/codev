@@ -244,6 +244,7 @@ export class ShepherdProcess extends EventEmitter {
 
     // Send WELCOME response
     const welcome = encodeWelcome({
+      version: PROTOCOL_VERSION,
       pid: this.pty?.pid ?? -1,
       cols: this.cols,
       rows: this.rows,

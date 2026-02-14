@@ -130,6 +130,22 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
           if (frame.type === FrameType.WELCOME) {
             try {
               const welcome = parseJsonPayload<WelcomeMessage>(frame.payload);
+
+              // Version mismatch handling per spec:
+              // - shepherd version < Tower version → disconnect (stale shepherd)
+              // - shepherd version > Tower version → warn but continue
+              const shepherdVersion = welcome.version ?? 0;
+              if (shepherdVersion < PROTOCOL_VERSION) {
+                handshakeResolved = true;
+                reject(new Error(`Shepherd protocol version ${shepherdVersion} is older than Tower version ${PROTOCOL_VERSION}`));
+                this.cleanup();
+                return;
+              }
+              if (shepherdVersion > PROTOCOL_VERSION) {
+                // Newer shepherd — log warning but continue (forward compatible)
+                this.emit('version-warning', shepherdVersion, PROTOCOL_VERSION);
+              }
+
               handshakeResolved = true;
               this._connected = true;
               // Replay any buffered frames received before WELCOME

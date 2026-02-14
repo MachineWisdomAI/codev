@@ -30,7 +30,7 @@ function tmpSocketPath(): string {
 // Helper: mini shepherd server that does HELLO/WELCOME handshake
 function createMiniShepherd(
   socketPath: string,
-  welcomeMsg: WelcomeMessage = { pid: 1234, cols: 80, rows: 24, startTime: Date.now() },
+  welcomeMsg: WelcomeMessage = { version: PROTOCOL_VERSION, pid: 1234, cols: 80, rows: 24, startTime: Date.now() },
 ) {
   const server = net.createServer((socket) => {
     const parser = createFrameParser();
@@ -75,7 +75,7 @@ describe('ShepherdClient', () => {
 
   describe('connect/disconnect lifecycle', () => {
     it('connects and performs HELLO/WELCOME handshake', async () => {
-      const welcomeMsg: WelcomeMessage = { pid: 5678, cols: 120, rows: 40, startTime: 1700000000000 };
+      const welcomeMsg: WelcomeMessage = { version: PROTOCOL_VERSION, pid: 5678, cols: 120, rows: 40, startTime: 1700000000000 };
       const shepherd = createMiniShepherd(socketPath, welcomeMsg);
       cleanup.push(shepherd.close);
 
@@ -127,7 +127,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -167,7 +167,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else {
             receivedFrames.push(frame);
           }
@@ -198,7 +198,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else {
             receivedFrames.push(frame);
           }
@@ -230,7 +230,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else {
             receivedFrames.push(frame);
           }
@@ -261,7 +261,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else {
             receivedFrames.push(frame);
           }
@@ -295,7 +295,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else {
             receivedFrames.push(frame);
           }
@@ -336,7 +336,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -366,7 +366,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -398,7 +398,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -431,7 +431,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           } else if (frame.type === FrameType.PONG) {
             serverParser.emit('pong-received');
           }
@@ -473,7 +473,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -518,7 +518,7 @@ describe('ShepherdClient', () => {
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -551,7 +551,7 @@ describe('ShepherdClient', () => {
             // Send DATA before WELCOME (simulates PTY output racing handshake)
             socket.write(encodeData('pre-welcome-data'));
             // Then send WELCOME
-            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -573,6 +573,90 @@ describe('ShepherdClient', () => {
       // The pre-WELCOME DATA frame should have been replayed after handshake
       await new Promise((r) => setTimeout(r, 50));
       expect(receivedData).toContain('pre-welcome-data');
+    });
+  });
+
+  describe('version mismatch handling', () => {
+    it('disconnects when shepherd version is older than Tower version', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            // Send WELCOME with version 0 (older than PROTOCOL_VERSION=1)
+            socket.write(encodeWelcome({ version: 0, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+
+      await expect(client.connect()).rejects.toThrow('Shepherd protocol version 0 is older than Tower version');
+      expect(client.connected).toBe(false);
+    });
+
+    it('connects and emits version-warning when shepherd version is newer', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            // Send WELCOME with version 99 (newer than PROTOCOL_VERSION=1)
+            socket.write(encodeWelcome({ version: 99, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+
+      const warnings: number[] = [];
+      client.on('version-warning', (shepherdVersion: number) => {
+        warnings.push(shepherdVersion);
+      });
+
+      const welcome = await client.connect();
+      expect(welcome.pid).toBe(1);
+      expect(client.connected).toBe(true);
+      expect(warnings).toEqual([99]);
+    });
+
+    it('connects normally when versions match', async () => {
+      let serverSocket: net.Socket | null = null;
+      const server = net.createServer((socket) => {
+        serverSocket = socket;
+        const parser = createFrameParser();
+        socket.pipe(parser);
+        parser.on('data', (frame: ParsedFrame) => {
+          if (frame.type === FrameType.HELLO) {
+            socket.write(encodeWelcome({ version: PROTOCOL_VERSION, pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
+          }
+        });
+      });
+      server.listen(socketPath);
+      cleanup.push(() => { server.close(); });
+
+      const client = new ShepherdClient(socketPath);
+      cleanup.push(() => client.disconnect());
+
+      const warnings: number[] = [];
+      client.on('version-warning', (shepherdVersion: number) => {
+        warnings.push(shepherdVersion);
+      });
+
+      const welcome = await client.connect();
+      expect(welcome.pid).toBe(1);
+      expect(client.connected).toBe(true);
+      expect(warnings).toEqual([]); // No warnings when versions match
     });
   });
 });

@@ -387,11 +387,19 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Shut down all sessions gracefully.
+   * Disconnect from all sessions without killing shepherd processes.
+   * Per spec: "When Tower intentionally stops, Tower closes its socket
+   * connections to shepherds. Shepherds continue running."
    */
-  async shutdown(): Promise<void> {
-    const sessionIds = [...this.sessions.keys()];
-    await Promise.all(sessionIds.map((id) => this.killSession(id)));
+  shutdown(): void {
+    for (const [id, session] of this.sessions) {
+      if (session.restartResetTimer) {
+        clearTimeout(session.restartResetTimer);
+        session.restartResetTimer = null;
+      }
+      session.client.disconnect();
+    }
+    this.sessions.clear();
   }
 
   // --- Private helpers ---

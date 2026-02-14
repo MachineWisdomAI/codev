@@ -65,6 +65,7 @@ export interface HelloMessage {
 }
 
 export interface WelcomeMessage {
+  version: number;
   pid: number;
   cols: number;
   rows: number;

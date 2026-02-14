@@ -692,6 +692,132 @@ describe('SessionManager', () => {
     }, 20000);
   });
 
+  describe('shutdown (disconnect without killing)', () => {
+    it('disconnects clients but leaves shepherd processes alive', async () => {
+      const socketPath = path.join(socketDir, 'shepherd-shutdown.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shepherd = new ShepherdProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shepherd.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Reconnect to register the session
+      const client = await manager.reconnectSession(
+        'shutdown-test',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        expect(manager.listSessions().size).toBe(1);
+        expect(client.connected).toBe(true);
+
+        // Shutdown should disconnect but NOT kill the shepherd
+        manager.shutdown();
+
+        expect(manager.listSessions().size).toBe(0);
+
+        // The shepherd should still be accepting connections (still alive)
+        const client2 = new ShepherdClient(socketPath);
+        cleanupFns.push(() => client2.disconnect());
+        const welcome = await client2.connect();
+        expect(welcome.pid).toBeGreaterThan(0);
+        client2.disconnect();
+      }
+    });
+  });
+
+  describe('stop/reconnect/replay integration', () => {
+    it('disconnects Tower connection, reconnects, and receives replay', async () => {
+      const socketPath = path.join(socketDir, 'shepherd-replay.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shepherd = new ShepherdProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        1000,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shepherd.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Connect first client
+      const client1 = await manager.reconnectSession(
+        'replay-test',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client1) {
+        // Simulate PTY output that goes into the replay buffer
+        capturedPty!.simulateData('hello world\r\n');
+        await new Promise((r) => setTimeout(r, 50));
+
+        // Disconnect (simulates Tower stop) — shutdown doesn't kill shepherd
+        manager.shutdown();
+        expect(manager.listSessions().size).toBe(0);
+
+        // Wait for socket to fully close
+        await new Promise((r) => setTimeout(r, 100));
+
+        // Reconnect — shepherd is still alive
+        const manager2 = new SessionManager({
+          socketDir,
+          shepherdScript: '/nonexistent/shepherd.js',
+          nodeExecutable: process.execPath,
+        });
+
+        const client2 = await manager2.reconnectSession(
+          'replay-test',
+          socketPath,
+          process.pid,
+          Date.now(),
+        );
+
+        if (client2) {
+          cleanupFns.push(() => client2.disconnect());
+          expect(client2.connected).toBe(true);
+
+          // Wait for replay to arrive
+          const replayPromise = new Promise<Buffer>((resolve) => {
+            client2.on('replay', (data: Buffer) => resolve(data));
+          });
+
+          const replayData = await Promise.race([
+            replayPromise,
+            new Promise<Buffer>((_, reject) => setTimeout(() => reject(new Error('replay timeout')), 3000)),
+          ]);
+
+          // Replay should contain the data written before disconnect
+          expect(replayData.toString()).toContain('hello world');
+        }
+      }
+    });
+  });
+
   describe('reconnectSession', () => {
     it('returns null for dead process', async () => {
       const manager = new SessionManager({

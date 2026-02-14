@@ -166,7 +166,7 @@ describe('shepherd-protocol', () => {
     });
 
     it('WELCOME frame round-trips', async () => {
-      const frame = encodeWelcome({ pid: 12345, cols: 80, rows: 24, startTime: 1700000000000 });
+      const frame = encodeWelcome({ version: PROTOCOL_VERSION, pid: 12345, cols: 80, rows: 24, startTime: 1700000000000 });
       const parser = createFrameParser();
       const frames = await collectFrames(parser, frame);
 
