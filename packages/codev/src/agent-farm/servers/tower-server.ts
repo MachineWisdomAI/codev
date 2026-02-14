@@ -585,7 +585,7 @@ async function reconcileTerminalSessions(): Promise<void> {
       continue;
     }
     const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
-    if (tmpDirs.some(d => projectPath.startsWith(d))) {
+    if (tmpDirs.some(d => projectPath === d || projectPath.startsWith(d + '/'))) {
       log('INFO', `Skipping shepherd session ${dbSession.id} — project is in temp directory: ${projectPath}`);
       // Kill orphaned shepherd process before removing row
       if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
