@@ -697,6 +697,13 @@
       cursor: default;
     }
 
+    .connect-dialog-error {
+      color: #ef4444;
+      font-size: 13px;
+      margin-top: 8px;
+      display: none;
+    }
+
     /* Reduced motion */
     @media (prefers-reduced-motion: reduce) {
       .status-dot.running,
@@ -1001,6 +1008,26 @@
         <div class="dialog-actions">
           <button class="btn" onclick="hideCreateProjectDialog()">Cancel</button>
           <button class="btn btn-primary" onclick="createNewProject()">Create & Launch</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cloud Connect Dialog -->
+    <div class="dialog-overlay" id="connect-dialog" style="display: none;">
+      <div class="dialog-box">
+        <h3>Connect to Codev Cloud</h3>
+        <div class="dialog-field">
+          <label for="connect-device-name">Device Name</label>
+          <input type="text" id="connect-device-name" placeholder="my-tower" />
+        </div>
+        <div class="dialog-field">
+          <label for="connect-server-url">Service URL</label>
+          <input type="text" id="connect-server-url" value="https://cloud.codevos.ai" />
+        </div>
+        <div class="connect-dialog-error" id="connect-error"></div>
+        <div class="dialog-actions">
+          <button class="btn" onclick="hideConnectDialog()">Cancel</button>
+          <button class="btn btn-primary" id="connect-submit-btn" onclick="submitConnect()">Connect</button>
         </div>
       </div>
     </div>
@@ -1733,17 +1760,23 @@
       }
     }
 
-    // Close dialog on escape
+    // Close dialogs on escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         hideCreateProjectDialog();
+        hideConnectDialog();
       }
     });
 
-    // Close dialog on backdrop click
+    // Close dialogs on backdrop click
     document.getElementById('create-dialog').addEventListener('click', (e) => {
       if (e.target.id === 'create-dialog') {
         hideCreateProjectDialog();
+      }
+    });
+    document.getElementById('connect-dialog').addEventListener('click', (e) => {
+      if (e.target.id === 'connect-dialog') {
+        hideConnectDialog();
       }
     });
 
@@ -1770,8 +1803,12 @@
       return h + 'h ' + m + 'm';
     }
 
+    // Store the latest cloud status for use by cloudConnect
+    let lastCloudStatus = null;
+
     function renderCloudStatus(status) {
       const el = document.getElementById('cloud-status');
+      lastCloudStatus = status;
 
       // When accessed through codevos.ai, cloud status is irrelevant
       if (window.location.hostname.endsWith('codevos.ai')) {
@@ -1779,8 +1816,17 @@
         return;
       }
 
-      if (!status || status.state === 'error' || !status.registered) {
+      if (!status || status.state === 'error') {
         el.innerHTML = '';
+        return;
+      }
+
+      if (!status.registered) {
+        el.innerHTML = `
+          <span class="cloud-status">
+            Codev Cloud
+            <button class="cloud-btn" onclick="cloudConnect()" ${cloudLoading ? 'disabled' : ''}>Connect</button>
+          </span>`;
         return;
       }
 
@@ -1824,29 +1870,111 @@
     }
 
     async function cloudConnect() {
-      cloudLoading = true;
-      renderCloudStatus({ registered: true, state: 'connecting' });
-      try {
-        await authFetch('./api/tunnel/connect', { method: 'POST' });
-        showToast('Connecting to cloud...', 'success');
-      } catch (err) {
-        showToast('Connect failed: ' + err.message, 'error');
+      // Smart connect: if registered, reconnect without dialog
+      if (lastCloudStatus && lastCloudStatus.registered) {
+        cloudLoading = true;
+        renderCloudStatus({ registered: true, state: 'connecting' });
+        try {
+          await authFetch('./api/tunnel/connect', { method: 'POST' });
+          showToast('Connecting to cloud...', 'success');
+        } catch (err) {
+          showToast('Connect failed: ' + err.message, 'error');
+        }
+        cloudLoading = false;
+        setTimeout(refresh, 2000);
+        return;
       }
-      cloudLoading = false;
-      // Refresh will pick up new status
-      setTimeout(refresh, 2000);
+      // Not registered: open the connect dialog
+      showConnectDialog();
     }
 
     async function cloudDisconnect() {
+      if (!confirm('This will disconnect from Codev Cloud. Continue?')) return;
       cloudLoading = true;
       try {
-        await authFetch('./api/tunnel/disconnect', { method: 'POST' });
-        showToast('Disconnected from cloud', 'success');
+        const res = await authFetch('./api/tunnel/disconnect', { method: 'POST' });
+        const data = await res.json();
+        if (data.warning) {
+          showToast(data.warning, 'error');
+        } else {
+          showToast('Disconnected from cloud', 'success');
+        }
       } catch (err) {
         showToast('Disconnect failed: ' + err.message, 'error');
       }
       cloudLoading = false;
       setTimeout(refresh, 1000);
+    }
+
+    // Cloud connect dialog functions
+    function showConnectDialog() {
+      const dialog = document.getElementById('connect-dialog');
+      const nameInput = document.getElementById('connect-device-name');
+      const errorEl = document.getElementById('connect-error');
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+      // Default device name from hostname (fetched via /api/tunnel/status)
+      nameInput.value = (lastCloudStatus && lastCloudStatus.hostname) || '';
+      document.getElementById('connect-server-url').value = 'https://cloud.codevos.ai';
+      dialog.style.display = 'flex';
+      nameInput.focus();
+    }
+
+    function hideConnectDialog() {
+      document.getElementById('connect-dialog').style.display = 'none';
+    }
+
+    function uiNormalizeDeviceName(raw) {
+      return raw.trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '');
+    }
+
+    function uiValidateDeviceName(name) {
+      if (!name) return { valid: false, error: 'Device name is required.' };
+      if (name.length > 63) return { valid: false, error: 'Device name must be 63 characters or fewer.' };
+      if (!/^[a-z0-9]/.test(name) || !/[a-z0-9]$/.test(name)) return { valid: false, error: 'Device name must start and end with a letter or number.' };
+      if (/^-+$/.test(name)) return { valid: false, error: 'Device name cannot be all hyphens.' };
+      return { valid: true };
+    }
+
+    async function submitConnect() {
+      const rawName = document.getElementById('connect-device-name').value;
+      const serverUrl = document.getElementById('connect-server-url').value.trim();
+      const errorEl = document.getElementById('connect-error');
+      const submitBtn = document.getElementById('connect-submit-btn');
+
+      const name = uiNormalizeDeviceName(rawName);
+      const result = uiValidateDeviceName(name);
+      if (!result.valid) {
+        errorEl.textContent = result.error;
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      errorEl.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Connecting...';
+
+      try {
+        const res = await authFetch('./api/tunnel/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, serverUrl, origin: window.location.origin }),
+        });
+        const data = await res.json();
+        if (data.authUrl) {
+          window.location.href = data.authUrl;
+        } else if (data.error) {
+          errorEl.textContent = data.error;
+          errorEl.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Connect';
+        }
+      } catch (err) {
+        errorEl.textContent = 'Connection failed: ' + err.message;
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Connect';
+      }
     }
 
     // Initialize
