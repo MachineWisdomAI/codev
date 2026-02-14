@@ -298,7 +298,9 @@ describe('tower-tunnel', () => {
         expect(parsed.authUrl).toBeDefined();
         expect(parsed.authUrl).toContain('https://cloud.codevos.ai/towers/register');
         expect(parsed.authUrl).toContain('callback=');
-        expect(parsed.authUrl).toContain('nonce=');
+        // Nonce is embedded in the callback URL (not a top-level authUrl param)
+        const decodedCallback = decodeURIComponent(parsed.authUrl.split('callback=')[1]);
+        expect(decodedCallback).toContain('nonce=test-nonce-1234');
         expect(mockCreatePendingRegistration).toHaveBeenCalledWith('my-tower', 'https://cloud.codevos.ai');
       });
 
@@ -524,7 +526,25 @@ describe('tower-tunnel', () => {
         expect(mockDeleteCloudConfig).toHaveBeenCalled();
       });
 
-      it('returns warning when server-side deregister fails', async () => {
+      it('returns warning when server-side DELETE returns non-OK status', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        fetchSpy.mockResolvedValue(new Response(null, { status: 500 }));
+
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(true);
+        expect(parsed.warning).toBeDefined();
+        expect(parsed.warning).toContain('500');
+        expect(mockDeleteCloudConfig).toHaveBeenCalled();
+      });
+
+      it('returns warning when server-side deregister fails with network error', async () => {
         mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
         fetchSpy.mockRejectedValue(new Error('Network error'));
 

@@ -388,10 +388,11 @@ export async function handleTunnelEndpoint(
           return;
         }
 
-        // Validate serverUrl is HTTPS (or localhost)
+        // Validate serverUrl is HTTPS (or HTTP on localhost for development)
         try {
           const parsed = new URL(serverUrl);
-          if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost') {
+          const isLocalhost = parsed.hostname === 'localhost' && parsed.protocol === 'http:';
+          if (parsed.protocol !== 'https:' && !isLocalhost) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, error: 'Server URL must use HTTPS.' }));
             return;
@@ -403,8 +404,8 @@ export async function handleTunnelEndpoint(
         }
 
         const nonce = createPendingRegistration(name, serverUrl);
-        const callbackUrl = `${origin}/api/tunnel/connect/callback`;
-        const authUrl = `${serverUrl}/towers/register?callback=${encodeURIComponent(callbackUrl)}&nonce=${nonce}`;
+        const callbackUrl = `${origin}/api/tunnel/connect/callback?nonce=${nonce}`;
+        const authUrl = `${serverUrl}/towers/register?callback=${encodeURIComponent(callbackUrl)}`;
 
         _deps.log('INFO', `OAuth initiation: tower="${name}" server=${serverUrl}`);
 
@@ -453,12 +454,17 @@ export async function handleTunnelEndpoint(
     // Server-side deregister (best-effort)
     if (config) {
       try {
-        await fetch(`${config.server_url}/api/towers/${config.tower_id}`, {
+        const resp = await fetch(`${config.server_url}/api/towers/${config.tower_id}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${config.api_key}` },
           signal: AbortSignal.timeout(10_000),
         });
-        _deps?.log('INFO', `Server-side deregister succeeded for tower ${config.tower_id}`);
+        if (!resp.ok) {
+          warning = `Server-side deregister failed (${resp.status}). Local credentials removed.`;
+          _deps?.log('WARN', warning);
+        } else {
+          _deps?.log('INFO', `Server-side deregister succeeded for tower ${config.tower_id}`);
+        }
       } catch (err) {
         warning = `Server-side deregister failed: ${(err as Error).message}. Local credentials removed.`;
         _deps?.log('WARN', warning);
