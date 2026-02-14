@@ -29,9 +29,10 @@ For debugging common issues, start here:
 |-------|-------------|---------------|
 | **"Tower won't start"** | `packages/codev/src/agent-farm/servers/tower-server.ts` | Port 4100 conflict, node-pty availability |
 | **"Project won't activate"** | `tower-server.ts` → `launchInstance()` | Port allocation in global.db, architect command parsing |
-| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected |
+| **"Terminal not showing output"** | `tower-server.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shepherd alive |
+| **"Terminal not persistent"** | `tower-server.ts` → session creation | Check shepherd spawn succeeded, dashboard shows `persistent` flag |
 | **"Project shows inactive"** | `tower-server.ts` → `getInstances()` | Check `projectTerminals` Map has entry |
-| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, tmux session, role injection |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shepherd session, role injection |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
 | **"Port conflicts"** | `packages/codev/src/agent-farm/utils/port-registry.ts` | Global registry at `~/.agent-farm/global.db` |
@@ -52,8 +53,8 @@ curl -s http://localhost:4100/api/projects | jq
 # Check terminal sessions on Tower
 curl -s http://localhost:4100/api/terminals | jq
 
-# Verify tmux sessions
-tmux list-sessions
+# Check shepherd processes (Spec 0104)
+ls ~/.codev/run/shepherd-*.sock 2>/dev/null
 
 # Check Tower logs (if started with --log-file)
 tail -f ~/.agent-farm/tower.log
@@ -76,7 +77,9 @@ tail -f ~/.agent-farm/tower.log
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Worktree** | Git worktree providing isolated environment for a builder |
 | **node-pty** | Native PTY session manager replacing ttyd, multiplexed over WebSocket |
-| **tmux** | Terminal multiplexer providing session persistence and multiplexing |
+| **Shepherd** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
+| **SessionManager** | Tower-side orchestrator for shepherd process lifecycle (spawn, reconnect, kill, auto-restart) |
+| **tmux** | Terminal multiplexer (legacy, being replaced by shepherd in Spec 0104) |
 | **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
 | **Projectlist** | Centralized project tracking file (`codev/projectlist.md`) |
 
@@ -131,9 +134,10 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
               ┌─────────────┼─────────────┬─────────────┐
               ▼             ▼             ▼             ▼
    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-   │  tmux    │  │ node-pty │  │ node-pty │  │ node-pty │
-   │ session  │  │ (direct) │  │ (direct) │  │ (direct) │
-   │(claude)  │  │ builder  │  │ builder  │  │  shell   │
+   │ Shepherd │  │ Shepherd │  │ Shepherd │  │ Shepherd │
+   │ (unix    │  │ (unix    │  │ (unix    │  │ (unix    │
+   │  socket) │  │  socket) │  │  socket) │  │  socket) │
+   │ architect│  │ builder  │  │ builder  │  │  shell   │
    └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────────┘
         │             │             │
         ▼             ▼             ▼
@@ -147,16 +151,18 @@ Agent Farm orchestrates multiple AI agents working in parallel on a codebase. Th
 **Key Components**:
 1. **Tower Server**: Single daemon HTTP server (port 4100) serving React SPA and REST API for all projects
 2. **Terminal Manager**: node-pty based PTY session manager with WebSocket multiplexing (Spec 0085)
-3. **tmux**: Terminal multiplexer providing session persistence
-4. **Git Worktrees**: Isolated working directories for each builder
-5. **SQLite Databases**: State persistence (local and global)
+3. **Shepherd Processes**: Detached Node.js processes owning PTYs for session persistence (Spec 0104, replaces tmux)
+4. **SessionManager**: Tower-side orchestrator for shepherd lifecycle (spawn, reconnect, kill, auto-restart)
+5. **Git Worktrees**: Isolated working directories for each builder
+6. **SQLite Databases**: State persistence (local and global)
 
 **Data Flow**:
 1. User opens dashboard at `http://localhost:4200`
-2. React dashboard polls `/api/state` for current state (1-second interval)
+2. React dashboard polls `/api/state` for current state (1-second interval). Response includes `persistent` boolean per terminal.
 3. Each tab renders an xterm.js terminal connected via WebSocket to `/ws/terminal/<id>`
-4. Terminal Manager spawns node-pty sessions (direct PTY for builders/shells, tmux attach for architect)
-5. Builders work in isolated git worktrees under `.builders/`
+4. Terminal creation tries shepherd first (via `SessionManager.createSession()`), falls back to tmux (legacy), falls back to non-persistent direct node-pty
+5. Shepherd-backed PtySessions delegate write/resize/kill to the shepherd's Unix socket via `IShepherdClient`
+6. Builders work in isolated git worktrees under `.builders/`
 
 ### Port System
 
@@ -196,9 +202,63 @@ The global registry is a SQLite database that tracks port allocations across all
 - WAL mode enables concurrent reads
 - 5-second busy timeout prevents deadlocks
 
-### tmux Integration
+### Shepherd Process Architecture (Spec 0104)
 
-tmux provides terminal session persistence and multiplexing, enabling terminals to survive browser refreshes and continue running in the background.
+Shepherd processes provide terminal session persistence, replacing tmux. Each terminal session is owned by a dedicated detached Node.js process (the "shepherd") that holds the PTY master file descriptor. Tower communicates with shepherds over Unix sockets.
+
+```
+Browser (xterm.js, scrollback: 50000)
+  |  WebSocket (binary hybrid protocol, unchanged)
+Tower (SessionManager -> PtySession -> RingBuffer)
+  |  Unix Socket (~/.codev/run/shepherd-{sessionId}.sock)
+Shepherd (PTY owner + 10,000-line replay buffer)
+  |  PTY master fd
+Shell / Claude / Builder process (no tmux wrapper)
+```
+
+**Why not tmux**: tmux's alternate-screen handling conflicts with xterm.js scrollback, global options (`-g` flag) cause cross-session interference, and tmux's internal terminal emulation layer adds unnecessary complexity. See `codev/specs/0104-custom-session-manager.md` for the full rationale.
+
+#### Shepherd Lifecycle
+
+1. **Spawn**: Tower calls `SessionManager.createSession()`, which spawns `shepherd-main.js` as a detached child (`child_process.spawn` with `detached: true`). Shepherd writes PID + start time to stdout, then Tower calls `child.unref()`.
+2. **Connect**: Tower connects to the shepherd's Unix socket at `~/.codev/run/shepherd-{sessionId}.sock` via `ShepherdClient`. Handshake: Tower sends HELLO, shepherd responds with WELCOME (pid, cols, rows, startTime).
+3. **Data flow**: Shepherd forwards PTY output as DATA frames to Tower. Tower pipes DATA frames to all attached WebSocket clients via PtySession.
+4. **Tower restart**: Shepherds continue running as orphaned OS processes. On restart, Tower queries SQLite for sessions with `shepherd_socket IS NOT NULL`, validates PID + start time, reconnects via Unix socket, and receives REPLAY frame with buffered output.
+5. **Kill**: Tower sends SIGTERM via SIGNAL frame, waits 5s, SIGKILL if needed. Cleans up socket file.
+6. **Graceful degradation**: If shepherd spawn fails, Tower falls back to direct node-pty (non-persistent). SQLite row has `shepherd_socket = NULL`. Dashboard shows "Session persistence unavailable" warning.
+
+#### Wire Protocol
+
+Binary frame format: `[1-byte type] [4-byte big-endian length] [payload]`
+
+| Type | Code | Direction | Purpose |
+|------|------|-----------|---------|
+| DATA | 0x01 | Both | PTY output / user input |
+| RESIZE | 0x02 | Tower->Shepherd | Terminal resize (JSON: cols, rows) |
+| SIGNAL | 0x03 | Tower->Shepherd | Send signal to child (allowlist: SIGINT, SIGTERM, SIGKILL, SIGHUP, SIGWINCH) |
+| EXIT | 0x04 | Shepherd->Tower | Child process exited (JSON: code, signal) |
+| REPLAY | 0x05 | Shepherd->Tower | Replay buffer dump on connect |
+| PING/PONG | 0x06/0x07 | Both | Keepalive |
+| HELLO | 0x08 | Tower->Shepherd | Handshake (JSON: version) |
+| WELCOME | 0x09 | Shepherd->Tower | Handshake response (JSON: pid, cols, rows, startTime) |
+| SPAWN | 0x0A | Tower->Shepherd | Restart child process (JSON: command, args, cwd, env) |
+
+Max frame payload: 16MB. Unknown frame types are silently ignored.
+
+#### Auto-Restart (Architect Sessions)
+
+Architect sessions use `restartOnExit: true` in `SessionManager.createSession()`:
+- On child exit, SessionManager increments restart counter
+- After `restartDelay` (default: 2s), sends SPAWN frame to shepherd with original command/args
+- `maxRestarts` (default: 50) prevents infinite restart loops
+- Counter resets after `restartResetAfter` (default: 5min) of stable operation
+
+#### Security
+
+- **Unix socket permissions**: `~/.codev/run/` is `0700` (owner-only). Socket files are `0600`.
+- **No authentication protocol**: Filesystem permissions are the authentication mechanism.
+- **Input isolation**: Each shepherd manages exactly one session. No cross-session access.
+- **PID reuse protection**: Reconnection validates process start time, not just PID.
 
 #### Session Naming Convention
 
@@ -211,31 +271,13 @@ Each session has a unique name based on its purpose:
 | Shell | `shell-{id}` | `shell-U1A2B3C4` |
 | Utility | `af-shell-{id}` | `af-shell-U5D6E7F8` |
 
-#### Session Configuration
+#### tmux (Legacy, Dual-Mode Transition)
 
-Each tmux session is configured with:
+During the transition period (Spec 0104 Phase 3), both tmux and shepherd sessions coexist. Reconciliation handles both: shepherd sessions are reconnected via Unix socket, tmux sessions via `tmux attach`. The `tmux_session` column persists in SQLite alongside the new `shepherd_socket`, `shepherd_pid`, and `shepherd_start_time` columns. tmux code will be fully removed in Phase 4.
 
-```bash
-# Create session with specific dimensions
-tmux new-session -d -s "${sessionName}" -x 200 -y 50 "${command}"
+#### node-pty Terminal Manager (Spec 0085, extended by Spec 0104)
 
-# Hide tmux status bar (dashboard provides tabs)
-tmux set-option -t "${sessionName}" status off
-
-# Enable mouse support
-tmux set-option -t "${sessionName}" -g mouse on
-
-# Enable clipboard integration (OSC 52)
-tmux set-option -t "${sessionName}" -g set-clipboard on
-tmux set-option -t "${sessionName}" -g allow-passthrough on
-
-# Copy to system clipboard on mouse release (macOS)
-tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "pbcopy"
-```
-
-#### node-pty Terminal Manager (Spec 0085)
-
-All terminal sessions are managed by the Terminal Manager (`packages/codev/src/terminal/`), which multiplexes PTY sessions over WebSocket:
+All terminal sessions are managed by the Terminal Manager (`packages/codev/src/terminal/`), which multiplexes PTY sessions over WebSocket. As of Spec 0104, PtySession supports two I/O backends: direct node-pty (non-persistent) and shepherd-backed (persistent via `attachShepherd()`).
 
 ```bash
 # REST API for session management
@@ -256,7 +298,7 @@ ws://localhost:4200/ws/terminal/<session-id>
 ```typescript
 const baseEnv = {
   TERM: 'xterm-256color',
-  LANG: process.env.LANG ?? 'en_US.UTF-8',  // Required for tmux Unicode rendering
+  LANG: process.env.LANG ?? 'en_US.UTF-8',  // Required for Unicode rendering
 };
 ```
 
@@ -328,7 +370,7 @@ When spawning a builder (`af spawn -p 0003`):
 4. **Setup Files**:
    - `.builder-prompt.txt`: Initial prompt for the builder
    - `.builder-role.md`: Role definition (from `codev/roles/builder.md`)
-   - `.builder-start.sh`: Launch script for tmux
+   - `.builder-start.sh`: Launch script for builder session
 
 #### Directory Structure
 
@@ -378,7 +420,7 @@ When cleaning up a builder (`af cleanup -p 0003`):
 
 1. **Check for uncommitted changes**: Refuses if dirty (unless `--force`)
 2. **Kill PTY session**: Terminal Manager kills node-pty session
-3. **Kill tmux session**: `tmux kill-session -t {session}`
+3. **Kill shepherd session**: `SessionManager.killSession()` sends SIGTERM, waits 5s, SIGKILL, cleans up socket (or kills tmux session for legacy sessions)
 4. **Remove worktree**: `git worktree remove .builders/0003`
 5. **Delete branch**: `git branch -d builder/0003-feature-name`
 6. **Update state**: Remove builder from database
@@ -417,9 +459,19 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    TerminalManager (node-pty sessions)               │    │
-│  │  - Spawns PTY sessions via node-pty                                  │    │
+│  │  - Spawns PTY sessions via node-pty or attaches to shepherd         │    │
+│  │  - createSessionRaw() for shepherd-backed sessions (no spawn)       │    │
 │  │  - Maintains ring buffer (1000 lines) per session                    │    │
 │  │  - Handles WebSocket broadcast to connected clients                  │    │
+│  │  - shutdown() preserves shepherd-backed sessions                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                 SessionManager (shepherd orchestration)              │    │
+│  │  - Spawns shepherd-main.js as detached OS processes                 │    │
+│  │  - Connects ShepherdClient to each shepherd via Unix socket         │    │
+│  │  - Reconnects to living shepherds after Tower restart               │    │
+│  │  - Auto-restart for architect sessions (SPAWN frame)                │    │
+│  │  - Cleans up stale sockets on startup                               │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -440,22 +492,25 @@ As of v2.0.0 (Spec 0090 Phase 4), Agent Farm uses a **Tower Single Daemon** arch
 
 **These MUST remain true - violating them will break the system:**
 
-1. **Single PTY per terminal**: Each architect/builder/shell has exactly one node-pty session in TerminalManager
+1. **Single PTY per terminal**: Each architect/builder/shell has exactly one PtySession in TerminalManager (either node-pty direct or shepherd-backed)
 2. **projectTerminals is the runtime source of truth**: The in-memory Map tracks which terminals belong to which project
-3. **SQLite (global.db) tracks port allocations only**: Port assignments persist across restarts, but terminal state does not
+3. **SQLite (global.db) tracks port allocations and terminal sessions**: Port assignments and shepherd metadata (`shepherd_socket`, `shepherd_pid`, `shepherd_start_time`) persist across restarts
 4. **Tower serves React dashboard directly**: No separate dashboard-server processes - Tower serves `/project/<encoded>/` routes
 5. **WebSocket paths include project context**: Format is `/project/<base64url>/ws/terminal/<id>`
 
 #### State Split Problem & Reconciliation
 
 **WARNING**: The system has a known state split between:
-- **SQLite (global.db)**: Persistent port allocations
+- **SQLite (global.db)**: Persistent port allocations and terminal session metadata (including `shepherd_socket`, `shepherd_pid`, `shepherd_start_time`)
 - **In-memory (projectTerminals)**: Runtime terminal state
 
-On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy:
-- Projects show "inactive" until explicitly activated
-- Activation creates new terminals (doesn't restore old ones)
-- tmux sessions may be orphaned after crashes (handled by orphan cleanup)
+On Tower restart, `projectTerminals` is empty but SQLite may show projects as "allocated". The reconciliation strategy (`reconcileTerminalSessions()`) uses a **triple-source approach** (Spec 0104 Phase 3):
+
+1. **Phase 1 -- Shepherd reconnection**: For SQLite rows with `shepherd_socket IS NOT NULL`, attempt `SessionManager.reconnectSession()`. Validates PID is alive and start time matches. On success, creates a PtySession via `TerminalManager.createSessionRaw()` and wires it with `attachShepherd()`. Receives REPLAY frame for output continuity.
+2. **Phase 2 -- tmux reconnection (legacy dual-mode)**: For SQLite rows with `tmux_session IS NOT NULL AND shepherd_socket IS NULL`, uses the original tmux-first discovery logic.
+3. **Phase 3 -- SQLite sweep**: Stale rows (no matching shepherd or tmux session) are cleaned up. Orphaned non-shepherd processes are killed. Shepherd processes are preserved (they may be reconnectable later).
+
+This triple-source strategy ensures sessions survive Tower restarts when backed by shepherd processes, while maintaining backward compatibility with legacy tmux sessions during the transition.
 
 #### Server Architecture
 
@@ -539,16 +594,18 @@ packages/codev/dashboard/
 **Building**: `npm run build` in `packages/codev/` includes `build:dashboard`. Output: ~64KB gzipped.
 
 **Terminal Component** (`Terminal.tsx`):
-- xterm.js with `customGlyphs: true` for crisp Unicode block elements (▀▄█)
+- xterm.js with `customGlyphs: true` for crisp Unicode block elements
 - WebSocket connection to `/ws/terminal/<id>` using hybrid binary protocol
 - DA (Device Attribute) response filtering: buffers initial 300ms to catch `ESC[?...c` sequences
 - Canvas renderer with dark theme
+- **Persistent prop** (Spec 0104): Accepts `persistent?: boolean`. When `persistent === false`, renders a yellow warning banner: "Session persistence unavailable -- this terminal will not survive a restart". Prop flows from `/api/state` through `useTabs` hook → `Tab` interface → `App.tsx` → `Terminal.tsx`.
 
 **Tab System**:
 - Architect tab (always present when running)
 - Builder tabs (one per spawned builder)
 - Utility tabs (shell terminals, filtered to exclude stale entries with pid=0)
 - File tabs (annotation viewers)
+- Each tab carries a `persistent?: boolean` field sourced from `/api/state`
 
 **StatusPanel**:
 - Parses `codev/projectlist.md` YAML entries for stage/priority/dependencies
@@ -566,17 +623,21 @@ Agent Farm includes several mechanisms for handling failures and recovering from
 
 #### Orphan Session Detection
 
-On startup, `handleOrphanedSessions()` detects and cleans up:
-- tmux sessions from previous crashed runs
+On startup, `handleOrphanedSessions()` and `reconcileTerminalSessions()` detect and clean up:
+- Stale shepherd sockets with no live process (via `SessionManager.cleanupStaleSockets()`)
+- tmux sessions from previous crashed runs (legacy, during transition)
 - node-pty sessions without active WebSocket clients
 - State entries for dead processes
 
+Shepherd processes are treated specially during cleanup: orphaned shepherds are NOT killed during the SQLite sweep because they may be reconnectable later. Only non-shepherd orphaned processes receive SIGTERM.
+
 ```typescript
-// From utils/orphan-handler.ts
-export async function handleOrphanedSessions(options: { kill: boolean }): Promise<void> {
-  // Find tmux sessions matching af-* or builder-* patterns
-  // Check if corresponding state entries exist
-  // Kill orphaned sessions if options.kill is true
+// From session-manager.ts — stale socket cleanup
+async cleanupStaleSockets(): Promise<number> {
+  // Scan ~/.codev/run/shepherd-*.sock
+  // Skip symlinks (security), skip active sessions
+  // Probe socket: connect to check if shepherd is alive
+  // If connection refused → stale, unlink socket file
 }
 ```
 
@@ -603,7 +664,7 @@ for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
 
 #### Dead Process Cleanup
 
-Dashboard server cleans up stale entries on state load:
+Tower cleans up stale entries on state load:
 
 ```typescript
 function cleanupDeadProcesses(): void {
@@ -611,9 +672,8 @@ function cleanupDeadProcesses(): void {
   for (const util of getUtils()) {
     if (!isProcessRunning(util.pid)) {
       console.log(`Auto-closing shell tab ${util.name} (process ${util.pid} exited)`);
-      if (util.tmuxSession) {
-        killTmuxSession(util.tmuxSession);
-      }
+      // For shepherd-backed sessions, SessionManager handles cleanup
+      // For legacy tmux sessions, kill the tmux session
       removeUtil(util.id);
     }
   }
@@ -622,21 +682,20 @@ function cleanupDeadProcesses(): void {
 
 #### Graceful Shutdown
 
-Two-phase process termination prevents zombie processes:
+Tower shutdown uses a multi-step process:
+
+1. **TerminalManager.shutdown()**: Iterates all PtySessions. Shepherd-backed sessions are **skipped** (they survive Tower restart). Non-shepherd sessions receive SIGTERM/SIGKILL.
+2. **SessionManager.shutdown()**: Disconnects from all shepherds (closes Unix socket connections) without killing the shepherd processes. Shepherds continue running as orphaned OS processes.
+3. Legacy tmux sessions are killed if present.
 
 ```typescript
-async function killProcessGracefully(pid: number, tmuxSession?: string): Promise<void> {
-  // First kill tmux session
-  if (tmuxSession) {
-    killTmuxSession(tmuxSession);
+// TerminalManager.shutdown() — preserves shepherd sessions
+shutdown(): void {
+  for (const session of this.sessions.values()) {
+    if (session.shepherdBacked) continue; // Survive Tower restart
+    session.kill();
   }
-
-  // SIGTERM first
-  process.kill(pid, 'SIGTERM');
-
-  // Wait up to 500ms
-  // If still alive, SIGKILL
-  process.kill(pid, 'SIGKILL');
+  this.sessions.clear();
 }
 ```
 
@@ -810,30 +869,36 @@ const CONFIG = {
 |------|---------|
 | `utils/config.ts` | Configuration loading and port initialization |
 | `utils/port-registry.ts` | Global port allocation |
-| `utils/shell.ts` | Shell command execution, tmux session management |
+| `utils/shell.ts` | Shell command execution, session management |
 | `utils/logger.ts` | Formatted console output |
-| `utils/deps.ts` | Dependency checking (git, tmux, node-pty) |
+| `utils/deps.ts` | Dependency checking (git, node-pty) |
 | `utils/orphan-handler.ts` | Stale session cleanup |
 
-#### Terminal Management (Spec 0085)
+#### Terminal Management (Spec 0085, extended by Spec 0104)
 
 | File | Purpose |
 |------|---------|
-| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing |
-| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast |
+| `terminal/pty-manager.ts` | Terminal session lifecycle (spawn, kill, resize, list) + REST/WS routing. `createSessionRaw()` creates PtySession without spawning (for shepherd). `shutdown()` skips shepherd-backed sessions. |
+| `terminal/pty-session.ts` | Individual PTY wrapper with ring buffer, disk logging, WebSocket broadcast. `attachShepherd()` wires IShepherdClient as I/O backend. `shepherdBacked` flag changes write/resize/kill/detach behavior. |
 | `terminal/ring-buffer.ts` | Fixed-size circular buffer (1000 lines) with monotonic sequence numbers |
 | `terminal/ws-protocol.ts` | WebSocket frame encoding/decoding (hybrid binary protocol) |
+| `terminal/session-manager.ts` | Orchestrates shepherd lifecycle: spawn, reconnect, kill, auto-restart, stale socket cleanup (Spec 0104) |
+| `terminal/shepherd-client.ts` | Tower-side client connecting to a single shepherd process via Unix socket (Spec 0104) |
+| `terminal/shepherd-protocol.ts` | Binary wire protocol encoder/decoder shared by shepherd and Tower (Spec 0104) |
+| `terminal/shepherd-process.ts` | Shepherd core logic: PTY management, replay buffer, socket handling (Spec 0104) |
+| `terminal/shepherd-main.ts` | Standalone shepherd entry point spawned by Tower as detached process (Spec 0104) |
+| `terminal/shepherd-replay-buffer.ts` | Shepherd-side 10,000-line replay buffer (standalone, no ring-buffer.ts dependency) (Spec 0104) |
 
 #### Dashboard (React + Vite, Spec 0085)
 
 | File | Purpose |
 |------|---------|
 | `dashboard/src/components/App.tsx` | Root layout with split pane |
-| `dashboard/src/components/Terminal.tsx` | xterm.js + WebSocket client with DA filtering |
+| `dashboard/src/components/Terminal.tsx` | xterm.js + WebSocket client with DA filtering. Accepts `persistent` prop; shows warning banner when `false` (Spec 0104). |
 | `dashboard/src/components/TabBar.tsx` | Tab bar with close buttons |
 | `dashboard/src/components/StatusPanel.tsx` | Project status from projectlist.md |
-| `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state |
-| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath() |
+| `dashboard/src/hooks/useTabs.ts` | Tab state management from /api/state. Tab interface includes `persistent?: boolean` (Spec 0104). |
+| `dashboard/src/lib/api.ts` | REST client + getTerminalWsPath(). Builder, UtilTerminal, ArchitectState interfaces include `persistent?: boolean` (Spec 0104). |
 
 #### Templates
 
@@ -860,8 +925,9 @@ const CONFIG = {
 - **commander.js**: CLI argument parsing and command structure
 - **better-sqlite3**: SQLite database for atomic state management (WAL mode)
 - **tree-kill**: Process cleanup and termination
-- **tmux**: Session persistence for builder terminals
+- **Shepherd processes**: Detached Node.js processes for terminal session persistence (replaced tmux in Spec 0104)
 - **node-pty**: Native PTY sessions with WebSocket multiplexing (replaced ttyd in Spec 0085)
+- **tmux**: Legacy session persistence (being removed in Spec 0104 Phase 4)
 - **React 19 + Vite 6**: Dashboard SPA (replaced vanilla JS in Spec 0085)
 - **xterm.js**: Terminal emulator in the browser (with `customGlyphs: true` for Unicode)
 
@@ -884,8 +950,9 @@ const CONFIG = {
 - macOS (Darwin)
 - Linux (GNU/Linux)
 - Requires: Node.js 18+, Bash 4.0+, Git 2.5+ (worktree support), standard Unix utilities
-- Optional: tmux (session persistence)
+- Optional: tmux (legacy session persistence, no longer required as of Spec 0104)
 - Native addon: node-pty (compiled during npm install, may need `npm rebuild node-pty`)
+- Runtime directory: `~/.codev/run/` for shepherd Unix sockets (created automatically with `0700` permissions)
 
 ## Repository Dual Nature
 
@@ -1224,7 +1291,7 @@ af send 0003 "msg" --interrupt        # Send Ctrl+C first
 af send 0003 "msg" --raw              # Skip structured formatting
 
 # Direct CLI access (v1.5.0+)
-af architect                  # Start/attach to architect tmux session
+af architect                  # Start/attach to architect session
 af architect "initial prompt" # With initial prompt
 
 # Remote access (v1.5.2+)
@@ -1684,7 +1751,7 @@ consult -m claude spec 42
 **Porch integration**: Porch's `next.ts` spawns 3 parallel `consult` commands with `--output` flags, collects results, parses verdicts via `verdict.ts` (scans backward for `VERDICT:` line, defaults to `REQUEST_CHANGES` if not found).
 
 **Claude nesting limitation**: The `claude` CLI detects nested sessions via the `CLAUDECODE` environment variable and refuses to run inside another Claude session. This affects builders (which run inside Claude) trying to run `consult -m claude`. Two mitigation options exist:
-1. **Unset `CLAUDECODE`**: Builder's tmux session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
+1. **Unset `CLAUDECODE`**: Builder's shepherd session already uses `env -u CLAUDECODE` for terminal sessions, but not for `consult` invocations
 2. **Anthropic SDK**: Replace CLI delegation with direct API calls via `@anthropic-ai/sdk`, bypassing the nesting check entirely
 
 ### 10. TICK Protocol for Fast Iteration
@@ -1768,7 +1835,7 @@ base+70-99: Reserved for future use
 - **No migration complexity** - Delete old artifacts rather than migrating
 - **Dirty worktree protection** - Refuse to delete worktrees with uncommitted changes
 - **Force flag requirement** - `--force` required to override safety checks
-- **Orphaned session handling** - Detect and handle stale tmux sessions on startup
+- **Orphaned session handling** - Detect and handle stale shepherd sockets and legacy tmux sessions on startup
 
 ## Integration Points
 
@@ -1795,7 +1862,7 @@ base+70-99: Reserved for future use
 - **JSON**: State management and configuration
 
 ### Optional Dependencies (Agent-Farm)
-- **tmux**: Session persistence for architect terminal (recommended)
+- **tmux**: Legacy session persistence (no longer required as of Spec 0104; shepherd processes provide persistence)
 - **node-pty**: Native PTY sessions for dashboard terminals (compiled during install, may need `npm rebuild node-pty`)
 
 ## System-Wide Patterns
@@ -2209,10 +2276,15 @@ npm run test:e2e -- --grep "tower" --headed
 |------|---------|
 | `packages/codev/src/agent-farm/__tests__/tower-api.test.ts` | Tower API unit tests |
 | `packages/codev/src/agent-farm/__tests__/e2e/tower.spec.ts` | Tower E2E tests (Playwright) |
+| `packages/codev/src/terminal/__tests__/shepherd-protocol.test.ts` | Shepherd wire protocol unit tests (Spec 0104 Phase 1) |
+| `packages/codev/src/terminal/__tests__/shepherd-process.test.ts` | Shepherd process logic unit tests (Spec 0104 Phase 1) |
+| `packages/codev/src/terminal/__tests__/shepherd-client.test.ts` | ShepherdClient unit tests (Spec 0104 Phase 2) |
+| `packages/codev/src/terminal/__tests__/session-manager.test.ts` | SessionManager unit/integration tests (Spec 0104 Phase 2) |
+| `packages/codev/src/terminal/__tests__/tower-shepherd-integration.test.ts` | PtySession + ShepherdClient integration tests (16 tests, Spec 0104 Phase 3) |
 
 ---
 
-**Last Updated**: 2026-02-05
+**Last Updated**: 2026-02-13
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Updated to reflect Tower Single Daemon architecture (Spec 0090 Phase 4). Removed dashboard-server.ts references. Added integration testing requirements.
-**Next Review**: After v2.0.0 release
+**Changes**: Updated for Spec 0104 Phase 3 (Custom Terminal Session Manager). Documented shepherd architecture replacing tmux, SessionManager, PtySession.attachShepherd(), triple-source reconciliation, dashboard persistent prop wiring, and new test files.
+**Next Review**: After Spec 0104 Phase 4 (tmux removal)
