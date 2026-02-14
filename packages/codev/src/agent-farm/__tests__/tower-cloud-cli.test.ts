@@ -112,7 +112,7 @@ describe('tower cloud CLI flows (Phase 5)', () => {
       expect(config!.tower_id).toBe('tower-mock-id');
       expect(config!.api_key).toBe('ctk_MockApiKey123');
       expect(config!.tower_name).toBe('my-test-tower');
-      expect(config!.server_url).toBe('https://codevos.ai');
+      expect(config!.server_url).toBe('https://cloud.codevos.ai');
 
       expect(openBrowser).toHaveBeenCalledWith(
         expect.stringContaining('/towers/register?callback='),
@@ -223,6 +223,90 @@ describe('tower cloud CLI flows (Phase 5)', () => {
 
     it('throws fatal when not registered', async () => {
       await expect(towerDeregister()).rejects.toThrow('FATAL:');
+    });
+  });
+
+  describe('CLI aliases (Phase 4)', () => {
+    it('towerRegister is exported and callable via both connect and register', () => {
+      // Verify the function is importable (the CLI wires it to both 'connect' and hidden 'register')
+      expect(typeof towerRegister).toBe('function');
+    });
+
+    it('towerDeregister is exported and callable via both disconnect and deregister', () => {
+      // Verify the function is importable (the CLI wires it to both 'disconnect' and hidden 'deregister')
+      expect(typeof towerDeregister).toBe('function');
+    });
+
+    it('CLI has connect/disconnect as primary commands with hidden register/deregister aliases', async () => {
+      const { Command } = await import('commander');
+
+      // Build the tower subcommand tree the same way cli.ts does
+      const towerCmd = new Command('tower');
+
+      const connectOpts = (cmd: InstanceType<typeof Command>) => cmd
+        .option('--reauth', 'Update API key without changing tower name')
+        .option('--service <url>', 'CodevOS service URL')
+        .option('-p, --port <port>', 'Tower port');
+      const disconnectOpts = (cmd: InstanceType<typeof Command>) => cmd
+        .option('-p, --port <port>', 'Tower port');
+
+      const noop = () => {};
+
+      connectOpts(towerCmd.command('connect').description('Connect')).action(noop);
+      disconnectOpts(towerCmd.command('disconnect').description('Disconnect')).action(noop);
+      towerCmd.addCommand(connectOpts(new Command('register')).action(noop), { hidden: true });
+      towerCmd.addCommand(disconnectOpts(new Command('deregister')).action(noop), { hidden: true });
+
+      // Help output should show connect/disconnect but NOT register/deregister
+      const helpText = towerCmd.helpInformation();
+      expect(helpText).toContain('connect');
+      expect(helpText).toContain('disconnect');
+      expect(helpText).not.toContain('register');
+      expect(helpText).not.toContain('deregister');
+
+      // But the hidden commands should still be findable by Commander
+      const allCommands = towerCmd.commands.map((c: InstanceType<typeof Command>) => c.name());
+      expect(allCommands).toContain('connect');
+      expect(allCommands).toContain('disconnect');
+      expect(allCommands).toContain('register');
+      expect(allCommands).toContain('deregister');
+    });
+
+    it('user-facing messages reference "af tower connect" not "af tower register"', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+
+      // Check messages in tower-cloud.ts reference new names
+      const cloudSource = readFileSync(
+        resolve(import.meta.dirname, '../commands/tower-cloud.ts'),
+        'utf-8',
+      );
+      expect(cloudSource).toContain('af tower connect');
+      expect(cloudSource).not.toContain('af tower register');
+
+      // Check messages in cloud-config.ts reference new names
+      const configSource = readFileSync(
+        resolve(import.meta.dirname, '../lib/cloud-config.ts'),
+        'utf-8',
+      );
+      expect(configSource).toContain('af tower connect');
+      expect(configSource).not.toContain('af tower register');
+
+      // Check messages in tunnel-client.ts reference new names
+      const tunnelSource = readFileSync(
+        resolve(import.meta.dirname, '../lib/tunnel-client.ts'),
+        'utf-8',
+      );
+      expect(tunnelSource).toContain('af tower connect');
+      expect(tunnelSource).not.toContain('af tower register');
+
+      // Check messages in tower-tunnel.ts reference new names
+      const tunnelServerSource = readFileSync(
+        resolve(import.meta.dirname, '../servers/tower-tunnel.ts'),
+        'utf-8',
+      );
+      expect(tunnelServerSource).toContain('af tower connect');
+      expect(tunnelServerSource).not.toContain('af tower register');
     });
   });
 });

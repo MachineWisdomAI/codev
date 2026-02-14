@@ -9,8 +9,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import os from 'node:os';
 import { TunnelClient, type TunnelState, type TowerMetadata } from '../lib/tunnel-client.js';
-import { readCloudConfig, getCloudConfigPath, maskApiKey, type CloudConfig } from '../lib/cloud-config.js';
+import {
+  readCloudConfig,
+  writeCloudConfig,
+  deleteCloudConfig,
+  getCloudConfigPath,
+  getOrCreateMachineId,
+  maskApiKey,
+  type CloudConfig,
+} from '../lib/cloud-config.js';
+import { createPendingRegistration, consumePendingRegistration } from '../lib/nonce-store.js';
+import { redeemToken } from '../lib/token-exchange.js';
+import { validateDeviceName } from '../lib/device-name.js';
 import type { ProjectTerminals, InstanceStatus } from './tower-types.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 
@@ -32,6 +44,7 @@ let configWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 let metadataRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
 const METADATA_REFRESH_MS = 30_000;
+const DEFAULT_SERVER_URL = 'https://cloud.codevos.ai';
 
 /** Stored references set by initTunnel() */
 let _deps: TunnelDeps | null = null;
@@ -130,7 +143,7 @@ async function connectTunnel(config: CloudConfig): Promise<TunnelClient> {
       stopMetadataRefresh();
     }
     if (state === 'auth_failed') {
-      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower register --reauth\' to update credentials.');
+      _deps!.log('ERROR', 'Cloud connection failed: API key is invalid or revoked. Run \'af tower connect --reauth\' to update credentials.');
     }
   });
 
@@ -255,27 +268,170 @@ export function shutdownTunnel(): void {
 }
 
 /**
- * Handle tunnel management endpoints (Spec 0097 Phase 4).
- * Dispatches /api/tunnel/{connect,disconnect,status} requests.
+ * Read the request body as a string.
+ */
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Generate a minimal HTML response page.
+ */
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function htmlPage(title: string, body: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title>
+<style>body{font-family:system-ui,sans-serif;max-width:480px;margin:60px auto;text-align:center}
+h1{font-size:1.4em}a{color:#0066cc}</style></head>
+<body><h1>${title}</h1>${body}</body></html>`;
+}
+
+/**
+ * Handle tunnel management endpoints (Spec 0097 Phase 4, Spec 0107 Phase 2).
+ * Dispatches /api/tunnel/{connect,connect/callback,disconnect,status} requests.
  */
 export async function handleTunnelEndpoint(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   tunnelSub: string,
 ): Promise<void> {
-  // POST connect
+  // GET connect/callback — OAuth callback (MUST be checked BEFORE 'connect')
+  if (req.method === 'GET' && tunnelSub === 'connect/callback') {
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const token = url.searchParams.get('token');
+    const nonce = url.searchParams.get('nonce');
+
+    if (!token || !nonce) {
+      res.writeHead(400, { 'Content-Type': 'text/html' });
+      res.end(htmlPage('Registration Failed', '<p>Missing token or nonce parameter.</p><p><a href="/">Back to Tower</a></p>'));
+      return;
+    }
+
+    const pending = consumePendingRegistration(nonce);
+    if (!pending) {
+      res.writeHead(400, { 'Content-Type': 'text/html' });
+      res.end(htmlPage('Registration Failed', '<p>Invalid or expired registration link. Please try again from the Tower UI.</p><p><a href="/">Back to Tower</a></p>'));
+      return;
+    }
+
+    try {
+      const machineId = getOrCreateMachineId();
+      _deps?.log('INFO', `OAuth callback: redeeming token for tower "${pending.name}" (key: ${maskApiKey(token)})`);
+      const { towerId, apiKey } = await redeemToken(pending.serverUrl, token, pending.name, machineId);
+
+      writeCloudConfig({
+        tower_id: towerId,
+        tower_name: pending.name,
+        api_key: apiKey,
+        server_url: pending.serverUrl,
+      });
+
+      _deps?.log('INFO', `Registration complete: tower="${pending.name}" id=${towerId} key=${maskApiKey(apiKey)}`);
+
+      // Connect tunnel with new credentials
+      const config = readCloudConfig();
+      if (config) {
+        await connectTunnel(config);
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(htmlPage('Connected to Codev Cloud',
+        `<p>Tower "<strong>${pending.name}</strong>" is now connected.</p>` +
+        '<p>Redirecting to Tower homepage...</p>' +
+        '<meta http-equiv="refresh" content="3;url=/">' +
+        '<p><a href="/">Back to Tower</a></p>'));
+    } catch (err) {
+      _deps?.log('ERROR', `OAuth callback failed: ${(err as Error).message}`);
+      res.writeHead(500, { 'Content-Type': 'text/html' });
+      res.end(htmlPage('Registration Failed',
+        `<p>${escapeHtml((err as Error).message)}</p><p><a href="/">Back to Tower</a></p>`));
+    }
+    return;
+  }
+
+  // POST connect — OAuth initiation or smart reconnect
   if (req.method === 'POST' && tunnelSub === 'connect') {
     if (!_deps) {
-      // Module not initialized yet (server still starting up)
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: 'Tower is still starting up. Try again shortly.' }));
       return;
     }
+
     try {
+      const rawBody = await readBody(req);
+      let body: Record<string, unknown> | null = null;
+      if (rawBody.trim()) {
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON in request body.' }));
+          return;
+        }
+      }
+
+      // OAuth initiation: body contains { name, serverUrl?, origin? }
+      if (body && 'name' in body) {
+        const name = String(body.name);
+        const serverUrl = String(body.serverUrl || DEFAULT_SERVER_URL);
+        const origin = String(body.origin || `http://localhost:${_deps.port}`);
+
+        // Validate device name
+        const nameResult = validateDeviceName(name);
+        if (!nameResult.valid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: nameResult.error }));
+          return;
+        }
+
+        // Validate origin is a well-formed URL
+        try {
+          new URL(origin);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid origin URL.' }));
+          return;
+        }
+
+        // Validate serverUrl is HTTPS (or HTTP on localhost for development)
+        try {
+          const parsed = new URL(serverUrl);
+          const isLocalhost = parsed.hostname === 'localhost' && parsed.protocol === 'http:';
+          if (parsed.protocol !== 'https:' && !isLocalhost) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Server URL must use HTTPS.' }));
+            return;
+          }
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid server URL.' }));
+          return;
+        }
+
+        const nonce = createPendingRegistration(name, serverUrl);
+        const callbackUrl = `${origin}/api/tunnel/connect/callback?nonce=${nonce}`;
+        const authUrl = `${serverUrl}/towers/register?callback=${encodeURIComponent(callbackUrl)}`;
+
+        _deps.log('INFO', `OAuth initiation: tower="${name}" server=${serverUrl}`);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ authUrl }));
+        return;
+      }
+
+      // Smart reconnect: no body or empty body — reconnect using existing config
       const config = readCloudConfig();
       if (!config) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Not registered. Run \'af tower register\' first.' }));
+        res.end(JSON.stringify({ success: false, error: "Not registered. Run 'af tower connect' or use the Connect button in the Tower UI." }));
         return;
       }
       if (tunnelClient) tunnelClient.resetCircuitBreaker();
@@ -290,14 +446,57 @@ export async function handleTunnelEndpoint(
     return;
   }
 
-  // POST disconnect
+  // POST disconnect — deregister server-side + delete local config
   if (req.method === 'POST' && tunnelSub === 'disconnect') {
+    let warning: string | undefined;
+
+    // Read config FIRST (need credentials for server-side deregister)
+    let config: CloudConfig | null = null;
+    try {
+      config = readCloudConfig();
+    } catch {
+      // Config corrupted — proceed with local cleanup
+    }
+
+    // Disconnect tunnel
     if (tunnelClient) {
       tunnelClient.disconnect();
       tunnelClient = null;
     }
+
+    // Server-side deregister (best-effort)
+    if (config) {
+      try {
+        const resp = await fetch(`${config.server_url}/api/towers/${config.tower_id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${config.api_key}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!resp.ok) {
+          warning = `Server-side deregister failed (${resp.status}). Local credentials removed.`;
+          _deps?.log('WARN', warning);
+        } else {
+          _deps?.log('INFO', `Server-side deregister succeeded for tower ${config.tower_id}`);
+        }
+      } catch (err) {
+        warning = `Server-side deregister failed: ${(err as Error).message}. Local credentials removed.`;
+        _deps?.log('WARN', warning);
+      }
+    }
+
+    // Delete local config LAST
+    try {
+      deleteCloudConfig();
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: `Failed to delete local config: ${(err as Error).message}` }));
+      return;
+    }
+
+    const response: Record<string, unknown> = { success: true };
+    if (warning) response.warning = warning;
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
+    res.end(JSON.stringify(response));
     return;
   }
 
@@ -317,6 +516,7 @@ export async function handleTunnelEndpoint(
       registered: config !== null,
       state,
       uptime,
+      hostname: os.hostname(),
     };
 
     if (config) {
