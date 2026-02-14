@@ -39,13 +39,16 @@ All components use interfaces and dependency injection for independent testabili
 #### Objectives
 - Implement the binary wire protocol (encoder/decoder) shared by shepherd and Tower
 - Implement the shepherd process as a standalone Node.js script
-- Implement the shepherd's replay buffer using the existing RingBuffer class
+- Implement the shepherd's replay buffer as a standalone module (cannot import from RingBuffer because the shepherd runs as a separate detached process and must resolve its own dependencies from the compiled `dist/` output)
 - Comprehensive unit tests for protocol and shepherd logic
+
+**Build system integration**: `shepherd-main.ts` compiles to `dist/terminal/shepherd-main.js` via `tsc` alongside all other source. The `SessionManager` resolves it at runtime via `path.join(__dirname, 'shepherd-main.js')` (works in both dev/tsx and compiled modes because `__dirname` points to the source/dist directory respectively). In dev mode (`tsx`), Tower spawns `node dist/terminal/shepherd-main.js` (requires a build step). The shepherd imports only from sibling compiled files (`shepherd-protocol.js`, `shepherd-replay-buffer.js`) — no imports from the broader package to avoid dependency issues in the detached process.
 
 #### Deliverables
 - [ ] `packages/codev/src/terminal/shepherd-protocol.ts` — Frame encoder/decoder
 - [ ] `packages/codev/src/terminal/shepherd-process.ts` — Shepherd class (testable core logic)
-- [ ] `packages/codev/src/terminal/shepherd-main.ts` — Standalone entry point (spawned by Tower)
+- [ ] `packages/codev/src/terminal/shepherd-main.ts` — Standalone entry point (spawned by Tower as detached process)
+- [ ] `packages/codev/src/terminal/shepherd-replay-buffer.ts` — Shepherd-side replay buffer (lightweight standalone, does NOT import from ring-buffer.ts to avoid pulling in the full package dependency tree)
 - [ ] `packages/codev/src/terminal/__tests__/shepherd-protocol.test.ts` — Protocol unit tests
 - [ ] `packages/codev/src/terminal/__tests__/shepherd-process.test.ts` — Shepherd unit tests
 
@@ -178,7 +181,7 @@ No existing code is modified. All new files can be deleted.
 #### Deliverables
 - [ ] `packages/codev/src/terminal/shepherd-client.ts` — Tower's client to a single shepherd
 - [ ] `packages/codev/src/terminal/session-manager.ts` — Manages all shepherd sessions
-- [ ] `packages/codev/src/agent-farm/db/migrations/add-shepherd-columns.ts` — Schema migration
+- [ ] Schema migration logic inline in `packages/codev/src/agent-farm/servers/tower-server.ts` startup (no migrations directory exists; use `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` pattern)
 - [ ] `packages/codev/src/terminal/__tests__/shepherd-client.test.ts` — Client unit tests
 - [ ] `packages/codev/src/terminal/__tests__/session-manager.test.ts` — Manager unit/integration tests
 
@@ -293,8 +296,12 @@ Run on Tower startup if columns don't exist (check via `PRAGMA table_info(termin
 - **Integration Tests (session-manager.test.ts)**:
   - Real shepherd process: create → write → read → kill → verify cleanup
   - Real shepherd process: create → stop Tower connection → reconnect → verify replay
-  - Stale socket cleanup with real files
+  - Stale socket cleanup with real files (including symlink rejection)
   - Multi-client: two clients on same shepherd, concurrent I/O
+  - Shepherd crash recovery: kill shepherd process → verify session cleanup in SQLite and socket file removal
+  - Version mismatch: shepherd version > Tower version → verify warning and continue; Tower version > shepherd → verify disconnect
+  - Socket permissions: verify `~/.codev/run/` created with `0700`, socket files with `0600`
+  - Rapid restart cycles: kill process 10 times → verify maxRestarts honored
 
 #### Rollback Strategy
 New files only. Schema migration adds columns (non-breaking). Existing tmux code untouched.
@@ -317,8 +324,10 @@ New files only. Schema migration adds columns (non-breaking). Existing tmux code
 - Wire auto-restart for architect sessions through SessionManager
 
 #### Deliverables
-- [ ] Modified `packages/codev/src/agent-farm/servers/tower-server.ts` — Replace tmux functions
+- [ ] Modified `packages/codev/src/agent-farm/servers/tower-server.ts` — Replace tmux functions with shepherd
 - [ ] Modified `packages/codev/src/agent-farm/db/schema.ts` — Update DbTerminalSession interface
+- [ ] Modified `packages/codev/src/terminal/pty-session.ts` — Add `attachShepherd()` method and lifecycle management
+- [ ] Modified `packages/codev/dashboard/src/components/Terminal.tsx` — Add "Session persistence unavailable" warning
 - [ ] `packages/codev/src/terminal/__tests__/tower-shepherd-integration.test.ts` — Integration tests
 
 #### Implementation Details
@@ -385,6 +394,21 @@ async attachShepherd(client: IShepherdClient, replayData: Buffer): Promise<void>
 
 This preserves the existing PtySession API (RingBuffer, client broadcast, disk logging) while replacing the I/O backend.
 
+**PtySession lifecycle difference for shepherd-backed sessions:**
+- `cleanup()` currently clears the ring buffer and clients on exit — this is wrong for shepherd sessions where disconnect from Tower ≠ session death
+- `attachShepherd()` must set a flag (`this.shepherdBacked = true`) that changes cleanup behavior:
+  - On shepherd disconnect: don't clear ring buffer, don't kill process (shepherd is still alive)
+  - On explicit kill: send SIGNAL to shepherd, then cleanup normally
+  - On shepherd EXIT frame: cleanup normally (session is truly done)
+
+**Graceful degradation implementation (Spec Requirement 10):**
+When `sessionManager.createSession()` fails (shepherd spawn failure):
+1. Tower catches the error and falls back to direct `manager.createSession()` (existing PtySession with node-pty, no shepherd)
+2. SQLite row is saved with `shepherd_socket = NULL` to indicate non-persistent mode
+3. Tower includes `persistent: false` in the terminal session info returned to the dashboard
+4. Dashboard `Terminal.tsx` checks `persistent` field and shows a warning banner: "Session persistence unavailable" in the terminal header when `persistent === false`
+5. Session works normally for the Tower process lifetime but won't survive a restart
+
 #### Acceptance Criteria
 - [ ] Architect sessions created via shepherd (no tmux)
 - [ ] Shell terminals created via shepherd (no tmux)
@@ -394,6 +418,8 @@ This preserves the existing PtySession API (RingBuffer, client broadcast, disk l
 - [ ] On-the-fly reconnection works for shepherd-backed sessions
 - [ ] SQLite records shepherd_socket, shepherd_pid, shepherd_start_time
 - [ ] `af spawn` creates builder sessions via shepherd
+- [ ] Graceful degradation: shepherd spawn failure falls back to non-persistent session
+- [ ] Dashboard shows "Session persistence unavailable" warning for non-persistent sessions
 - [ ] All existing E2E tests pass
 
 #### Test Plan
@@ -423,17 +449,38 @@ Dual-mode support means existing tmux sessions keep working. If issues found, ca
 **Dependencies**: Phase 3
 
 #### Objectives
-- Remove all tmux-related code from the codebase
-- Drop the `tmux_session` column from SQLite
+- Remove ALL tmux-related code from the entire codebase (19 files, ~142 occurrences)
+- Drop `tmux_session` column from all 4 SQLite tables (terminal_sessions in global.db + architect, builders, utils in state.db)
+- Update all CLI commands that reference tmux (spawn, attach, stop, send)
+- Update type definitions, interfaces, and converter functions
 - Update documentation
 - Final E2E validation
 
 #### Deliverables
-- [ ] Modified `packages/codev/src/agent-farm/servers/tower-server.ts` — Remove tmux functions
-- [ ] Modified `packages/codev/src/agent-farm/db/schema.ts` — Drop tmux_session column
-- [ ] Removed `codev/resources/terminal-tmux.md` — No longer relevant
+
+**Tower and terminal layer (global.db):**
+- [ ] Modified `packages/codev/src/agent-farm/servers/tower-server.ts` — Remove all tmux functions (~10 functions), `tmuxAvailable` variable, dual-mode fallback
+- [ ] Modified `packages/codev/src/agent-farm/db/schema.ts` — Drop `tmux_session` from `GLOBAL_SCHEMA` terminal_sessions table; rename to use shepherd columns
+
+**State database layer (state.db) — 3 additional tables with `tmux_session`:**
+- [ ] Modified `packages/codev/src/agent-farm/db/schema.ts` — Drop `tmux_session` from `LOCAL_SCHEMA` tables: `architect`, `builders`, `utils`
+- [ ] Modified `packages/codev/src/agent-farm/db/types.ts` — Remove `tmuxSession` from `DbArchitect`, `DbBuilder`, `DbUtil` interfaces and converter functions
+
+**CLI commands that reference tmux:**
+- [ ] Modified `packages/codev/src/agent-farm/commands/spawn.ts` (~18 tmux refs) — Replace tmux session creation with shepherd in `startBuilderSession()`, update builder table writes
+- [ ] Modified `packages/codev/src/agent-farm/commands/attach.ts` (~6 tmux refs) — Replace tmux attach logic with shepherd reconnect
+- [ ] Modified `packages/codev/src/agent-farm/commands/stop.ts` (~8 tmux refs) — Replace tmux kill with shepherd kill
+- [ ] Modified `packages/codev/src/agent-farm/commands/send.ts` (~13 tmux refs) — Replace tmux send-keys with shepherd data write
+- [ ] Modified `packages/codev/src/agent-farm/state/state.ts` (~10 tmux refs) — Remove tmux session tracking from state management
+
+**Session naming and utilities:**
+- [ ] Modified `packages/codev/src/agent-farm/utils/session.ts` — Rename `parseTmuxSessionName()` to `parseSessionName()` (function is tmux-agnostic, just naming conventions)
 - [ ] Modified `packages/codev/src/terminal/pty-manager.ts` — Remove tmux UTF-8 comment
-- [ ] Updated `codev/resources/arch.md` — Document new shepherd architecture
+
+**Documentation:**
+- [ ] Removed `codev/resources/terminal-tmux.md`
+- [ ] Updated `codev/resources/arch.md` — Document shepherd architecture
+- [ ] Updated any README/CLAUDE.md tmux references
 
 #### Implementation Details
 
@@ -447,12 +494,11 @@ Dual-mode support means existing tmux sessions keep working. If issues found, ca
 - `findSqliteRowForTmuxSession()` function (lines ~686-720)
 - `resolveProjectPathFromBasename()` function (lines ~722-736 — only if unused after tmux removal)
 - `tmuxAvailable` variable and all references
-- Dual-mode tmux fallback in reconciliation (Phase 2 legacy path)
-- tmux-related comments throughout the file
+- Dual-mode tmux fallback in reconciliation
+- All tmux-related comments
 
-**Schema migration:**
+**Schema migration (global.db — terminal_sessions):**
 ```sql
--- Create new table without tmux_session
 CREATE TABLE terminal_sessions_new (
   id TEXT PRIMARY KEY,
   project_path TEXT NOT NULL,
@@ -464,25 +510,31 @@ CREATE TABLE terminal_sessions_new (
   shepherd_start_time INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
--- Copy data
 INSERT INTO terminal_sessions_new SELECT id, project_path, type, role_id, pid, shepherd_socket, shepherd_pid, shepherd_start_time, created_at FROM terminal_sessions;
--- Swap tables
 DROP TABLE terminal_sessions;
 ALTER TABLE terminal_sessions_new RENAME TO terminal_sessions;
 ```
 
-**Documentation updates:**
-- Remove `codev/resources/terminal-tmux.md`
-- Update `codev/resources/arch.md` with shepherd architecture description
-- Update any README/CLAUDE.md references to tmux
+**Schema migration (state.db — architect, builders, utils):**
+Drop `tmux_session TEXT` column from each table using the same CREATE-new/INSERT/DROP/RENAME pattern. These tables are per-project state; existing data references stale tmux sessions anyway.
+
+**CLI command updates:**
+- `spawn.ts`: `startBuilderSession()` currently creates a tmux session and writes `tmux_session` to the builders table. Replace with shepherd session creation via Tower API. The builder table no longer needs a `tmux_session` column.
+- `attach.ts`: Currently uses `tmux attach-session`. Replace with reconnecting to the Tower WebSocket for the builder's terminal.
+- `stop.ts`: Currently kills tmux sessions. Replace with Tower API calls to kill shepherd sessions.
+- `send.ts`: Currently uses `tmux send-keys`. Replace with writing to the shepherd via Tower API.
+
+**Verification approach:**
+Run `grep -r "tmux" packages/codev/src/` after all changes. Expected: zero results in implementation code (only user-facing strings like "tmux is available for use inside your shells" may remain).
 
 #### Acceptance Criteria
-- [ ] No tmux references in codebase (except user-facing docs noting tmux is available for users)
-- [ ] `tmux_session` column removed from SQLite schema
+- [ ] `grep -rn "tmux" packages/codev/src/ | grep -v "test" | grep -v "node_modules"` returns zero results (excluding test fixtures and user-facing strings)
+- [ ] `tmux_session` column removed from all 4 SQLite tables
+- [ ] All type interfaces (`DbArchitect`, `DbBuilder`, `DbUtil`, `DbTerminalSession`) updated
+- [ ] CLI commands `spawn`, `attach`, `stop`, `send` work without tmux
 - [ ] All E2E tests pass
-- [ ] `grep -r "tmux" packages/codev/src/` returns no results (except user-facing strings)
 - [ ] `codev/resources/terminal-tmux.md` deleted
-- [ ] `codev/resources/arch.md` updated
+- [ ] `codev/resources/arch.md` updated with shepherd architecture
 
 #### Test Plan
 - **E2E Tests (Playwright)**:
@@ -491,17 +543,24 @@ ALTER TABLE terminal_sessions_new RENAME TO terminal_sessions;
   - Terminal persistence across Tower restart
   - Multi-tab shared terminal
   - Architect auto-restart
+- **CLI Integration Tests**:
+  - `af spawn` creates working builder via shepherd
+  - `af attach` reconnects to builder terminal
+  - `af stop` cleanly stops builder
+  - `af send` delivers input to builder
 - **Manual Testing**:
-  - `af spawn` creates working builder
   - Dashboard shows all terminals
   - Clipboard and scroll work natively
+  - No tmux binary required for full Codev functionality
 
 #### Rollback Strategy
-Git revert. Schema migration can be reversed by re-adding `tmux_session` column.
+Git revert. Schema migrations can be reversed by re-adding `tmux_session` columns.
 
 #### Risks
 - **Risk**: Hidden tmux dependency in code not covered by grep
   - **Mitigation**: Full text search + E2E test suite as regression gate
+- **Risk**: CLI command changes break builder workflow
+  - **Mitigation**: Test `af spawn` → `af attach` → `af send` → `af stop` lifecycle end-to-end
 
 ---
 
