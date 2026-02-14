@@ -16,7 +16,7 @@ Additionally, the CLI terminology ("register" / "deregister") is confusing. The 
 
 ## Non-Goals
 
-- Changing the OAuth flow on the cloud.codevos.ai side
+- Changing the OAuth flow on the codevos.ai side
 - Adding user account management
 - Mobile-specific UI (mobile is rarely the client for Tower management)
 
@@ -42,21 +42,21 @@ Additionally, the CLI terminology ("register" / "deregister") is confusing. The 
 ### When Not Connected
 The cloud status area in the header shows "Codev Cloud" with a "Connect" button. Clicking it opens a dialog with:
 1. **Device name** input (default: machine hostname)
-2. **Service URL** input (default: `https://cloud.codevos.ai`)
+2. **Service URL** input (default: `https://codevos.ai`)
 3. A "Connect" button that starts the OAuth flow
 
-The OAuth flow redirects the browser to cloud.codevos.ai. After authentication, the callback returns to Tower (not an ephemeral server), Tower exchanges the token, saves credentials, and connects the tunnel. The UI updates to show connected status.
+The OAuth flow navigates the current browser tab to codevos.ai. After authentication, the callback redirects back to Tower (not an ephemeral server), Tower exchanges the token, saves credentials, and connects the tunnel. The UI updates to show connected status.
 
 ### When Connected
 The cloud status shows the green dot, device name, uptime, and a "Disconnect" button. Disconnect:
 1. Confirms with the user ("This will disconnect from Codev Cloud. Continue?")
 2. Closes the tunnel
-3. Deregisters server-side
+3. Deregisters server-side (best-effort — see Error Handling)
 4. Deletes local credentials
 5. UI updates to show the "Connect" button again
 
 ### Smart Connect
-If already connected and the user somehow triggers Connect (e.g., tunnel dropped but credentials exist), it simply reconnects the tunnel without re-doing OAuth.
+If credentials exist but the tunnel is down (e.g., tunnel dropped, Tower restarted), Connect reconnects the tunnel without re-doing OAuth. Specifically: if `readCloudConfig()` returns a valid config, POST `/api/tunnel/connect` with no body reconnects the existing tunnel. Only when no credentials exist does the full OAuth flow start.
 
 ## Approach
 
@@ -65,63 +65,111 @@ If already connected and the user somehow triggers Connect (e.g., tunnel dropped
 Rename the commands while keeping the same behavior:
 - `af tower register` → `af tower connect`
 - `af tower deregister` → `af tower disconnect`
-- Keep old names as hidden aliases for backwards compatibility
+- Keep old names as hidden aliases for backwards compatibility (not shown in `--help`, but still functional)
 
 ### New Tower API Endpoints
 
 **POST `/api/tunnel/connect`** (enhanced — replaces current behavior)
-- If credentials exist: reconnect tunnel (current behavior)
-- If no credentials: accepts `{ name: string, serverUrl?: string }`, generates callback URL pointing to Tower, returns `{ authUrl: string }`
+- If credentials exist and no body is provided: reconnect tunnel (current behavior)
+- If no credentials: accepts `{ name: string, serverUrl?: string, origin?: string }`, generates callback URL, stores a pending registration nonce (see State Management), returns `{ authUrl: string }`
+- The `origin` field allows the UI to pass `window.location.origin` so the callback URL is constructed correctly for non-localhost access (e.g., LAN IP)
 
-**GET `/api/tunnel/connect/callback?token=...`**
-- Receives OAuth callback from cloud.codevos.ai
-- Exchanges token for API key using device name from the initial request
+**GET `/api/tunnel/connect/callback?token=...&nonce=...`**
+- Validates the `nonce` against the pending registration store (rejects if missing/expired/already-used)
+- Retrieves device name and serverUrl from the pending registration
+- Exchanges token for API key via POST `{serverUrl}/api/towers/register/redeem`
 - Writes cloud config
 - Connects tunnel
-- Returns HTML page: "Connected to Codev Cloud" with auto-redirect to Tower homepage
+- On success: returns HTML page "Connected to Codev Cloud" with auto-redirect to Tower homepage
+- On failure: returns HTML error page with description and a "Try Again" link to Tower homepage
+- Consumes the nonce (single-use)
 
 **POST `/api/tunnel/disconnect`** (enhanced — replaces current behavior)
 - Closes tunnel
-- Deregisters server-side (DELETE to cloud API)
+- Deregisters server-side (DELETE to cloud API) — best-effort
 - Deletes local credentials
-- Returns `{ success: true }`
+- Returns `{ success: true }` (even if server-side deregister failed — includes `warning` field if so)
+
+### OAuth State Management
+
+The OAuth flow has a gap between initiating (POST `/api/tunnel/connect`) and completing (GET callback). To bridge this without server-side persistence across restarts:
+
+1. **Initiation**: Server generates a random nonce (crypto.randomUUID), stores `{ nonce, name, serverUrl, createdAt }` in an in-memory Map
+2. **Callback URL**: `{origin}/api/tunnel/connect/callback?token={token}&nonce={nonce}` — the nonce is embedded in the OAuth redirect URL (via the `callback` query parameter to codevos.ai)
+3. **Completion**: Callback handler looks up the nonce, retrieves name/serverUrl, completes registration
+4. **TTL**: Pending registrations expire after 5 minutes. A cleanup runs on each new registration.
+5. **Single-use**: Nonce is deleted after successful use (replay protection)
+6. **Tower restart**: If Tower restarts between initiation and callback, the in-memory store is lost. The callback returns an error page telling the user to try again. This is acceptable — the OAuth token is short-lived anyway.
 
 ### UI Changes (tower.html)
 
-1. **When not connected**: Cloud status shows "Codev Cloud: not connected" with a "Connect" button
-2. Clicking "Connect" shows a dialog with device name + service URL inputs
-3. Submitting POSTs to `/api/tunnel/connect`, gets `authUrl`, opens it in browser
-4. After OAuth, callback completes at `/api/tunnel/connect/callback`, redirects to Tower homepage
-5. **When connected**: Show device name + uptime + "Disconnect" button (with confirmation)
+1. **When not connected**: Cloud status shows "Codev Cloud" with a "Connect" button (replacing the current empty/hidden state)
+2. Clicking "Connect" opens a modal dialog with:
+   - Device name input (default: machine hostname from `/api/status`, validated: 1-63 chars, lowercase alphanumeric + hyphens, must start/end with letter or digit)
+   - Service URL input (default: `https://codevos.ai`)
+   - "Connect" and "Cancel" buttons
+3. On submit: auto-normalize device name (trim, lowercase, replace spaces/underscores with hyphens, strip invalid chars). If result is empty, show inline error.
+4. POST to `/api/tunnel/connect` with `{ name, serverUrl, origin: window.location.origin }`, receive `{ authUrl }`
+5. Navigate current tab to `authUrl` (`window.location.href = authUrl`)
+6. After OAuth completes, callback redirects back to Tower homepage
+7. **When connected**: Show device name + uptime + "Disconnect" button (with confirmation dialog)
+8. **During OAuth** (user navigates away then returns before callback): The 5-second status poll detects that the tunnel is still disconnected. No special UI state needed — the Connect button remains available for retry.
 
 ### Existing Code to Reuse
 
-- `cloud-config.ts`: `readCloudConfig()`, `writeCloudConfig()`, `deleteCloudConfig()`, `readOrCreateMachineId()`
-- `tower-cloud.ts`: Token exchange logic (POST to `/api/towers/register/redeem`)
+- `cloud-config.ts`: `readCloudConfig()`, `writeCloudConfig()`, `deleteCloudConfig()`, `getOrCreateMachineId()`
+- `tower-cloud.ts`: Token exchange logic (POST to `/api/towers/register/redeem`) — extract `redeemToken()` into shared lib
 - `tower-tunnel.ts`: `handleTunnelEndpoint()` for routing `/api/tunnel/*`
 - `tower.html`: Existing `renderCloudStatus()`, `cloudConnect()`, `cloudDisconnect()`
+
+## Error Handling
+
+### Callback Errors
+| Scenario | Behavior |
+|----------|----------|
+| Invalid/expired/missing nonce | HTML error page: "Registration session expired. Please try again." with link to Tower homepage |
+| Token exchange fails (network) | HTML error page: "Could not reach Codev Cloud. Please check your connection and try again." |
+| Token invalid/expired | HTML error page: "Authentication expired. Please try again." |
+| Config write fails | HTML error page: "Could not save credentials. Check file permissions." |
+
+### Disconnect Errors
+| Scenario | Behavior |
+|----------|----------|
+| Server-side deregister fails (network) | Local cleanup proceeds. Response includes `{ success: true, warning: "Could not reach Codev Cloud to deregister. Local credentials removed." }` |
+| Server-side deregister fails (API error) | Same as above — best-effort. Local cleanup always happens. |
+| Local credential deletion fails | Return `{ success: false, error: "..." }` — this is a real failure |
+
+### UI Error Display
+- Connect dialog: inline error below the form (e.g., "Invalid device name")
+- Disconnect: toast/banner warning if server-side deregister failed
+- Callback page errors: full-page HTML with description and retry link
 
 ## Success Criteria
 
 - [ ] Tower homepage shows "Connect" when not connected to Codev Cloud
 - [ ] User can connect from the web UI: dialog with device name + service URL, OAuth flow, auto-connect
-- [ ] OAuth callback handled by Tower server (no ephemeral port)
+- [ ] OAuth callback handled by Tower server (no ephemeral port) with nonce validation
 - [ ] Connected state shows device name + "Disconnect" button
-- [ ] Disconnect fully cleans up: tunnel, server-side registration, local credentials
+- [ ] Disconnect fully cleans up: tunnel, server-side registration (best-effort), local credentials
 - [ ] Smart connect: reconnects tunnel if credentials exist without re-doing OAuth
 - [ ] CLI commands renamed to `af tower connect` / `af tower disconnect`
 - [ ] Old CLI names (`register`/`deregister`) work as hidden aliases
 - [ ] Existing tunnel connect/disconnect behavior preserved
+- [ ] Callback error pages rendered for all failure modes
 
 ## Constraints
 
-- OAuth callback must come to Tower's own HTTP server (port 4100)
-- Device name validated: lowercase, alphanumeric + hyphens
-- Default service URL: `https://cloud.codevos.ai`
+- OAuth callback must come to Tower's own HTTP server (port 4100 default)
+- Device name: 1-63 characters, lowercase alphanumeric + hyphens, must start and end with a letter or digit
+- Default service URL: `https://codevos.ai`
 - Cloud config permissions (0o600) must be maintained
+- Callback URL constructed from UI-provided origin (supports LAN access)
 
 ## Security Considerations
 
-- Cloud config contains API key — file permissions must be preserved
-- OAuth token is single-use and short-lived
+- Cloud config contains API key — file permissions (0o600) must be preserved
+- OAuth token is single-use and short-lived (managed by codevos.ai)
+- Callback nonce: random UUID, single-use, 5-minute TTL, in-memory only
+- Service URL must use HTTPS (reject non-HTTPS URLs except localhost for development)
 - Disconnect confirmation prevents accidental credential deletion
+- Tokens must not appear in server logs (use masked format: `ctk_****XXXX`)
