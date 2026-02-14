@@ -424,6 +424,34 @@ describe('tower-routes', () => {
   });
 
   // =========================================================================
+  // Rate limiting on activate
+  // =========================================================================
+
+  describe('POST /api/projects/:path/activate', () => {
+    it('returns 429 when rate limited', async () => {
+      const { isRateLimited } = await import('../servers/tower-utils.js');
+      (isRateLimited as any).mockReturnValueOnce(true);
+
+      const encoded = Buffer.from('/test/project').toString('base64url');
+      const req = makeReq('POST', `/api/projects/${encoded}/activate`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(429);
+      expect(JSON.parse(body()).error).toContain('Too many activations');
+    });
+
+    it('launches instance when not rate limited', async () => {
+      const encoded = Buffer.from('/test/project').toString('base64url');
+      const req = makeReq('POST', `/api/projects/${encoded}/activate`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+    });
+  });
+
+  // =========================================================================
   // Error handling
   // =========================================================================
 
