@@ -133,6 +133,28 @@ Projects currently in development (conceived through committed), sorted by prior
 ```yaml
 # High Priority
 
+  - id: "0104"
+    title: "Custom Terminal Session Manager"
+    summary: "Replace tmux with a purpose-built shepherd process for session persistence, eliminating alternate-screen conflicts and global state mutation"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0104-custom-session-manager.md
+      plan: null
+      review: null
+    dependencies: ["0090"]
+    tags: [terminal, architecture, tower, persistence]
+    timestamps:
+      conceived_at: "2026-02-14T00:00:00-08:00"
+      specified_at: null
+      planned_at: null
+      implementing_at: null
+      implemented_at: null
+      committed_at: null
+      integrated_at: null
+    notes: "Replace tmux with lightweight shepherd daemon. Spec proposes Approach B (shepherd process per session). See terminal-tmux.md for full problem history."
+
   - id: "0091"
     title: "Tower Mobile UX Refresh"
     summary: "Full mobile UX for tower: responsive layout, touch targets, QR code sharing, terminal usability on small screens"
@@ -1238,7 +1260,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0104** - Reserve this number for your next project
+**0105** - Reserve this number for your next project
 
 ---
 
