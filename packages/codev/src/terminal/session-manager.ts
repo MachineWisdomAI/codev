@@ -140,6 +140,16 @@ export class SessionManager extends EventEmitter {
       this.emit('session-error', opts.sessionId, err);
     });
 
+    // Handle shepherd crash (socket disconnects without EXIT frame)
+    client.on('close', () => {
+      // If the session is still in the map (wasn't already cleaned up by exit/kill),
+      // the shepherd died without sending EXIT. Remove the dead session.
+      if (this.sessions.has(opts.sessionId)) {
+        this.removeDeadSession(opts.sessionId);
+        this.emit('session-error', opts.sessionId, new Error('Shepherd disconnected unexpectedly'));
+      }
+    });
+
     // Start restart reset timer if configured
     if (opts.restartOnExit) {
       this.startRestartResetTimer(session);
@@ -218,6 +228,14 @@ export class SessionManager extends EventEmitter {
 
     client.on('error', (err) => {
       this.emit('session-error', sessionId, err);
+    });
+
+    // Handle shepherd crash (socket disconnects without EXIT frame)
+    client.on('close', () => {
+      if (this.sessions.has(sessionId)) {
+        this.removeDeadSession(sessionId);
+        this.emit('session-error', sessionId, new Error('Shepherd disconnected unexpectedly'));
+      }
     });
 
     return client;

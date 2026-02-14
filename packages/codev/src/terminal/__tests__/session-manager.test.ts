@@ -471,6 +471,63 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('shepherd crash cleanup (close without EXIT)', () => {
+    it('removes session from map when shepherd disconnects without EXIT', async () => {
+      const socketPath = path.join(socketDir, 'shepherd-crash.sock');
+      let capturedPty: MockPty | null = null;
+
+      const shepherd = new ShepherdProcess(
+        () => {
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Reconnect to register the session
+      const client = await manager.reconnectSession(
+        'crash-test',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        expect(manager.listSessions().size).toBe(1);
+
+        const errorPromise = new Promise<Error>((resolve) => {
+          manager.on('session-error', (_id: string, err: Error) => {
+            if (err.message.includes('Shepherd disconnected unexpectedly')) {
+              resolve(err);
+            }
+          });
+        });
+
+        // Simulate shepherd crash by shutting down the server (closes socket)
+        shepherd.shutdown();
+
+        const err = await Promise.race([
+          errorPromise,
+          new Promise<Error>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+
+        expect(err.message).toContain('Shepherd disconnected unexpectedly');
+        expect(manager.listSessions().size).toBe(0);
+        expect(manager.getSessionInfo('crash-test')).toBeNull();
+      } else {
+        shepherd.shutdown();
+      }
+    });
+  });
+
   describe('natural exit cleanup (no auto-restart)', () => {
     it('removes session from map when process exits and restartOnExit is false', async () => {
       const socketPath = path.join(socketDir, 'shepherd-natural-exit.sock');
