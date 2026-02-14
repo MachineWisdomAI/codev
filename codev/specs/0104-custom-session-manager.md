@@ -84,7 +84,7 @@ Shell / Claude / Builder process
 
 4. **Process lifecycle management**: Start, resize, kill processes. Detect exit. Support disconnect timeouts before cleanup. Shepherd must forward resize (SIGWINCH) and signals (SIGINT, SIGTERM, SIGKILL) from Tower to the child process.
 
-5. **Reconnection with replay**: When a client reconnects, replay recent output from a server-side buffer so the terminal isn't blank. The shepherd maintains its own replay buffer (1000 lines) so that after Tower restarts, recent output is available immediately without waiting for new shell output.
+5. **Reconnection with replay**: When a client reconnects, replay recent output from a server-side buffer so the terminal isn't blank. The shepherd maintains its own replay buffer (10,000 lines, matching xterm.js scrollback) so that after Tower restarts, recent output is available immediately without waiting for new shell output.
 
 6. **Auto-restart for architect sessions**: Architect sessions must auto-restart on any exit (clean or crash). The `restartOnExit` option triggers on all exit codes, matching the current unconditional `while true` loop behavior. A `maxRestarts` counter (default: 50) prevents infinite restart loops. Counter resets after 5 minutes of stable operation.
 
@@ -94,7 +94,7 @@ Shell / Claude / Builder process
 
 8. **Disk logging**: Log terminal output to disk for debugging (current: 50MB max per session in `.agent-farm/logs/`).
 
-9. **Session metadata in SQLite**: Continue using `terminal_sessions` table as source of truth, with project path, session type, role ID. Schema migration: rename `tmux_session TEXT` column to `shepherd_socket TEXT` (stores Unix socket path) and add `shepherd_pid INTEGER` column.
+9. **Session metadata in SQLite**: Continue using `terminal_sessions` table as source of truth, with project path, session type, role ID. Schema migration: add `shepherd_socket TEXT` and `shepherd_pid INTEGER` and `shepherd_start_time INTEGER` columns alongside the existing `tmux_session` column. During Phase 3 (tmux removal), drop the `tmux_session` column. This two-step migration allows rollback during the transition period.
 
 10. **Graceful degradation**: If the shepherd process fails to spawn, Tower falls back to a direct node-pty session without persistence. The session works normally for the duration of the Tower process but won't survive a restart. SQLite row is marked with `shepherd_socket = NULL` to indicate non-persistent mode. User sees a warning in the dashboard terminal header: "Session persistence unavailable."
 
@@ -136,7 +136,7 @@ The shepherd will be implemented as a **Node.js script** (`codev-shepherd.mjs`).
 
 Each terminal session is managed by a dedicated shepherd process:
 
-1. Tower spawns `codev-shepherd.mjs` as a detached child process (`child_process.spawn` with `detached: true, stdio: 'ignore'`)
+1. Tower spawns `codev-shepherd.mjs` as a detached child process (`child_process.spawn` with `detached: true, stdio: ['ignore', 'pipe', 'ignore']`). Tower reads the shepherd's PID and start time from stdout, then calls `child.unref()` to allow Tower to exit independently.
 2. Shepherd creates the PTY (via `node-pty`) and owns the master fd
 3. Shepherd listens on a Unix socket for Tower connections
 4. Tower connects to the shepherd's socket and forwards I/O to/from WebSocket clients
@@ -156,13 +156,21 @@ Frame format: [1-byte type] [4-byte big-endian length] [payload]
 Types:
   0x01 DATA      — PTY output (shepherd→Tower) or user input (Tower→shepherd)
   0x02 RESIZE    — Terminal resize: payload = JSON {"cols": N, "rows": N}
-  0x03 SIGNAL    — Send signal to child: payload = JSON {"signal": N}
+  0x03 SIGNAL    — Send signal to child: payload = JSON {"signal": N} (allowed signals: SIGINT, SIGTERM, SIGKILL, SIGHUP, SIGWINCH only)
   0x04 EXIT      — Child process exited: payload = JSON {"code": N, "signal": S}
   0x05 REPLAY    — Replay buffer dump (shepherd→Tower on connect): payload = raw bytes
   0x06 PING      — Keepalive (bidirectional)
   0x07 PONG      — Keepalive response
   0x08 HELLO     — Handshake (Tower→shepherd on connect): payload = JSON {"version": 1}
   0x09 WELCOME   — Handshake response (shepherd→Tower): payload = JSON {"pid": N, "cols": N, "rows": N, "startTime": N}
+  0x0A SPAWN     — Restart child process (Tower→shepherd): payload = JSON {"command": S, "args": [...], "cwd": S, "env": {...}}
+
+Constraints:
+  - Maximum frame payload size: 16MB. Frames exceeding this are dropped with an error log.
+  - Unknown frame types are silently ignored (forward compatibility).
+  - Version mismatch in HELLO/WELCOME: If shepherd version > Tower version, Tower logs a warning but continues. If shepherd version < Tower version, Tower disconnects and marks session as stale.
+  - Malformed frames (incomplete header, invalid JSON in control frames): connection is closed and logged.
+  - Backpressure: If Tower is disconnected or slow, shepherd continues buffering PTY output in its replay buffer (overwriting oldest entries). No flow control — terminal I/O is low-throughput enough that backpressure is not a concern.
 ```
 
 The protocol is intentionally minimal — no authentication (Unix socket permissions handle access control), no multiplexing (one session per shepherd), no configuration.
@@ -172,7 +180,7 @@ The protocol is intentionally minimal — no authentication (Unix socket permiss
 **Spawning**: Tower spawns one shepherd process per session. The shepherd is a standalone Node.js script that:
 1. Creates a PTY with the requested command, args, cwd, and environment
 2. Creates a Unix socket at a predictable path: `~/.codev/run/shepherd-{sessionId}.sock`
-3. Maintains a 1000-line replay buffer of recent PTY output
+3. Maintains a 10,000-line replay buffer of recent PTY output
 4. Writes its PID to stdout before detaching (Tower captures this)
 
 **Socket directory**: `~/.codev/run/` is created with permissions `0700` (owner-only). Socket files are created with permissions `0600`.
@@ -185,7 +193,7 @@ The protocol is intentionally minimal — no authentication (Unix socket permiss
 5. Shepherd sends REPLAY frame with buffered output, then streams live DATA frames
 6. If PID is dead or identity check fails, mark SQLite row as stale and clean up socket file
 
-**Stale socket cleanup**: On startup, Tower also scans `~/.codev/run/shepherd-*.sock` for socket files with no corresponding live process. Stale socket files are unlinked. This handles the case where a shepherd crashed without cleanup.
+**Stale socket cleanup**: On startup, Tower also scans `~/.codev/run/shepherd-*.sock` for socket files with no corresponding live process. Stale socket files are unlinked after verifying the socket path is a regular socket file (not a symlink), preventing symlink-based attacks. This handles the case where a shepherd crashed without cleanup.
 
 **Shutdown**:
 - When Tower intentionally stops: Tower closes its socket connections to shepherds. Shepherds continue running (this is the whole point — persistence).
@@ -217,12 +225,13 @@ interface SessionOptions {
 ```
 
 When the process exits and `restartOnExit` is true:
-1. Shepherd receives EXIT frame from child process
-2. Shepherd sends EXIT frame to Tower
-3. Tower increments restart counter. If counter exceeds `maxRestarts`, stop restarting and notify clients.
-4. After `restartDelay` ms, Tower tells shepherd to spawn a new process. Shepherd creates a new PTY and begins forwarding.
-5. Connected clients see the restart seamlessly — Tower sends a brief "Session restarting..." message via the WebSocket.
-6. If the session stays alive for `restartResetAfter` ms, the restart counter resets to 0.
+1. Shepherd detects child exit and sends EXIT frame to Tower (with exit code and signal)
+2. Tower increments restart counter. If counter exceeds `maxRestarts`, Tower sends no SPAWN and notifies clients "Session stopped after too many restarts."
+3. After `restartDelay` ms, Tower sends a SPAWN frame to the shepherd with the original command/args/cwd/env
+4. Shepherd creates a new PTY with the specified parameters and begins forwarding output
+5. Connected clients see the restart seamlessly — Tower sends a brief "Session restarting..." control message via the WebSocket
+6. If the session stays alive for `restartResetAfter` ms, the restart counter resets to 0
+7. If Tower is not connected when the child exits, the shepherd waits indefinitely (it cannot restart on its own — restart policy is Tower's responsibility)
 
 ### Security
 
