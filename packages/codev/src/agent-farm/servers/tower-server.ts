@@ -576,6 +576,10 @@ async function reconcileTerminalSessions(): Promise<void> {
     // Skip sessions whose project path doesn't exist or is in temp directory
     if (!fs.existsSync(projectPath)) {
       log('INFO', `Skipping shepherd session ${dbSession.id} — project path no longer exists: ${projectPath}`);
+      // Kill orphaned shepherd process before removing row
+      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
+        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      }
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
       cleaned++;
       continue;
@@ -583,6 +587,10 @@ async function reconcileTerminalSessions(): Promise<void> {
     const tmpDirs = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
     if (tmpDirs.some(d => projectPath.startsWith(d))) {
       log('INFO', `Skipping shepherd session ${dbSession.id} — project is in temp directory: ${projectPath}`);
+      // Kill orphaned shepherd process before removing row
+      if (dbSession.shepherd_pid && processExists(dbSession.shepherd_pid)) {
+        try { process.kill(dbSession.shepherd_pid, 'SIGTERM'); killed++; } catch { /* not killable */ }
+      }
       db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
       cleaned++;
       continue;
@@ -687,14 +695,11 @@ async function reconcileTerminalSessions(): Promise<void> {
 
     // Stale row — kill orphaned process if any, then delete
     if (session.pid && processExists(session.pid)) {
-      // Don't kill shepherd processes — they may be reconnectable later
-      if (!session.shepherd_socket) {
-        log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
-        try {
-          process.kill(session.pid, 'SIGTERM');
-          killed++;
-        } catch { /* process not killable */ }
-      }
+      log('INFO', `Killing orphaned process: PID ${session.pid} (${session.type} for ${path.basename(session.project_path)})`);
+      try {
+        process.kill(session.pid, 'SIGTERM');
+        killed++;
+      } catch { /* process not killable */ }
     }
 
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(session.id);
