@@ -12,10 +12,9 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
-import { getGateStatusForProject } from '../utils/gate-status.js';
 import type { GateStatus } from '../utils/gate-status.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
-import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
+import type { SessionManager } from '../../terminal/session-manager.js';
 import type { ProjectTerminals, TerminalEntry, InstanceStatus } from './tower-types.js';
 import {
   normalizeProjectPath,
