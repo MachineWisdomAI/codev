@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   slugify, DEFAULT_TOWER_PORT, buildWorktreeLaunchScript,
   checkDependencies, createWorktree, checkBugfixCollisions,
-  validateResumeWorktree, type GitHubIssue,
+  validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
 
 // Mock dependencies
@@ -290,6 +290,37 @@ describe('spawn-worktree', () => {
         .mockReturnValueOnce(true)  // worktreePath exists
         .mockReturnValueOnce(true); // .git exists
       expect(() => validateResumeWorktree('/tmp/good')).not.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // initPorchInWorktree
+  // =========================================================================
+
+  describe('initPorchInWorktree', () => {
+    it('runs porch init with sanitized inputs', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({ stdout: '', stderr: '' } as any);
+      await initPorchInWorktree('/tmp/wt', 'spir', '0105', 'my-feature');
+      expect(run).toHaveBeenCalledWith('porch init spir 0105 "my-feature"', { cwd: '/tmp/wt' });
+    });
+
+    it('sanitizes special characters from inputs', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({ stdout: '', stderr: '' } as any);
+      await initPorchInWorktree('/tmp/wt', 'sp!r', '01;05', 'my feature & more');
+      expect(run).toHaveBeenCalledWith(
+        expect.stringMatching(/^porch init spr 0105 "my-feature---more"$/),
+        { cwd: '/tmp/wt' },
+      );
+    });
+
+    it('warns but does not fatal on failure', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockRejectedValueOnce(new Error('porch not found'));
+      const { logger } = await import('../utils/logger.js');
+      await expect(initPorchInWorktree('/tmp/wt', 'spir', '0105', 'feat')).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to initialize porch'));
     });
   });
 });
