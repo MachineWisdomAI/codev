@@ -117,7 +117,7 @@ function substituteVariables(
  * Build a header listing all previous iteration files.
  * Claude can read these files to understand the history and feedback.
  */
-function buildHistoryHeader(history: IterationRecord[], currentIteration: number, state: ProjectState): string {
+function buildHistoryHeader(history: IterationRecord[], currentIteration: number, state: ProjectState, projectRoot: string): string {
   const lines: string[] = [
     '# REVISION REQUIRED',
     '',
@@ -158,7 +158,7 @@ function buildHistoryHeader(history: IterationRecord[], currentIteration: number
   lines.push('');
 
   // Add rebuttal instructions
-  const projectDir = getProjectDir('.', state.id, state.title);
+  const projectDir = getProjectDir(projectRoot, state.id, state.title);
   const phase = state.current_plan_phase || state.phase;
   const rebuttalFileName = `${state.id}-${phase}-iter${currentIteration - 1}-rebuttals.md`;
   const rebuttalPath = path.join(projectDir, rebuttalFileName);
@@ -218,7 +218,7 @@ export function buildPhasePrompt(
       h => (h.plan_phase || undefined) === currentPhase
     );
     if (phaseHistory.length > 0) {
-      historyHeader = buildHistoryHeader(phaseHistory, state.iteration, state);
+      historyHeader = buildHistoryHeader(phaseHistory, state.iteration, state, projectRoot);
     }
   }
 
