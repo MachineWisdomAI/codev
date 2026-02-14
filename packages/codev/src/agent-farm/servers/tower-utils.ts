@@ -110,6 +110,37 @@ export function isTempDirectory(projectPath: string): boolean {
 }
 
 // ============================================================================
+// Language & MIME Detection
+// ============================================================================
+
+/**
+ * Get language identifier for syntax highlighting.
+ */
+export function getLanguageForExt(ext: string): string {
+  const langMap: Record<string, string> = {
+    js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+    py: 'python', sh: 'bash', bash: 'bash', md: 'markdown',
+    html: 'markup', css: 'css', json: 'json', yaml: 'yaml', yml: 'yaml',
+    rs: 'rust', go: 'go', java: 'java', c: 'c', cpp: 'cpp', h: 'c',
+  };
+  return langMap[ext] || ext || 'plaintext';
+}
+
+/**
+ * Get MIME type for a file path (by extension).
+ */
+export function getMimeTypeForFile(filePath: string): string {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    pdf: 'application/pdf', txt: 'text/plain',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
+
+// ============================================================================
 // Static File Serving
 // ============================================================================
 

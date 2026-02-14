@@ -18,6 +18,8 @@ import {
   normalizeProjectPath,
   getProjectName,
   isTempDirectory,
+  getLanguageForExt,
+  getMimeTypeForFile,
   MIME_TYPES,
   serveStaticFile,
 } from '../servers/tower-utils.js';
@@ -165,6 +167,39 @@ describe('tower-utils', () => {
 
     it('rejects paths that merely contain tmp', () => {
       expect(isTempDirectory('/Users/dev/tmp-stuff/project')).toBe(false);
+    });
+  });
+
+  describe('getLanguageForExt', () => {
+    it('returns known language identifiers', () => {
+      expect(getLanguageForExt('ts')).toBe('typescript');
+      expect(getLanguageForExt('js')).toBe('javascript');
+      expect(getLanguageForExt('py')).toBe('python');
+      expect(getLanguageForExt('rs')).toBe('rust');
+    });
+
+    it('returns extension itself for unknown languages', () => {
+      expect(getLanguageForExt('xyz')).toBe('xyz');
+    });
+
+    it('returns plaintext for empty/undefined extension', () => {
+      expect(getLanguageForExt('')).toBe('plaintext');
+    });
+  });
+
+  describe('getMimeTypeForFile', () => {
+    it('returns correct MIME type for known extensions', () => {
+      expect(getMimeTypeForFile('image.png')).toBe('image/png');
+      expect(getMimeTypeForFile('video.mp4')).toBe('video/mp4');
+      expect(getMimeTypeForFile('doc.pdf')).toBe('application/pdf');
+    });
+
+    it('returns octet-stream for unknown extensions', () => {
+      expect(getMimeTypeForFile('file.xyz')).toBe('application/octet-stream');
+    });
+
+    it('handles uppercase extensions via toLowerCase', () => {
+      expect(getMimeTypeForFile('IMAGE.PNG')).toBe('image/png');
     });
   });
 
