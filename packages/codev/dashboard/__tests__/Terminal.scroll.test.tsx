@@ -2,10 +2,9 @@
  * Regression test for GitHub Issue #220: Terminal scrolling
  *
  * Verifies that the Terminal component does NOT intercept wheel events with
- * custom key sequence translation. Scrolling is handled natively by tmux
- * (mouse mode ON) + xterm.js mouse reporting. Previous approaches of sending
- * arrow keys or Page Up/Down sequences caused command history navigation or
- * unwanted copy mode entry.
+ * custom key sequence translation. Scrolling is handled natively by xterm.js
+ * scrollback buffer. Previous approaches of sending arrow keys or Page Up/Down
+ * sequences caused command history navigation or unwanted side effects.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
@@ -103,13 +102,13 @@ describe('Terminal scroll handling (Issue #220)', () => {
     return event;
   }
 
-  describe('alternate screen buffer (tmux with mouse ON)', () => {
-    it('does NOT send any key sequences on wheel (tmux handles natively)', () => {
+  describe('alternate screen buffer', () => {
+    it('does NOT send any key sequences on wheel (handled natively)', () => {
       const el = renderTerminal();
       const sendCallsBefore = mockWsSend.mock.calls.length;
       dispatchWheel(el, -60); // scroll up
 
-      // No data frames should be sent — tmux handles scroll via mouse reporting
+      // No data frames should be sent — xterm.js handles scroll natively
       const newDataFrames = mockWsSend.mock.calls.slice(sendCallsBefore).filter((call) => {
         const bytes = new Uint8Array(call[0]);
         return bytes[0] === 0x01; // FRAME_DATA

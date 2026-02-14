@@ -1,9 +1,9 @@
 /**
  * Regression test for GitHub Issue #228: Architect terminal has stale input characters on start
  *
- * When the terminal WebSocket connects and tmux attaches, tmux sends DA queries.
+ * When the terminal WebSocket connects, the PTY session sends DA queries.
  * xterm.js auto-responds with DA responses (e.g., ESC[?62;22c), which flow back
- * through term.onData() → sendData() → WebSocket → pty → tmux → Claude Code stdin.
+ * through term.onData() → sendData() → WebSocket → pty → Claude Code stdin.
  *
  * The fix filters these auto-response patterns in the onData handler during the
  * initial phase (first ~500ms), preventing them from reaching the pty as keyboard input.

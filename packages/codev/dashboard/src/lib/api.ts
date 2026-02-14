@@ -9,7 +9,6 @@ export interface Builder {
   phase: string;
   worktree: string;
   branch: string;
-  tmuxSession?: string;
   type: string;
   projectId?: string;
   terminalId?: string;
@@ -21,7 +20,6 @@ export interface UtilTerminal {
   name: string;
   port: number;
   pid: number;
-  tmuxSession?: string;
   terminalId?: string;
   persistent?: boolean;
 }
@@ -37,7 +35,6 @@ export interface Annotation {
 export interface ArchitectState {
   port: number;
   pid: number;
-  tmuxSession?: string;
   terminalId?: string;
   persistent?: boolean;
 }
