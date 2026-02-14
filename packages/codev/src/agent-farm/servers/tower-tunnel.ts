@@ -282,6 +282,10 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 /**
  * Generate a minimal HTML response page.
  */
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function htmlPage(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${title}</title>
@@ -348,7 +352,7 @@ export async function handleTunnelEndpoint(
       _deps?.log('ERROR', `OAuth callback failed: ${(err as Error).message}`);
       res.writeHead(500, { 'Content-Type': 'text/html' });
       res.end(htmlPage('Registration Failed',
-        `<p>${(err as Error).message}</p><p><a href="/">Back to Tower</a></p>`));
+        `<p>${escapeHtml((err as Error).message)}</p><p><a href="/">Back to Tower</a></p>`));
     }
     return;
   }
@@ -363,7 +367,16 @@ export async function handleTunnelEndpoint(
 
     try {
       const rawBody = await readBody(req);
-      const body = rawBody.trim() ? JSON.parse(rawBody) : null;
+      let body: Record<string, unknown> | null = null;
+      if (rawBody.trim()) {
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON in request body.' }));
+          return;
+        }
+      }
 
       // OAuth initiation: body contains { name, serverUrl?, origin? }
       if (body && 'name' in body) {

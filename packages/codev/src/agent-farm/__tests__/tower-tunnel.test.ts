@@ -346,6 +346,19 @@ describe('tower-tunnel', () => {
         expect(parsed.error).toContain('letter or number');
       });
 
+      it('returns 400 for invalid JSON in request body', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: '{not valid json',
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toMatch(/invalid json/i);
+      });
+
       it('returns 400 for malformed origin URL', async () => {
         const { res, body, statusCode } = makeRes();
         const req = makeReq('POST', {
