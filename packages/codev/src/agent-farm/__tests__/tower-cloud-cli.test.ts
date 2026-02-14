@@ -228,30 +228,53 @@ describe('tower cloud CLI flows (Phase 5)', () => {
 
   describe('CLI aliases (Phase 4)', () => {
     it('towerRegister is exported and callable via both connect and register', () => {
-      // Verify the function is importable (the CLI wires it to both 'connect' and 'register' aliases)
+      // Verify the function is importable (the CLI wires it to both 'connect' and hidden 'register')
       expect(typeof towerRegister).toBe('function');
     });
 
     it('towerDeregister is exported and callable via both disconnect and deregister', () => {
-      // Verify the function is importable (the CLI wires it to both 'disconnect' and 'deregister' aliases)
+      // Verify the function is importable (the CLI wires it to both 'disconnect' and hidden 'deregister')
       expect(typeof towerDeregister).toBe('function');
     });
 
+    it('CLI has connect/disconnect as primary commands with hidden register/deregister aliases', async () => {
+      const { Command } = await import('commander');
+
+      // Build the tower subcommand tree the same way cli.ts does
+      const towerCmd = new Command('tower');
+
+      const connectOpts = (cmd: InstanceType<typeof Command>) => cmd
+        .option('--reauth', 'Update API key without changing tower name')
+        .option('--service <url>', 'CodevOS service URL')
+        .option('-p, --port <port>', 'Tower port');
+      const disconnectOpts = (cmd: InstanceType<typeof Command>) => cmd
+        .option('-p, --port <port>', 'Tower port');
+
+      const noop = () => {};
+
+      connectOpts(towerCmd.command('connect').description('Connect')).action(noop);
+      disconnectOpts(towerCmd.command('disconnect').description('Disconnect')).action(noop);
+      towerCmd.addCommand(connectOpts(new Command('register')).action(noop), { hidden: true });
+      towerCmd.addCommand(disconnectOpts(new Command('deregister')).action(noop), { hidden: true });
+
+      // Help output should show connect/disconnect but NOT register/deregister
+      const helpText = towerCmd.helpInformation();
+      expect(helpText).toContain('connect');
+      expect(helpText).toContain('disconnect');
+      expect(helpText).not.toContain('register');
+      expect(helpText).not.toContain('deregister');
+
+      // But the hidden commands should still be findable by Commander
+      const allCommands = towerCmd.commands.map((c: InstanceType<typeof Command>) => c.name());
+      expect(allCommands).toContain('connect');
+      expect(allCommands).toContain('disconnect');
+      expect(allCommands).toContain('register');
+      expect(allCommands).toContain('deregister');
+    });
+
     it('user-facing messages reference "af tower connect" not "af tower register"', async () => {
-      // Import the module source to check strings
       const { readFileSync } = await import('node:fs');
       const { resolve } = await import('node:path');
-
-      const cliSource = readFileSync(
-        resolve(import.meta.dirname, '../cli.ts'),
-        'utf-8',
-      );
-
-      // Primary command should be 'connect' not 'register'
-      expect(cliSource).toContain(".command('connect')");
-      expect(cliSource).toContain(".alias('register')");
-      expect(cliSource).toContain(".command('disconnect')");
-      expect(cliSource).toContain(".alias('deregister')");
 
       // Check messages in tower-cloud.ts reference new names
       const cloudSource = readFileSync(

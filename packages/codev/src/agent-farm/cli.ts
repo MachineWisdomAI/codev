@@ -424,37 +424,56 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  towerCmd
-    .command('connect')
-    .alias('register')
-    .description('Connect this tower to Codev Cloud for remote access')
-    .option('--reauth', 'Update API key without changing tower name')
-    .option('--service <url>', 'CodevOS service URL (default: https://codevos.ai)')
-    .option('-p, --port <port>', 'Tower port to signal after connection (default: 4100)')
-    .action(async (options) => {
-      try {
-        await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
-        process.exit(0);
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
+  // Connect/disconnect handlers (shared with hidden backward-compat aliases)
+  const connectAction = async (options: { reauth?: boolean; service?: string; port?: string }) => {
+    try {
+      await towerRegister({ reauth: options.reauth, serviceUrl: options.service, port: options.port ? parseInt(options.port, 10) : undefined });
+      process.exit(0);
+    } catch (error) {
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  };
 
-  towerCmd
-    .command('disconnect')
-    .alias('deregister')
-    .description('Disconnect this tower from Codev Cloud')
-    .option('-p, --port <port>', 'Tower port to signal after disconnection (default: 4100)')
-    .action(async (options) => {
-      try {
-        await towerDeregister({ port: options.port ? parseInt(options.port, 10) : undefined });
-        process.exit(0);
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
+  const disconnectAction = async (options: { port?: string }) => {
+    try {
+      await towerDeregister({ port: options.port ? parseInt(options.port, 10) : undefined });
+      process.exit(0);
+    } catch (error) {
+      logger.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  };
+
+  const connectOptions = (cmd: Command) => cmd
+    .option('--reauth', 'Update API key without changing tower name')
+    .option('--service <url>', 'CodevOS service URL (default: https://cloud.codevos.ai)')
+    .option('-p, --port <port>', 'Tower port to signal after connection (default: 4100)');
+
+  const disconnectOptions = (cmd: Command) => cmd
+    .option('-p, --port <port>', 'Tower port to signal after disconnection (default: 4100)');
+
+  connectOptions(
+    towerCmd
+      .command('connect')
+      .description('Connect this tower to Codev Cloud for remote access'),
+  ).action(connectAction);
+
+  disconnectOptions(
+    towerCmd
+      .command('disconnect')
+      .description('Disconnect this tower from Codev Cloud'),
+  ).action(disconnectAction);
+
+  // Hidden backward-compatible aliases (not shown in --help)
+  towerCmd.addCommand(
+    connectOptions(new Command('register')).action(connectAction),
+    { hidden: true },
+  );
+  towerCmd.addCommand(
+    disconnectOptions(new Command('deregister')).action(disconnectAction),
+    { hidden: true },
+  );
 
   towerCmd
     .command('status')
