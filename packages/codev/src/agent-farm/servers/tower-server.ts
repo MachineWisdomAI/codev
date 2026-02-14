@@ -1126,6 +1126,15 @@ async function getTerminalsForProject(
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
             ptySession.attachShepherd(client, replayData, dbSession.shepherd_pid!, dbSession.id);
+
+            // Clean up on exit (same as startup reconciliation path)
+            ptySession.on('exit', () => {
+              const currentEntry = getProjectTerminalsEntry(dbSession.project_path);
+              if (dbSession.type === 'architect' && currentEntry.architect === newSession.id) {
+                currentEntry.architect = undefined;
+              }
+              deleteTerminalSession(newSession.id);
+            });
           }
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.project_path, dbSession.type, dbSession.role_id, dbSession.shepherd_pid,
