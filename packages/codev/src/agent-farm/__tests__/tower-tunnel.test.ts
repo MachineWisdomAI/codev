@@ -1,12 +1,13 @@
 /**
- * Unit tests for tower-tunnel.ts (Spec 0105 Phase 2)
+ * Unit tests for tower-tunnel.ts (Spec 0105 Phase 2, Spec 0107 Phase 2)
  *
- * Tests: handleTunnelEndpoint (connect, disconnect, status, 404),
- * initTunnel / shutdownTunnel lifecycle.
+ * Tests: handleTunnelEndpoint (connect, connect/callback, disconnect, status, 404),
+ * initTunnel / shutdownTunnel lifecycle, OAuth initiation, smart reconnect.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { Readable } from 'node:stream';
 import {
   initTunnel,
   shutdownTunnel,
@@ -20,7 +21,10 @@ import {
 
 const {
   mockReadCloudConfig,
+  mockWriteCloudConfig,
+  mockDeleteCloudConfig,
   mockGetCloudConfigPath,
+  mockGetOrCreateMachineId,
   mockMaskApiKey,
   mockConnect,
   mockDisconnect,
@@ -31,9 +35,17 @@ const {
   mockResetCircuitBreaker,
   mockFsWatch,
   mockFsWatcherClose,
+  mockCreatePendingRegistration,
+  mockConsumePendingRegistration,
+  mockRedeemToken,
+  mockValidateDeviceName,
+  mockFetch,
 } = vi.hoisted(() => ({
   mockReadCloudConfig: vi.fn(),
+  mockWriteCloudConfig: vi.fn(),
+  mockDeleteCloudConfig: vi.fn(),
   mockGetCloudConfigPath: vi.fn().mockReturnValue('/tmp/test-cloud-config/cloud-config.json'),
+  mockGetOrCreateMachineId: vi.fn().mockReturnValue('machine-id-1234'),
   mockMaskApiKey: vi.fn((key: string) => `***${key.slice(-4)}`),
   mockConnect: vi.fn(),
   mockDisconnect: vi.fn(),
@@ -44,11 +56,19 @@ const {
   mockResetCircuitBreaker: vi.fn(),
   mockFsWatch: vi.fn(),
   mockFsWatcherClose: vi.fn(),
+  mockCreatePendingRegistration: vi.fn().mockReturnValue('test-nonce-1234'),
+  mockConsumePendingRegistration: vi.fn(),
+  mockRedeemToken: vi.fn(),
+  mockValidateDeviceName: vi.fn().mockReturnValue({ valid: true }),
+  mockFetch: vi.fn(),
 }));
 
 vi.mock('../lib/cloud-config.js', () => ({
   readCloudConfig: (...args: unknown[]) => mockReadCloudConfig(...args),
+  writeCloudConfig: (...args: unknown[]) => mockWriteCloudConfig(...args),
+  deleteCloudConfig: (...args: unknown[]) => mockDeleteCloudConfig(...args),
   getCloudConfigPath: (...args: unknown[]) => mockGetCloudConfigPath(...args),
+  getOrCreateMachineId: (...args: unknown[]) => mockGetOrCreateMachineId(...args),
   maskApiKey: (...args: unknown[]) => mockMaskApiKey(...args),
 }));
 
@@ -62,6 +82,19 @@ vi.mock('../lib/tunnel-client.js', () => ({
     onStateChange = mockOnStateChange;
     resetCircuitBreaker = mockResetCircuitBreaker;
   },
+}));
+
+vi.mock('../lib/nonce-store.js', () => ({
+  createPendingRegistration: (...args: unknown[]) => mockCreatePendingRegistration(...args),
+  consumePendingRegistration: (...args: unknown[]) => mockConsumePendingRegistration(...args),
+}));
+
+vi.mock('../lib/token-exchange.js', () => ({
+  redeemToken: (...args: unknown[]) => mockRedeemToken(...args),
+}));
+
+vi.mock('../lib/device-name.js', () => ({
+  validateDeviceName: (...args: unknown[]) => mockValidateDeviceName(...args),
 }));
 
 vi.mock('node:fs', async () => {
@@ -92,8 +125,20 @@ function makeDeps(overrides: Partial<TunnelDeps> = {}): TunnelDeps {
   };
 }
 
-function makeReq(method: string): http.IncomingMessage {
-  return { method } as http.IncomingMessage;
+/** Create a mock IncomingMessage with optional body and URL */
+function makeReq(method: string, opts?: { body?: string; url?: string; host?: string }): http.IncomingMessage {
+  const readable = new Readable();
+  if (opts?.body) {
+    readable.push(opts.body);
+  }
+  readable.push(null); // end stream
+
+  const req = Object.assign(readable, {
+    method,
+    url: opts?.url || '/',
+    headers: { host: opts?.host || 'localhost:4100' },
+  });
+  return req as unknown as http.IncomingMessage;
 }
 
 function makeRes(): { res: http.ServerResponse; body: () => string; statusCode: () => number } {
@@ -149,6 +194,15 @@ describe('tower-tunnel', () => {
         expect(parsed.state).toBe('disconnected');
         expect(parsed.uptime).toBeNull();
       });
+
+      it('includes hostname in status response', async () => {
+        const { res, body } = makeRes();
+        await handleTunnelEndpoint(makeReq('GET'), res, 'status');
+
+        const parsed = JSON.parse(body());
+        expect(parsed.hostname).toBeDefined();
+        expect(typeof parsed.hostname).toBe('string');
+      });
     });
 
     describe('GET status (registered)', () => {
@@ -181,7 +235,7 @@ describe('tower-tunnel', () => {
       });
     });
 
-    describe('POST connect', () => {
+    describe('POST connect (smart reconnect)', () => {
       it('returns 503 when called before initTunnel (startup guard)', async () => {
         mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
         const { res, body, statusCode } = makeRes();
@@ -193,8 +247,7 @@ describe('tower-tunnel', () => {
         expect(parsed.error).toMatch(/still starting/i);
       });
 
-      it('returns 400 when not registered', async () => {
-        // Must init first so the guard passes
+      it('returns 400 when not registered and no body', async () => {
         const deps = makeDeps();
         await initTunnel(deps, { getInstances: async () => [] });
 
@@ -206,14 +259,13 @@ describe('tower-tunnel', () => {
         const parsed = JSON.parse(body());
         expect(parsed.success).toBe(false);
         expect(parsed.error).toMatch(/not registered/i);
+        expect(parsed.error).toMatch(/af tower connect/i);
       });
 
-      it('connects when registered and initTunnel was called', async () => {
-        // Initialize first so _deps is set
+      it('reconnects when registered and no body', async () => {
         const deps = makeDeps();
         await initTunnel(deps, { getInstances: async () => [] });
 
-        // Now test the connect endpoint
         mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
         mockGetState.mockReturnValue('connecting');
 
@@ -227,14 +279,282 @@ describe('tower-tunnel', () => {
       });
     });
 
+    describe('POST connect (OAuth initiation)', () => {
+      beforeEach(async () => {
+        mockValidateDeviceName.mockReturnValue({ valid: true });
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+      });
+
+      it('returns authUrl for valid body with name', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'my-tower', origin: 'http://localhost:4100' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.authUrl).toBeDefined();
+        expect(parsed.authUrl).toContain('https://cloud.codevos.ai/towers/register');
+        expect(parsed.authUrl).toContain('callback=');
+        expect(parsed.authUrl).toContain('nonce=');
+        expect(mockCreatePendingRegistration).toHaveBeenCalledWith('my-tower', 'https://cloud.codevos.ai');
+      });
+
+      it('uses custom serverUrl when provided', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'staging-tower', serverUrl: 'https://staging.codevos.ai' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.authUrl).toContain('https://staging.codevos.ai/towers/register');
+        expect(mockCreatePendingRegistration).toHaveBeenCalledWith('staging-tower', 'https://staging.codevos.ai');
+      });
+
+      it('returns 400 for invalid device name', async () => {
+        mockValidateDeviceName.mockReturnValue({ valid: false, error: 'Device name must start and end with a letter or number.' });
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: '-bad-name-' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toContain('letter or number');
+      });
+
+      it('returns 400 for malformed origin URL', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'my-tower', origin: 'not-a-url' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toMatch(/invalid origin/i);
+      });
+
+      it('returns 400 for non-HTTPS serverUrl', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'my-tower', serverUrl: 'http://insecure.example.com' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toMatch(/https/i);
+      });
+
+      it('allows localhost serverUrl without HTTPS', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'my-tower', serverUrl: 'http://localhost:3000' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.authUrl).toContain('http://localhost:3000/towers/register');
+      });
+
+      it('returns 400 for invalid serverUrl', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('POST', {
+          body: JSON.stringify({ name: 'my-tower', serverUrl: 'not-a-url' }),
+        });
+        await handleTunnelEndpoint(req, res, 'connect');
+
+        expect(statusCode()).toBe(400);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toMatch(/invalid server url/i);
+      });
+    });
+
+    describe('GET connect/callback', () => {
+      beforeEach(async () => {
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+      });
+
+      it('returns error HTML when token is missing', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?nonce=test-nonce' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(400);
+        expect(res.writeHead).toHaveBeenCalledWith(400, { 'Content-Type': 'text/html' });
+        expect(body()).toContain('Missing token or nonce');
+      });
+
+      it('returns error HTML when nonce is missing', async () => {
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=some-token' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(400);
+        expect(body()).toContain('Missing token or nonce');
+      });
+
+      it('returns error HTML for invalid/expired nonce', async () => {
+        mockConsumePendingRegistration.mockReturnValue(null);
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=tok&nonce=expired' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(400);
+        expect(res.writeHead).toHaveBeenCalledWith(400, { 'Content-Type': 'text/html' });
+        expect(body()).toContain('Invalid or expired');
+      });
+
+      it('completes registration with valid nonce and token', async () => {
+        mockConsumePendingRegistration.mockReturnValue({
+          nonce: 'valid-nonce',
+          name: 'my-tower',
+          serverUrl: 'https://cloud.codevos.ai',
+          createdAt: Date.now(),
+        });
+        mockRedeemToken.mockResolvedValue({ towerId: 'tower-123', apiKey: 'ctk_NewKey' });
+        mockReadCloudConfig.mockReturnValue({
+          tower_id: 'tower-123',
+          tower_name: 'my-tower',
+          api_key: 'ctk_NewKey',
+          server_url: 'https://cloud.codevos.ai',
+        });
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=valid-tok&nonce=valid-nonce' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(200);
+        expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'text/html' });
+        expect(body()).toContain('Connected to Codev Cloud');
+        expect(body()).toContain('my-tower');
+        expect(body()).toContain('meta http-equiv="refresh"');
+
+        expect(mockRedeemToken).toHaveBeenCalledWith('https://cloud.codevos.ai', 'valid-tok', 'my-tower', 'machine-id-1234');
+        expect(mockWriteCloudConfig).toHaveBeenCalledWith({
+          tower_id: 'tower-123',
+          tower_name: 'my-tower',
+          api_key: 'ctk_NewKey',
+          server_url: 'https://cloud.codevos.ai',
+        });
+        expect(mockConnect).toHaveBeenCalled();
+      });
+
+      it('returns error HTML when token redemption fails', async () => {
+        mockConsumePendingRegistration.mockReturnValue({
+          nonce: 'valid-nonce',
+          name: 'my-tower',
+          serverUrl: 'https://cloud.codevos.ai',
+          createdAt: Date.now(),
+        });
+        mockRedeemToken.mockRejectedValue(new Error('Registration failed (401): Unauthorized'));
+
+        const { res, body, statusCode } = makeRes();
+        const req = makeReq('GET', { url: '/api/tunnel/connect/callback?token=bad-tok&nonce=valid-nonce' });
+        await handleTunnelEndpoint(req, res, 'connect/callback');
+
+        expect(statusCode()).toBe(500);
+        expect(res.writeHead).toHaveBeenCalledWith(500, { 'Content-Type': 'text/html' });
+        expect(body()).toContain('Registration Failed');
+        expect(body()).toContain('Unauthorized');
+      });
+    });
+
     describe('POST disconnect', () => {
-      it('returns success even when not connected', async () => {
+      let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+          new Response(null, { status: 200 }),
+        );
+      });
+
+      afterEach(() => {
+        fetchSpy.mockRestore();
+      });
+
+      it('returns success when not connected (no config)', async () => {
         const { res, body, statusCode } = makeRes();
         await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
 
         expect(statusCode()).toBe(200);
         const parsed = JSON.parse(body());
         expect(parsed.success).toBe(true);
+        expect(mockDeleteCloudConfig).toHaveBeenCalled();
+      });
+
+      it('deregisters server-side and deletes local config', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        // Reconnect so tunnelClient is set
+        mockGetState.mockReturnValue('connected');
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(true);
+        expect(parsed.warning).toBeUndefined();
+
+        // Verify server-side deregister was called
+        expect(fetchSpy).toHaveBeenCalledWith(
+          'https://codevos.ai/api/towers/tower-abc',
+          expect.objectContaining({ method: 'DELETE' }),
+        );
+
+        // Verify local config deleted
+        expect(mockDeleteCloudConfig).toHaveBeenCalled();
+      });
+
+      it('returns warning when server-side deregister fails', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        fetchSpy.mockRejectedValue(new Error('Network error'));
+
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+        expect(statusCode()).toBe(200);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(true);
+        expect(parsed.warning).toBeDefined();
+        expect(parsed.warning).toContain('Server-side deregister failed');
+
+        // Local config should still be deleted
+        expect(mockDeleteCloudConfig).toHaveBeenCalled();
+      });
+
+      it('returns error when local config deletion fails', async () => {
+        mockReadCloudConfig.mockReturnValue(null);
+        mockDeleteCloudConfig.mockImplementation(() => { throw new Error('EACCES'); });
+
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'disconnect');
+
+        expect(statusCode()).toBe(500);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toContain('Failed to delete local config');
       });
     });
 
@@ -250,7 +570,7 @@ describe('tower-tunnel', () => {
 
       it('returns 404 for wrong method on connect', async () => {
         const { res, statusCode } = makeRes();
-        await handleTunnelEndpoint(makeReq('GET'), res, 'connect');
+        await handleTunnelEndpoint(makeReq('DELETE'), res, 'connect');
         expect(statusCode()).toBe(404);
       });
     });
