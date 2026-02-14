@@ -988,28 +988,6 @@
         Type a path to see suggestions. Directories with <code>codev/</code> are highlighted as valid projects.
         Non-codev directories will be initialized with <code>codev adopt</code> on first launch.
       </p>
-      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
-        <button class="btn" onclick="showCreateProjectDialog()">Create New Project...</button>
-      </div>
-    </div>
-
-    <!-- Create Project Dialog -->
-    <div class="dialog-overlay" id="create-dialog" style="display: none;">
-      <div class="dialog-box">
-        <h3>Create New Project</h3>
-        <div class="dialog-field">
-          <label for="new-project-path">Parent Directory</label>
-          <input type="text" id="new-project-parent" placeholder="~/Development" value="" />
-        </div>
-        <div class="dialog-field">
-          <label for="new-project-name">Project Name</label>
-          <input type="text" id="new-project-name" placeholder="my-project" />
-        </div>
-        <div class="dialog-actions">
-          <button class="btn" onclick="hideCreateProjectDialog()">Cancel</button>
-          <button class="btn btn-primary" onclick="createNewProject()">Create & Launch</button>
-        </div>
-      </div>
     </div>
 
     <!-- Cloud Connect Dialog -->
@@ -1705,73 +1683,10 @@
       }, 4000);
     }
 
-    // Create project dialog functions
-    function showCreateProjectDialog() {
-      const dialog = document.getElementById('create-dialog');
-      dialog.style.display = 'flex';
-      // Default to ~/Development
-      document.getElementById('new-project-parent').value = '~/Development';
-      document.getElementById('new-project-name').value = '';
-      document.getElementById('new-project-name').focus();
-    }
-
-    function hideCreateProjectDialog() {
-      document.getElementById('create-dialog').style.display = 'none';
-    }
-
-    async function createNewProject() {
-      const parent = document.getElementById('new-project-parent').value.trim();
-      const name = document.getElementById('new-project-name').value.trim();
-
-      if (!parent) {
-        showToast('Please enter a parent directory', 'error');
-        return;
-      }
-      if (!name) {
-        showToast('Please enter a project name', 'error');
-        return;
-      }
-
-      // Validate name (no spaces, special chars)
-      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-        showToast('Project name can only contain letters, numbers, hyphens, and underscores', 'error');
-        return;
-      }
-
-      hideCreateProjectDialog();
-
-      try {
-        const response = await authFetch('./api/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parent, name })
-        });
-
-        const result = await response.json();
-
-        if (!result.success) {
-          throw new Error(result.error || 'Create failed');
-        }
-
-        showToast(`Project "${name}" created! Launching...`, 'success');
-        setTimeout(refresh, 2000);
-      } catch (err) {
-        showToast('Failed to create project: ' + err.message, 'error');
-      }
-    }
-
     // Close dialogs on escape
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        hideCreateProjectDialog();
         hideConnectDialog();
-      }
-    });
-
-    // Close dialogs on backdrop click
-    document.getElementById('create-dialog').addEventListener('click', (e) => {
-      if (e.target.id === 'create-dialog') {
-        hideCreateProjectDialog();
       }
     });
     document.getElementById('connect-dialog').addEventListener('click', (e) => {

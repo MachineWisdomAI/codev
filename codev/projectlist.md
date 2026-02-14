@@ -180,23 +180,23 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0107"
     title: "Tower Cloud Registration UI"
     summary: "Add register/deregister UI to the Tower homepage, cloning the af tower register/deregister CLI commands"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0107-tower-cloud-registration-ui.md
-      plan: null
-      review: null
+      plan: codev/plans/0107-tower-cloud-registration-ui.md
+      review: codev/reviews/0107-tower-cloud-registration-ui.md
     dependencies: []
     tags: [tower, cloud, ui]
     timestamps:
       conceived_at: "2026-02-14T00:00:00-08:00"
-      specified_at: null
-      planned_at: null
-      implementing_at: null
-      implemented_at: null
-      committed_at: null
-      integrated_at: null
+      specified_at: "2026-02-14"
+      planned_at: "2026-02-14"
+      implementing_at: "2026-02-14"
+      implemented_at: "2026-02-14"
+      committed_at: "2026-02-14"
+      integrated_at: "2026-02-14"
     notes: "Mirror af tower register/deregister in the Tower web UI. OAuth flow, tower naming, deregister button."
 
   - id: "0106"
@@ -1326,7 +1326,7 @@ Completed projects not associated with any formal release (ad-hoc fixes, documen
 
 ## Next Available Number
 
-**0107** - Reserve this number for your next project
+**0108** - Reserve this number for your next project
 
 ---
 
