@@ -174,7 +174,7 @@ export const MIME_TYPES: Record<string, string> = {
  */
 export function buildArchitectArgs(baseArgs: string[], projectPath: string): string[] {
   const codevDir = path.join(projectPath, 'codev');
-  const bundledRolesDir = path.resolve(import.meta.dirname, '../../skeleton/roles');
+  const bundledRolesDir = path.resolve(import.meta.dirname, '../../../skeleton/roles');
   const config: RoleConfig = { codevDir, bundledRolesDir };
 
   const role = loadRolePrompt(config, 'architect');
