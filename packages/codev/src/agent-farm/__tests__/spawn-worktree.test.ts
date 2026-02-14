@@ -6,15 +6,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { slugify, DEFAULT_TOWER_PORT, buildWorktreeLaunchScript } from '../commands/spawn-worktree.js';
+import {
+  slugify, DEFAULT_TOWER_PORT, buildWorktreeLaunchScript,
+  checkDependencies, createWorktree, checkBugfixCollisions,
+  validateResumeWorktree, type GitHubIssue,
+} from '../commands/spawn-worktree.js';
 
 // Mock dependencies
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
+    existsSync: vi.fn(() => false),
     writeFileSync: vi.fn(),
     chmodSync: vi.fn(),
+    symlinkSync: vi.fn(),
   };
 });
 
@@ -124,6 +130,166 @@ describe('spawn-worktree', () => {
     it('bugfix IDs match expected pattern', () => {
       const builderId = `bugfix-${42}`;
       expect(builderId).toBe('bugfix-42');
+    });
+  });
+
+  // =========================================================================
+  // checkDependencies
+  // =========================================================================
+
+  describe('checkDependencies', () => {
+    it('succeeds when git is available', async () => {
+      const { commandExists } = await import('../utils/shell.js');
+      vi.mocked(commandExists).mockResolvedValueOnce(true);
+      await expect(checkDependencies()).resolves.toBeUndefined();
+    });
+
+    it('fatals when git is not found', async () => {
+      const { commandExists } = await import('../utils/shell.js');
+      vi.mocked(commandExists).mockResolvedValueOnce(false);
+      await expect(checkDependencies()).rejects.toThrow('git not found');
+    });
+  });
+
+  // =========================================================================
+  // createWorktree
+  // =========================================================================
+
+  describe('createWorktree', () => {
+    const config = { projectRoot: '/projects/test' } as any;
+
+    it('creates branch and worktree', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValue({ stdout: '', stderr: '' } as any);
+      await expect(createWorktree(config, 'my-branch', '/tmp/wt')).resolves.toBeUndefined();
+      expect(run).toHaveBeenCalledWith('git branch my-branch', { cwd: '/projects/test' });
+      expect(run).toHaveBeenCalledWith('git worktree add "/tmp/wt" my-branch', { cwd: '/projects/test' });
+    });
+
+    it('continues if branch already exists', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockRejectedValueOnce(new Error('branch already exists'))
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any);
+      await expect(createWorktree(config, 'my-branch', '/tmp/wt')).resolves.toBeUndefined();
+    });
+
+    it('fatals if worktree creation fails', async () => {
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' } as any)
+        .mockRejectedValueOnce(new Error('worktree add failed'));
+      await expect(createWorktree(config, 'my-branch', '/tmp/wt')).rejects.toThrow('Failed to create worktree');
+    });
+  });
+
+  // =========================================================================
+  // checkBugfixCollisions
+  // =========================================================================
+
+  describe('checkBugfixCollisions', () => {
+    const baseIssue: GitHubIssue = {
+      title: 'Test issue',
+      body: 'body',
+      state: 'OPEN',
+      comments: [],
+    };
+
+    it('fatals when worktree already exists', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(true);
+      await expect(
+        checkBugfixCollisions(42, '/tmp/wt', baseIssue, false),
+      ).rejects.toThrow('Worktree already exists');
+    });
+
+    it('fatals when recent "On it" comment exists and no --force', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      const issue: GitHubIssue = {
+        ...baseIssue,
+        comments: [{
+          body: 'On it! Working on a fix.',
+          createdAt: new Date().toISOString(),
+          author: { login: 'builder-bot' },
+        }],
+      };
+      await expect(
+        checkBugfixCollisions(42, '/tmp/wt', issue, false),
+      ).rejects.toThrow('On it');
+    });
+
+    it('warns but continues when "On it" comment exists with --force', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any);
+      const issue: GitHubIssue = {
+        ...baseIssue,
+        comments: [{
+          body: 'On it!',
+          createdAt: new Date().toISOString(),
+          author: { login: 'builder-bot' },
+        }],
+      };
+      await expect(
+        checkBugfixCollisions(42, '/tmp/wt', issue, true),
+      ).resolves.toBeUndefined();
+    });
+
+    it('fatals when open PRs reference the issue and no --force', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({
+        stdout: JSON.stringify([{ number: 99, title: 'Fix #42' }]),
+        stderr: '',
+      } as any);
+      // fatal() in production calls process.exit(), which isn't catchable.
+      // Our mock throws, but the PR-check try/catch swallows it.
+      // Verify fatal was called with the right message instead.
+      const { fatal } = await import('../utils/logger.js');
+      await checkBugfixCollisions(42, '/tmp/wt', baseIssue, false);
+      expect(fatal).toHaveBeenCalledWith(expect.stringContaining('open PR'));
+    });
+
+    it('warns when issue is already closed', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      const { run } = await import('../utils/shell.js');
+      vi.mocked(run).mockResolvedValueOnce({ stdout: '[]', stderr: '' } as any);
+      const { logger } = await import('../utils/logger.js');
+      const closedIssue: GitHubIssue = { ...baseIssue, state: 'CLOSED' };
+      await checkBugfixCollisions(42, '/tmp/wt', closedIssue, false);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('already closed'));
+    });
+  });
+
+  // =========================================================================
+  // validateResumeWorktree
+  // =========================================================================
+
+  describe('validateResumeWorktree', () => {
+    it('fatals when worktree does not exist', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync).mockReturnValueOnce(false);
+      expect(() => validateResumeWorktree('/tmp/missing')).toThrow('worktree does not exist');
+    });
+
+    it('fatals when .git file is missing', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)  // worktreePath exists
+        .mockReturnValueOnce(false); // .git does not
+      expect(() => validateResumeWorktree('/tmp/broken')).toThrow('not a valid git worktree');
+    });
+
+    it('succeeds when worktree is valid', async () => {
+      const { existsSync } = await import('node:fs');
+      vi.mocked(existsSync)
+        .mockReturnValueOnce(true)  // worktreePath exists
+        .mockReturnValueOnce(true); // .git exists
+      expect(() => validateResumeWorktree('/tmp/good')).not.toThrow();
     });
   });
 });
