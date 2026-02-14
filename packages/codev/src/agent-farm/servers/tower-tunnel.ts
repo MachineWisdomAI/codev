@@ -184,6 +184,13 @@ function startConfigWatcher(): void {
         try {
           const config = readCloudConfig();
           if (config) {
+            // Skip if already connected (avoids redundant reconnect when the OAuth
+            // callback writes config and connects directly — the file watcher fires
+            // 500ms later and would kill the working connection)
+            if (tunnelClient && tunnelClient.getState() === 'connected') {
+              _deps?.log('INFO', 'Cloud config changed but tunnel already connected, skipping reconnect');
+              return;
+            }
             _deps?.log('INFO', `Cloud config changed, reconnecting tunnel (key: ${maskApiKey(config.api_key)})`);
             // Reset circuit breaker in case previous key was invalid
             if (tunnelClient) tunnelClient.resetCircuitBreaker();
