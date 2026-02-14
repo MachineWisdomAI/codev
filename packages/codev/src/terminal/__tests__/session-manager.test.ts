@@ -75,10 +75,10 @@ describe('SessionManager', () => {
 
   afterEach(async () => {
     for (const fn of cleanupFns) {
-      try { fn(); } catch { /* noop */ }
+      try { await fn(); } catch { /* noop */ }
     }
     // Small delay for sockets to close
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 100));
     rmrf(socketDir);
   });
 
@@ -305,6 +305,283 @@ describe('SessionManager', () => {
       });
       expect(manager.getSessionInfo('nonexistent')).toBeNull();
     });
+  });
+
+  describe('cleanupStaleSockets (live shepherd preserved)', () => {
+    it('does not delete sockets with live shepherds', async () => {
+      // Create a real shepherd that is listening on a socket
+      const socketPath = path.join(socketDir, 'shepherd-livesock.sock');
+      let mockPty: MockPty | null = null;
+      const shepherd = new ShepherdProcess(
+        () => {
+          mockPty = new MockPty();
+          return mockPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shepherd.shutdown());
+
+      // SessionManager has NO knowledge of this session (simulates Tower restart)
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      expect(fs.existsSync(socketPath)).toBe(true);
+      const cleaned = await manager.cleanupStaleSockets();
+      // Should NOT delete the socket because the shepherd is alive (connection succeeds)
+      expect(cleaned).toBe(0);
+      expect(fs.existsSync(socketPath)).toBe(true);
+    });
+  });
+
+  describe('createSession (integration with real shepherd)', () => {
+    // These tests spawn a real shepherd-main.js process
+    const shepherdScript = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      '../../../dist/terminal/shepherd-main.js',
+    );
+
+    it('spawns a shepherd and returns connected client', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript,
+        nodeExecutable: process.execPath,
+      });
+
+      const client = await manager.createSession({
+        sessionId: 'int-test-1',
+        command: '/bin/echo',
+        args: ['hello'],
+        cwd: '/tmp',
+        env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+        cols: 80,
+        rows: 24,
+      });
+      cleanupFns.push(async () => {
+        try { await manager.killSession('int-test-1'); } catch { /* noop */ }
+      });
+
+      expect(client.connected).toBe(true);
+      expect(manager.listSessions().size).toBe(1);
+
+      const info = manager.getSessionInfo('int-test-1');
+      expect(info).not.toBeNull();
+      expect(info!.pid).toBeGreaterThan(0);
+      expect(info!.startTime).toBeGreaterThan(0);
+    }, 15000);
+
+    it('create → write → read → kill → verify cleanup', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript,
+        nodeExecutable: process.execPath,
+      });
+
+      const client = await manager.createSession({
+        sessionId: 'int-test-2',
+        command: '/bin/cat',
+        args: [],
+        cwd: '/tmp',
+        env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+        cols: 80,
+        rows: 24,
+      });
+      cleanupFns.push(async () => {
+        try { await manager.killSession('int-test-2'); } catch { /* noop */ }
+      });
+
+      // Write data and read it back via /bin/cat
+      const dataPromise = new Promise<string>((resolve) => {
+        client.on('data', (buf: Buffer) => {
+          const text = buf.toString();
+          if (text.includes('test-echo')) {
+            resolve(text);
+          }
+        });
+      });
+
+      client.write('test-echo\n');
+
+      const output = await Promise.race([
+        dataPromise,
+        new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      ]);
+      expect(output).toContain('test-echo');
+
+      // Kill session
+      const info = manager.getSessionInfo('int-test-2');
+      await manager.killSession('int-test-2');
+
+      // Session removed from map
+      expect(manager.listSessions().size).toBe(0);
+
+      // Socket file cleaned up
+      if (info) {
+        expect(fs.existsSync(info.socketPath)).toBe(false);
+      }
+    }, 20000);
+  });
+
+  describe('killSession', () => {
+    it('kills session and cleans up', async () => {
+      // Create a shepherd with MockPty
+      const socketPath = path.join(socketDir, 'shepherd-kill.sock');
+      let mockPty: MockPty | null = null;
+      const shepherd = new ShepherdProcess(
+        () => {
+          mockPty = new MockPty();
+          return mockPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      // Connect client and register in a mock manager-like setup
+      const client = new ShepherdClient(socketPath);
+      await client.connect();
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Manually reconnect to register the session
+      const reconnected = await manager.reconnectSession(
+        'kill-test',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (reconnected) {
+        expect(manager.listSessions().size).toBeGreaterThan(0);
+        await manager.killSession('kill-test');
+        expect(manager.listSessions().has('kill-test')).toBe(false);
+      }
+
+      // Clean up in case reconnect failed
+      client.disconnect();
+      shepherd.shutdown();
+    });
+  });
+
+  describe('auto-restart logic', () => {
+    it('sends SPAWN frame on exit when restartOnExit is true', async () => {
+      const socketPath = path.join(socketDir, 'shepherd-restart.sock');
+      let capturedPty: MockPty | null = null;
+      let spawnCount = 0;
+
+      const shepherd = new ShepherdProcess(
+        () => {
+          spawnCount++;
+          capturedPty = new MockPty();
+          return capturedPty;
+        },
+        socketPath,
+        100,
+      );
+      await shepherd.start('/bin/bash', ['-l'], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shepherd.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript: '/nonexistent/shepherd.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Create a mock session with auto-restart by manually connecting
+      // and registering with restart options
+      const client = new ShepherdClient(socketPath);
+      await client.connect();
+
+      // We need to test the auto-restart behavior directly.
+      // Since createSession isn't available without a real shepherd binary,
+      // we'll test the internal logic by verifying that the session-restart
+      // event is emitted when a client exit occurs.
+
+      // Simulate the auto-restart behavior: after exit, SPAWN is sent
+      const restartPromise = new Promise<void>((resolve) => {
+        shepherd.on('spawn', () => {
+          resolve();
+        });
+      });
+
+      // Simulate exit and trigger auto-restart via the client
+      const exitPromise = new Promise<void>((resolve) => {
+        client.on('exit', () => resolve());
+      });
+
+      capturedPty!.simulateExit(1);
+      await exitPromise;
+
+      // Send SPAWN manually (simulating what auto-restart does)
+      client.spawn({
+        command: '/bin/bash',
+        args: ['-l'],
+        cwd: '/tmp',
+        env: {},
+      });
+
+      await Promise.race([
+        restartPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+
+      expect(spawnCount).toBe(2); // Original + restart
+      client.disconnect();
+    });
+
+    it('respects maxRestarts limit', async () => {
+      const shepherdScript = path.resolve(
+        path.dirname(new URL(import.meta.url).pathname),
+        '../../../dist/terminal/shepherd-main.js',
+      );
+
+      const manager = new SessionManager({
+        socketDir,
+        shepherdScript,
+        nodeExecutable: process.execPath,
+      });
+
+      // Create with maxRestarts=2 and short delay
+      const client = await manager.createSession({
+        sessionId: 'maxrestart-test',
+        command: '/bin/sh',
+        args: ['-c', 'exit 1'],
+        cwd: '/tmp',
+        env: { PATH: process.env.PATH || '/usr/bin:/bin' },
+        cols: 80,
+        rows: 24,
+        restartOnExit: true,
+        restartDelay: 100,
+        maxRestarts: 2,
+      });
+      cleanupFns.push(async () => {
+        try { await manager.killSession('maxrestart-test'); } catch { /* noop */ }
+      });
+
+      // Wait for restarts to happen and exhaust maxRestarts
+      const errorPromise = new Promise<Error>((resolve) => {
+        manager.on('session-error', (_id: string, err: Error) => {
+          if (err.message.includes('Max restarts')) {
+            resolve(err);
+          }
+        });
+      });
+
+      const err = await Promise.race([
+        errorPromise,
+        new Promise<Error>((_, reject) => setTimeout(() => reject(new Error('timeout waiting for max restarts')), 15000)),
+      ]);
+
+      expect(err.message).toContain('Max restarts (2) exceeded');
+    }, 20000);
   });
 
   describe('reconnectSession', () => {

@@ -509,14 +509,18 @@ describe('ShepherdClient', () => {
       await expect(client.connect()).rejects.toThrow();
     });
 
-    it('rejects if server sends non-WELCOME frame first', async () => {
+    it('buffers frames received before WELCOME and delivers them after', async () => {
+      let serverSocket: net.Socket | null = null;
       const server = net.createServer((socket) => {
+        serverSocket = socket;
         const parser = createFrameParser();
         socket.pipe(parser);
         parser.on('data', (frame: ParsedFrame) => {
           if (frame.type === FrameType.HELLO) {
-            // Send DATA instead of WELCOME
-            socket.write(encodeData('wrong'));
+            // Send DATA before WELCOME (simulates PTY output racing handshake)
+            socket.write(encodeData('pre-welcome-data'));
+            // Then send WELCOME
+            socket.write(encodeWelcome({ pid: 1, cols: 80, rows: 24, startTime: Date.now() }));
           }
         });
       });
@@ -524,7 +528,20 @@ describe('ShepherdClient', () => {
       cleanup.push(() => { server.close(); });
 
       const client = new ShepherdClient(socketPath);
-      await expect(client.connect()).rejects.toThrow(/Expected WELCOME/);
+      cleanup.push(() => client.disconnect());
+
+      const receivedData: string[] = [];
+      client.on('data', (buf: Buffer) => {
+        receivedData.push(buf.toString());
+      });
+
+      // Connect should succeed even though DATA arrived before WELCOME
+      const welcome = await client.connect();
+      expect(welcome.pid).toBe(1);
+
+      // The pre-WELCOME DATA frame should have been replayed after handshake
+      await new Promise((r) => setTimeout(r, 50));
+      expect(receivedData).toContain('pre-welcome-data');
     });
   });
 });

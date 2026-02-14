@@ -14,6 +14,7 @@
 
 import { spawn as cpSpawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
@@ -270,6 +271,7 @@ export class SessionManager extends EventEmitter {
 
   /**
    * Scan socket directory for stale sockets (no live process).
+   * A socket is stale if nothing is listening on it (connection refused).
    * Returns the number of sockets cleaned up.
    */
   async cleanupStaleSockets(): Promise<number> {
@@ -301,7 +303,13 @@ export class SessionManager extends EventEmitter {
       // Skip if we have an active session for this
       if (this.sessions.has(sessionId)) continue;
 
-      // No active session — it's stale
+      // Probe the socket: try connecting to see if a shepherd is alive.
+      // If connection is refused, the socket is stale and safe to delete.
+      // If connection succeeds, a shepherd is still running — leave it alone.
+      const isAlive = await this.probeSocket(fullPath);
+      if (isAlive) continue;
+
+      // No live process — it's stale
       try {
         fs.unlinkSync(fullPath);
         cleaned++;
@@ -311,6 +319,32 @@ export class SessionManager extends EventEmitter {
     }
 
     return cleaned;
+  }
+
+  /**
+   * Test if a Unix socket has a listener by attempting a brief connection.
+   * Returns true if connection succeeds, false if refused/timed out.
+   */
+  private probeSocket(socketPath: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.createConnection(socketPath);
+      const timeout = setTimeout(() => {
+        socket.destroy();
+        resolve(false);
+      }, 2000);
+
+      socket.on('connect', () => {
+        clearTimeout(timeout);
+        socket.destroy();
+        resolve(true);
+      });
+
+      socket.on('error', () => {
+        clearTimeout(timeout);
+        socket.destroy();
+        resolve(false);
+      });
+    });
   }
 
   /**

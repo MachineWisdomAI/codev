@@ -110,25 +110,30 @@ export class ShepherdClient extends EventEmitter implements IShepherdClient {
         }
       });
 
+      // Buffer frames that arrive before WELCOME (e.g., DATA from PTY output
+      // that the shepherd forwards immediately on connection)
+      const preWelcomeBuffer: ParsedFrame[] = [];
+
       parser.on('data', (frame: ParsedFrame) => {
         if (!handshakeResolved) {
-          // During handshake: expect WELCOME
           if (frame.type === FrameType.WELCOME) {
             try {
               const welcome = parseJsonPayload<WelcomeMessage>(frame.payload);
               handshakeResolved = true;
               this._connected = true;
+              // Replay any buffered frames received before WELCOME
+              for (const buffered of preWelcomeBuffer) {
+                this.handleFrame(buffered);
+              }
               resolve(welcome);
-            } catch (err) {
+            } catch {
               handshakeResolved = true;
               reject(new Error('Invalid WELCOME payload'));
               this.cleanup();
             }
           } else {
-            // Unexpected frame during handshake
-            handshakeResolved = true;
-            reject(new Error(`Expected WELCOME, got frame type 0x${frame.type.toString(16)}`));
-            this.cleanup();
+            // Buffer non-WELCOME frames for replay after handshake
+            preWelcomeBuffer.push(frame);
           }
         } else {
           // Post-handshake: dispatch frames
