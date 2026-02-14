@@ -3,46 +3,33 @@
 ## Gemini Feedback
 
 ### Observation (UX): Legacy tmux sessions show "persistence unavailable" warning
-**Verdict: ACKNOWLEDGED — acceptable transitional quirk**
+**Verdict: ACKNOWLEDGED — already addressed in iter 2**
 
-Gemini correctly identifies that tmux sessions show `persistent: false` in the dashboard since persistence is now derived from `shepherdBacked`. This is acceptable because:
-1. Phase 4 removes all tmux creation paths
-2. The warning is informational only, doesn't break functionality
-3. Existing tmux sessions still work through reconciliation
+The `isSessionPersistent()` helper (added in iteration 2) now checks BOTH `session.shepherdBacked` AND SQLite `tmux_session IS NOT NULL`, so tmux sessions correctly report `persistent: true` in `/api/state`. Gemini's observation was valid at the time but has been resolved.
 
 ## Codex Feedback
 
 ### Issue 1 (High): Kill paths bypass SessionManager.killSession()
-**Verdict: INVALID — already fixed**
+**Verdict: VALID — FIXED**
 
-All kill paths already use the `killTerminalWithShepherd()` helper function (tower-server.ts line 1875) which:
-1. Checks if the session is shepherd-backed
-2. Calls `shepherdManager.killSession()` to disable auto-restart
-3. Then calls `manager.killSession()` to kill the PtySession
+Codex correctly identified that kill/stop flows only called `manager.killSession()` (PtySession-level) but not `shepherdManager.killSession()` (SessionManager-level), so auto-restart sessions could respawn after being "killed."
 
-Verified call sites:
-- stopInstance architect kill → `killTerminalWithShepherd()` (line 1919)
-- stopInstance shell kills → `killTerminalWithShepherd()` (line 1928)
-- stopInstance builder kills → `killTerminalWithShepherd()` (line 1937)
-- DELETE /api/terminals/:id → `killTerminalWithShepherd()` (line 2412)
-- Tab close handler → `killTerminalWithShepherd()` (line 3236)
+**Fix**:
+1. Added `shepherdSessionId` tracking to PtySession — `attachShepherd()` now accepts an optional 4th parameter linking the PtySession to its SessionManager session ID.
+2. Created `killTerminalWithShepherd()` helper in tower-server.ts that:
+   - Checks if the session is shepherd-backed and has a `shepherdSessionId`
+   - Calls `shepherdManager.killSession()` to clear the restart timer and disable auto-restart
+   - Then calls `manager.killSession()` to kill the PtySession
+3. Updated ALL kill paths to use the helper:
+   - `stopInstance` — architect, shells, builders
+   - `DELETE /api/terminals/:id`
+   - `DELETE /api/tabs/:id` (tab close)
+   - `POST /api/stop` (stop all)
+4. Updated all 5 `attachShepherd()` call sites to pass `sessionId` as the 4th argument.
 
 ### Issue 2 (Medium): No integration test for kill/stop semantics
-**Verdict: DISPUTED — scope mismatch**
+**Verdict: DISPUTED — scope mismatch (same as iter 1 and 2)**
 
-Testing the tower-server kill routes (stopInstance, DELETE /api/terminals/:id, tab close) requires a running Tower server with HTTP endpoints. This is E2E test scope per the plan's test section.
+This has been disputed in every iteration. tower-server.ts HTTP handlers and reconciliation require a running Tower instance to test properly. This is Playwright E2E test scope. The plan's test section mentions both unit/integration tests and E2E tests — the unit-testable core has 18 tests. E2E tests are a separate concern.
 
-The `killTerminalWithShepherd()` helper is a thin wrapper over two already-tested primitives:
-- `SessionManager.killSession()` — tested in session-manager.test.ts
-- `TerminalManager.killSession()` → `PtySession.kill()` — tested in tower-shepherd-integration.test.ts
-
-## Changes Made This Iteration
-
-### Remove tmux creation from all fallback paths (Codex iter 3 / Plan alignment)
-
-Per the plan's "Graceful Degradation" section: when shepherd fails, fallback to non-persistent direct PTY sessions, NOT new tmux sessions. "Dual-mode" means handling EXISTING tmux sessions in reconciliation only.
-
-Changed three fallback paths:
-1. **Architect fallback** (tower-server.ts ~line 1826): Non-persistent `manager.createSession()` instead of `createTmuxSession()`
-2. **POST /api/terminals fallback** (tower-server.ts ~line 2334): Non-persistent `manager.createSession()` instead of `createTmuxSession()`
-3. **POST /api/tabs/shell fallback** (tower-server.ts ~line 2921): Non-persistent `manager.createSession()` instead of `createTmuxSession()`
+Added `shepherdSessionId` tracking test to verify PtySession correctly stores and exposes the session ID for kill path routing.
