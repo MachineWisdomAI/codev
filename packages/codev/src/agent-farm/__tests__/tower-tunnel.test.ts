@@ -182,7 +182,23 @@ describe('tower-tunnel', () => {
     });
 
     describe('POST connect', () => {
+      it('returns 503 when called before initTunnel (startup guard)', async () => {
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        const { res, body, statusCode } = makeRes();
+        await handleTunnelEndpoint(makeReq('POST'), res, 'connect');
+
+        expect(statusCode()).toBe(503);
+        const parsed = JSON.parse(body());
+        expect(parsed.success).toBe(false);
+        expect(parsed.error).toMatch(/still starting/i);
+      });
+
       it('returns 400 when not registered', async () => {
+        // Must init first so the guard passes
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        mockReadCloudConfig.mockReturnValue(null);
         const { res, body, statusCode } = makeRes();
         await handleTunnelEndpoint(makeReq('POST'), res, 'connect');
 
@@ -300,6 +316,78 @@ describe('tower-tunnel', () => {
       const deps2 = makeDeps();
       await initTunnel(deps2, { getInstances: async () => [] });
       expect(deps2.log).toHaveBeenCalledWith('INFO', 'No cloud config found, operating in local-only mode');
+    });
+  });
+
+  // =========================================================================
+  // Config watcher debouncing
+  // =========================================================================
+
+  describe('config watcher debouncing', () => {
+    it('starts watching config directory on initTunnel', async () => {
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+
+      // initTunnel calls startConfigWatcher which calls fs.watch
+      expect(mockFsWatch).toHaveBeenCalled();
+    });
+
+    it('stops watcher on shutdownTunnel', async () => {
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+
+      shutdownTunnel();
+
+      // shutdownTunnel calls stopConfigWatcher which closes the watcher
+      expect(mockFsWatcherClose).toHaveBeenCalled();
+    });
+
+    it('debounces rapid config changes via setTimeout', async () => {
+      vi.useFakeTimers();
+      try {
+        const deps = makeDeps();
+        await initTunnel(deps, { getInstances: async () => [] });
+
+        // Grab the watcher callback from the fs.watch mock call
+        const watchCall = mockFsWatch.mock.calls[0];
+        expect(watchCall).toBeDefined();
+        const watchCallback = watchCall[1] as (eventType: string, filename: string) => void;
+        const configFileName = 'cloud-config.json';
+
+        // Fire multiple rapid events (simulating rapid file writes)
+        mockReadCloudConfig.mockReturnValue(FAKE_CONFIG);
+        watchCallback('change', configFileName);
+        watchCallback('change', configFileName);
+        watchCallback('change', configFileName);
+
+        // Before debounce timeout fires, no reconnection should have happened
+        // (clear previous call count from initTunnel itself)
+        const connectCallsBefore = mockConnect.mock.calls.length;
+
+        // Advance past the 500ms debounce window
+        await vi.advanceTimersByTimeAsync(600);
+
+        // Only ONE reconnection should have occurred despite 3 events
+        const connectCallsAfter = mockConnect.mock.calls.length;
+        expect(connectCallsAfter - connectCallsBefore).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('ignores events for non-config files', async () => {
+      const deps = makeDeps();
+      await initTunnel(deps, { getInstances: async () => [] });
+
+      const watchCall = mockFsWatch.mock.calls[0];
+      const watchCallback = watchCall[1] as (eventType: string, filename: string) => void;
+
+      // Fire event for a different file
+      const connectCallsBefore = mockConnect.mock.calls.length;
+      watchCallback('change', 'other-file.json');
+
+      // No reconnection should happen
+      expect(mockConnect.mock.calls.length).toBe(connectCallsBefore);
     });
   });
 });

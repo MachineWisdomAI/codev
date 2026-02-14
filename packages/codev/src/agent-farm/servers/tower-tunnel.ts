@@ -265,6 +265,12 @@ export async function handleTunnelEndpoint(
 ): Promise<void> {
   // POST connect
   if (req.method === 'POST' && tunnelSub === 'connect') {
+    if (!_deps) {
+      // Module not initialized yet (server still starting up)
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'Tower is still starting up. Try again shortly.' }));
+      return;
+    }
     try {
       const config = readCloudConfig();
       if (!config) {
