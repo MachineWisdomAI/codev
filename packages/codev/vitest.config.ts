@@ -9,6 +9,12 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,  // Prevent worker crash on CI during cleanup
+      },
+    },
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
