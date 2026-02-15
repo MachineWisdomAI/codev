@@ -241,16 +241,20 @@ describe('send integration (POST /api/send → /ws/messages)', () => {
   }, 120_000);
 
   afterAll(async () => {
-    // Deactivate workspaces
-    const encA = encodeWorkspacePath(workspaceA);
-    const encB = encodeWorkspacePath(workspaceB);
-    await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encA}/deactivate`, { method: 'POST' }).catch(() => {});
-    await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encB}/deactivate`, { method: 'POST' }).catch(() => {});
+    // Guard against setup failure — variables may be undefined
+    if (workspaceA) {
+      const encA = encodeWorkspacePath(workspaceA);
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encA}/deactivate`, { method: 'POST' }).catch(() => {});
+      cleanupWorkspace(workspaceA);
+    }
+    if (workspaceB) {
+      const encB = encodeWorkspacePath(workspaceB);
+      await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encB}/deactivate`, { method: 'POST' }).catch(() => {});
+      cleanupWorkspace(workspaceB);
+    }
 
     await stopServer(towerProcess);
     towerProcess = null;
-    cleanupWorkspace(workspaceA);
-    cleanupWorkspace(workspaceB);
     // Clean up test database
     const dbBase = resolve(homedir(), '.agent-farm', `test-${TEST_TOWER_PORT}`);
     try { rmSync(`${dbBase}.db`, { force: true }); } catch { /* ignore */ }

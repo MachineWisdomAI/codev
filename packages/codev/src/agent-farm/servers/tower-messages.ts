@@ -109,6 +109,14 @@ export function resolveTarget(
 ): ResolveResult | ResolveError {
   const { project, agent } = parseAddress(target);
 
+  // Validate: empty or whitespace-only agent is a malformed address
+  if (!agent || !agent.trim()) {
+    return {
+      code: 'NO_CONTEXT' as const,
+      message: 'Malformed address: agent name is empty.',
+    };
+  }
+
   // Determine the workspace path
   let workspacePath: string;
   if (project) {

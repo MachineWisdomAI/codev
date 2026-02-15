@@ -283,26 +283,29 @@ describe('resolveTarget', () => {
   });
 
   describe('malformed addresses', () => {
-    it('treats empty agent after project: as NOT_FOUND', () => {
+    it('rejects empty agent after project: as NO_CONTEXT (malformed address)', () => {
       // parseAddress('project:') returns { project: 'project', agent: '' }
-      // Empty agent won't match architect, builders, or shells
+      // Empty agent is caught early as a malformed address → NO_CONTEXT → 400 INVALID_PARAMS
       const ws = makeWorkspaceTerminals({ architect: 'term-1' });
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
       const result = resolveTarget('project:', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
       if (isResolveError(result)) {
-        expect(result.code).toBe('NOT_FOUND');
+        expect(result.code).toBe('NO_CONTEXT');
+        expect(result.message).toContain('empty');
       }
     });
 
-    it('handles whitespace-only target via fallback (resolved as NOT_FOUND)', () => {
+    it('rejects whitespace-only target as NO_CONTEXT (malformed address)', () => {
       const ws = makeWorkspaceTerminals();
       mockGetWorkspaceTerminals.mockReturnValue(new Map([['/home/user/project', ws]]));
 
-      // Whitespace becomes empty string after parseAddress lowercasing
       const result = resolveTarget(' ', '/home/user/project');
       expect(isResolveError(result)).toBe(true);
+      if (isResolveError(result)) {
+        expect(result.code).toBe('NO_CONTEXT');
+      }
     });
   });
 
