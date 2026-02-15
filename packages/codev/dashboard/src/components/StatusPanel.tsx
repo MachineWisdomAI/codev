@@ -265,9 +265,7 @@ function ProjectTable({ projects }: { projects: Project[] }) {
 
 function ProjectsView({ projects }: { projects: Project[] }) {
   // Split: active (+ recently integrated) vs old integrated vs terminal
-  const activeProjects = projects.filter(p =>
-    ACTIVE_STATUSES.has(p.status) || isRecentlyIntegrated(p)
-  );
+  const activeProjects = projects.filter(p => ACTIVE_STATUSES.has(p.status));
 
   // Sort active: furthest along first, then by ID
   activeProjects.sort((a, b) => {
@@ -277,9 +275,7 @@ function ProjectsView({ projects }: { projects: Project[] }) {
     return a.id.localeCompare(b.id);
   });
 
-  const completedProjects = projects.filter(p =>
-    p.status === 'integrated' && !isRecentlyIntegrated(p)
-  );
+  const completedProjects = projects.filter(p => p.status === 'integrated');
 
   const terminalProjects = projects.filter(p => TERMINAL_STATUSES.has(p.status));
 

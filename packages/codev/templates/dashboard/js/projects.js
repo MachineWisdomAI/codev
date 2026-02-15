@@ -437,9 +437,7 @@ function renderKanbanGrid(projects) {
     'implemented': 4, 'committed': 5, 'integrated': 6
   };
 
-  const activeProjects = projects.filter(p =>
-    activeStatuses.includes(p.status) || isRecentlyIntegrated(p)
-  );
+  const activeProjects = projects.filter(p => activeStatuses.includes(p.status));
 
   activeProjects.sort((a, b) => {
     const orderA = statusOrder[a.status] || 0;
@@ -448,9 +446,7 @@ function renderKanbanGrid(projects) {
     return a.id.localeCompare(b.id);
   });
 
-  const inactiveProjects = projects.filter(p =>
-    p.status === 'integrated' && !isRecentlyIntegrated(p)
-  );
+  const inactiveProjects = projects.filter(p => p.status === 'integrated');
 
   let html = '';
 
