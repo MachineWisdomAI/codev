@@ -123,7 +123,8 @@ Note: The second catch block (lines 197-208) already kills via `process.kill(inf
 - [ ] `SHELLPER_SOCKET_DIR` env var support in `tower-server.ts`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
 - [ ] 4 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll`
-- [ ] 2 workspace-activating E2E files already have deactivation — verified, no changes needed
+- [ ] `tower-baseline` already has `deactivateWorkspace()` in `afterEach` — verified, no changes needed
+- [ ] `bugfix-202` adds defensive terminal DELETE in `afterAll` as failure-safe (inline deactivation is not guaranteed on assertion failure)
 - [ ] Temp socket directories cleaned up in `afterAll` for all 6 E2E files
 
 #### Implementation Details
@@ -156,7 +157,7 @@ The complete list of E2E test files with inline `startTower()` that need updatin
 | `tower-api.e2e.test.ts` (line 69) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
 | `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
 | `tower-baseline.e2e.test.ts` (line 68) | Via workspace activation (`POST /api/workspaces/.../activate`) | Already has `deactivateWorkspace()` in `afterEach` — no changes needed |
-| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Already deactivates inline — no changes needed |
+| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Defensive terminal DELETE in `afterAll` (inline deactivation not failure-safe) |
 | `cli-tower-mode.e2e.test.ts` (line 73) | Direct API via `TowerClient.createTerminal()` (lines 235, 250, 260, 272) | Terminal DELETE in `afterAll` |
 
 Pattern for each file's `startTower()`:
@@ -207,7 +208,7 @@ afterAll(async () => {
 });
 ```
 
-For `tower-baseline` and `bugfix-202`, which already have proper workspace deactivation, only socket dir cleanup is needed in `afterAll`:
+For `tower-baseline`, which already has `deactivateWorkspace()` in `afterEach`, only socket dir cleanup is needed in `afterAll`:
 ```typescript
 afterAll(async () => {
   await stopServer(towerProcess);
@@ -217,6 +218,8 @@ afterAll(async () => {
   // ... existing DB cleanup
 });
 ```
+
+For `bugfix-202`, inline deactivation is not failure-safe (if an assertion fails before the inline `deactivate` call, sessions leak). Add defensive terminal DELETE in `afterAll` matching the pattern used for the 4 API-terminal-creating files above. This is additive safety — it catches anything the inline deactivation misses.
 
 **4. Optional: Update `tower-test-utils.ts` for future use**
 
@@ -236,7 +239,7 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 - `packages/codev/src/agent-farm/__tests__/tower-api.e2e.test.ts` — Socket isolation + terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/bugfix-199-zombie-tab.e2e.test.ts` — Socket isolation + terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/tower-baseline.e2e.test.ts` — Socket isolation only
-- `packages/codev/src/agent-farm/__tests__/bugfix-202-stale-temp-projects.e2e.test.ts` — Socket isolation only
+- `packages/codev/src/agent-farm/__tests__/bugfix-202-stale-temp-projects.e2e.test.ts` — Socket isolation + defensive terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/cli-tower-mode.e2e.test.ts` — Socket isolation + terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/helpers/tower-test-utils.ts` — Add optional `socketDir` param
 
@@ -244,7 +247,8 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 - [ ] Test Tower instances use temp dirs for sockets, not `~/.codev/run/`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
 - [ ] `afterAll` in all 4 API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower
-- [ ] Workspace-activating E2E tests (`tower-baseline`, `bugfix-202`) already deactivate properly — verified
+- [ ] `tower-baseline` already deactivates properly via `afterEach` — verified
+- [ ] `bugfix-202` has defensive terminal DELETE in `afterAll` as failure-safe backup
 - [ ] Temp socket directories are cleaned up in `afterAll` for all E2E tests
 - [ ] Zero shellper socket files remain after test suite completes
 - [ ] Dev's running shellper sessions are never affected by test runs
@@ -381,7 +385,7 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 1. `tower-test-utils.ts` is not imported by any E2E test — plan targeted dead code
 2. Only `tower-terminals.e2e.test.ts` was explicitly targeted; other terminal-creating files missed
 3. Spec says `afterEach/afterAll` but plan only used `afterAll`
-→ **Addressed**: (1) Rewrote Phase 2 to modify each file's inline `startTower()` individually. `tower-test-utils.ts` update kept as optional for future use. (2) Enumerated all 6 E2E files in a table with per-file requirements. (3) `afterAll` is appropriate: tests create terminals in `it()` blocks but SIGTERM on Tower stop kills all shellpers for that Tower instance; inter-test leaks within a suite are bounded by the suite's Tower lifetime and cleaned at `afterAll`.
+→ **Addressed**: (1) Rewrote Phase 2 to modify each file's inline `startTower()` individually. `tower-test-utils.ts` update kept as optional for future use. (2) Enumerated all 6 E2E files in a table with per-file requirements. (3) `afterAll` is appropriate: tests create terminals in `it()` blocks; `afterAll` explicitly kills all terminals via API DELETE before stopping Tower. Note: Tower's graceful shutdown does NOT kill shellper sessions (by design, to preserve them for reconnect), which is why explicit terminal cleanup in `afterAll` is essential.
 
 ### Iteration 2 (3-way review)
 **Gemini** (APPROVE): Verified plan accuracy against source code. All line number references, file paths, and code patterns check out.
@@ -401,6 +405,17 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 **Codex** (APPROVE): Plan is implementable and materially aligned with spec requirements.
 
 **Claude** (APPROVE): Thoroughly verified plan with accurate code references, complete spec coverage, and sound technical approach.
+
+### Iteration 4 (3-way review)
+**Gemini** (APPROVE): Comprehensive plan that correctly targets all leak vectors.
+
+**Codex** (REQUEST_CHANGES):
+1. `bugfix-202` inline deactivation is not failure-safe — if assertion fails before deactivation, sessions leak
+2. Plan reasoning incorrectly states SIGTERM kills shellpers (it doesn't — Tower preserves sessions on shutdown)
+→ **Addressed**: (1) Added defensive terminal DELETE in `afterAll` for `bugfix-202`. (2) Corrected SIGTERM reasoning in consultation log — Tower's graceful shutdown does NOT kill shellper sessions.
+
+**Claude** (APPROVE): Minor suggestion — spec test scenario #4 (100-session stress test) not explicitly in Phase 3 deliverables.
+→ **Noted**: Stress test is deferred — the core spec requirements (PID liveness, periodic cleanup, socket isolation) are all covered. 100-session lifecycle testing is better suited for a dedicated performance/stability test suite.
 
 ## Amendment History
 
