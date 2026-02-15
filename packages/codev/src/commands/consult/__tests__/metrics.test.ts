@@ -576,15 +576,59 @@ describe('JSON parse failure fallback', () => {
     expect(usage).toBeNull();
   });
 
-  it('Codex: extractReviewText returns null for invalid JSONL', () => {
+  it('Codex: extractReviewText returns null for entirely invalid JSONL', () => {
     const rawOutput = 'This is raw text, not JSONL';
     const text = extractReviewText('codex', rawOutput);
     expect(text).toBeNull();
   });
 
-  it('Codex: extractUsage returns null for invalid JSONL', () => {
+  it('Codex: extractUsage returns null for entirely invalid JSONL', () => {
     const rawOutput = 'Not valid JSONL';
     const usage = extractUsage('codex', rawOutput);
+    expect(usage).toBeNull();
+  });
+});
+
+// Test 15: Codex mixed JSONL with non-JSON lines (regression for #297)
+describe('Codex mixed JSONL with non-JSON lines', () => {
+  it('extractReviewText skips non-JSON lines and extracts assistant text', () => {
+    const output = [
+      'Codex CLI v1.2.3',  // Non-JSON progress line
+      JSON.stringify({ type: 'message', role: 'assistant', content: 'Review text here.' }),
+      'Some debug output',  // Non-JSON debug line
+      JSON.stringify({ type: 'message', role: 'assistant', content: ' More review.' }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 } }),
+    ].join('\n');
+
+    const text = extractReviewText('codex', output);
+    expect(text).not.toBeNull();
+    expect(text).toBe('Review text here. More review.');
+  });
+
+  it('extractUsage skips non-JSON lines and extracts usage data', () => {
+    const output = [
+      'Loading model...',  // Non-JSON progress line
+      JSON.stringify({ type: 'message', role: 'assistant', content: 'Review' }),
+      '--- progress ---',  // Non-JSON separator
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 100 } }),
+    ].join('\n');
+
+    const usage = extractUsage('codex', output);
+    expect(usage).not.toBeNull();
+    expect(usage!.inputTokens).toBe(500);
+    expect(usage!.cachedInputTokens).toBe(400);
+    expect(usage!.outputTokens).toBe(100);
+  });
+
+  it('extractReviewText returns null when only non-JSON lines present', () => {
+    const output = 'line 1\nline 2\nline 3';
+    const text = extractReviewText('codex', output);
+    expect(text).toBeNull();
+  });
+
+  it('extractUsage returns null when only non-JSON lines present', () => {
+    const output = 'not json\nalso not json';
+    const usage = extractUsage('codex', output);
     expect(usage).toBeNull();
   });
 });

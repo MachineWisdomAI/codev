@@ -18,7 +18,7 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What happens next:** The Architect (AI) writes a specification. The human reviews and approves it.
 
-**Artifact:** Draft specification in `codev/specs/NNNN-name.md`
+**Artifact:** Draft specification in `codev/specs/NNN-name.md`
 
 ---
 
@@ -30,7 +30,7 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What happens next:** The Architect creates an implementation plan.
 
-**Artifact:** Approved specification in `codev/specs/NNNN-name.md`
+**Artifact:** Approved specification in `codev/specs/NNN-name.md`
 
 ---
 
@@ -42,7 +42,7 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What happens next:** A Builder is spawned to implement the plan.
 
-**Artifact:** Implementation plan in `codev/plans/NNNN-name.md`
+**Artifact:** Implementation plan in `codev/plans/NNN-name.md`
 
 ---
 
@@ -90,7 +90,7 @@ conceived → specified → planned → implementing → implemented → committ
 
 **What happens next:** Nothing - the project is complete! A review document captures lessons learned.
 
-**Artifact:** Review document in `codev/reviews/NNNN-name.md`
+**Artifact:** Review document in `codev/reviews/NNN-name.md`
 
 ---
 

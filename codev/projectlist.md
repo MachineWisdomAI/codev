@@ -213,33 +213,20 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0110"
     title: "Messaging Infrastructure"
     summary: "Standardized agent naming, cross-project messaging, WebSocket message bus, POST /api/send endpoint"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0110-messaging-infrastructure.md
-      plan: null
-      review: null
+      plan: codev/plans/0110-messaging-infrastructure.md
+      review: codev/reviews/0110-messaging-infrastructure.md
     dependencies: ["0108", "0112"]
     tags: [messaging, af-send, dashboard, agents]
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
+      integrated_at: "2026-02-15"
     notes: "Standardize agent names (builder-spir-0109), add project:agent addressing, WebSocket message bus for dashboard observability, POST /api/send endpoint. Depends on 0108."
-
-  - id: "0113"
-    title: "Shellper Debug Logging"
-    summary: "Add lifecycle logging to shellper processes, capture stderr in Tower, surface exit codes/signals on session death"
-    status: conceived
-    priority: high
-    release: null
-    files:
-      spec: codev/specs/0113-shellper-debug-logging.md
-    dependencies: []
-    tags: [shellper, logging, debugging, reliability]
-    timestamps:
-      conceived_at: "2026-02-15"
-    notes: "Triggered by unexplained life architect shellper death on 2026-02-15. Currently zero diagnostic info when sessions die."
 
   - id: "0114"
     title: "Investigate Minimax for Code Reviews"
@@ -258,16 +245,64 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0115"
     title: "Consultation Metrics & Cost Tracking"
     summary: "Add time/cost measurement to every consult invocation, store in SQLite for statistical analysis"
-    status: conceived
+    status: integrated
     priority: high
     release: null
     files:
       spec: codev/specs/0115-consultation-metrics.md
+      plan: codev/plans/0115-consultation-metrics.md
+      review: codev/reviews/0115-consultation-metrics.md
     dependencies: []
     tags: [consult, metrics, cost, sqlite]
     timestamps:
       conceived_at: "2026-02-15"
+      integrated_at: "2026-02-15"
     notes: "Track duration, cost, protocol context, review type for every consult call. SQLite storage for analytics queries."
+
+  - id: "0116"
+    title: "Shellper Resource Leakage Prevention"
+    summary: "Periodic runtime cleanup, E2E test hygiene, defensive session creation to prevent posix_spawnp crashes"
+    status: committed
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0116-shellper-resource-leakage.md
+    dependencies: []
+    tags: [shellper, reliability, testing, stability]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Addresses posix_spawnp crashes from accumulated orphaned shellper sockets. Builder spawned."
+
+  - id: "0117"
+    title: "Consolidate Shellper Session Creation"
+    summary: "Extract duplicated shellper session creation code (6 call sites) into a single factory function"
+    status: committed
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0117-consolidate-session-creation.md
+    dependencies: []
+    tags: [shellper, refactor, code-hygiene]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Six files assemble the same cols/rows/cwd/env options bag for createSession(). Should be one function."
+
+  - id: "0118"
+    title: "Shellper Multi-Client Connections"
+    summary: "Replace single-connection model with multi-client Map, enabling af attach and simultaneous dashboard+terminal viewing"
+    status: committed
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0118-shellper-multi-client.md
+    dependencies: []
+    tags: [shellper, terminal, multi-client, af-attach]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Shellper currently accepts one connection (Tower). Need multiple clients like tmux. Enables af attach in terminal."
 
 # Low Priority
 
@@ -1014,6 +1049,22 @@ Completed projects not associated with any formal release.
       conceived_at: "2026-02-13"
       integrated_at: "2026-02-13"
     notes: "PR #231 merged. Agent SDK replaces CLI subprocess for Claude consultation. 7 tests."
+
+  - id: "0113"
+    title: "Shellper Debug Logging"
+    summary: "Add lifecycle logging to shellper processes, capture stderr in Tower, surface exit codes/signals on session death"
+    status: integrated
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0113-shellper-debug-logging.md
+      review: codev/reviews/0113-shellper-debug-logging.md
+    dependencies: []
+    tags: [shellper, logging, debugging, reliability]
+    timestamps:
+      conceived_at: "2026-02-15"
+      integrated_at: "2026-02-15"
+    notes: "PR #289 merged. Lifecycle logging, stderr capture, exit code/signal diagnostics for shellper sessions."
 ```
 
 ---
@@ -1111,7 +1162,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0112** - Reserve this number for your next project
+**0119** - Reserve this number for your next project
 
 ---
 

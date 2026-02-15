@@ -148,7 +148,7 @@ af spawn [options]
 ```
 
 **Options:**
-- `-p, --project <id>` - Spawn builder for a spec (e.g., `0042`)
+- `-p, --project <id>` - Spawn builder for a spec (e.g., `42`)
 - `--task <text>` - Spawn builder with a task description
 - `--protocol <name>` - Spawn builder to run a protocol
 - `--shell` - Spawn a bare Claude session
@@ -166,8 +166,8 @@ Creates a new builder in an isolated git worktree. The builder gets:
 **Examples:**
 
 ```bash
-# Spawn builder for spec 0042
-af spawn -p 0042
+# Spawn builder for spec 42
+af spawn -p 42
 
 # Spawn with task description
 af spawn --task "Fix login bug in auth module"
@@ -176,7 +176,7 @@ af spawn --task "Fix login bug in auth module"
 af spawn --shell
 
 # Spawn with context files
-af spawn -p 0042 --files "src/auth.ts,tests/auth.test.ts"
+af spawn -p 42 --files "src/auth.ts,tests/auth.test.ts"
 ```
 
 ---
@@ -198,8 +198,8 @@ Displays the current state of all builders and the architect:
 │ ID     │ Name         │ Status      │ Branch  │
 ├────────┼──────────────┼─────────────┼─────────┤
 │ arch   │ Architect    │ running     │ main    │
-│ 0042   │ auth-feature │ implementing│ builder/0042-auth │
-│ 0043   │ api-refactor │ pr-ready    │ builder/0043-api  │
+│ 42   │ auth-feature │ implementing│ builder/42-auth │
+│ 43   │ api-refactor │ pr-ready    │ builder/43-api  │
 └────────┴──────────────┴─────────────┴─────────┘
 ```
 
@@ -232,10 +232,10 @@ Removes a builder's worktree and associated resources. By default, refuses to de
 
 ```bash
 # Clean up completed builder
-af cleanup -p 0042
+af cleanup -p 42
 
 # Force cleanup (may lose work)
-af cleanup -p 0042 --force
+af cleanup -p 42 --force
 ```
 
 ---
@@ -249,7 +249,7 @@ af send [builder] [message] [options]
 ```
 
 **Arguments:**
-- `builder` - Builder ID (e.g., `0042`)
+- `builder` - Builder ID (e.g., `42`)
 - `message` - Message to send
 
 **Options:**
@@ -270,16 +270,16 @@ Sends text to a builder's terminal. Useful for:
 
 ```bash
 # Send message to builder
-af send 0042 "Focus on the auth module first"
+af send 42 "Focus on the auth module first"
 
 # Interrupt and send new instructions
-af send 0042 --interrupt "Stop that. Try a different approach."
+af send 42 --interrupt "Stop that. Try a different approach."
 
 # Send to all builders
 af send --all "Time to wrap up, create PRs"
 
 # Include file content
-af send 0042 --file src/api.ts "Review this implementation"
+af send 42 --file src/api.ts "Review this implementation"
 ```
 
 ---
@@ -352,7 +352,7 @@ af rename <id> <name>
 **Example:**
 
 ```bash
-af rename 0042 "auth-rework"
+af rename 42 "auth-rework"
 ```
 
 ---
@@ -528,7 +528,7 @@ Or override via CLI flags:
 
 ```bash
 af start --architect-cmd "claude --model opus"
-af spawn -p 0042 --builder-cmd "claude --model haiku"
+af spawn -p 42 --builder-cmd "claude --model haiku"
 ```
 
 ---

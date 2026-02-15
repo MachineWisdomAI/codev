@@ -28,9 +28,9 @@ This project uses **Codev** for AI-assisted development.
 ## File Naming Convention
 
 Use sequential numbering with descriptive names:
-- Specification: `codev/specs/0001-feature-name.md`
-- Plan: `codev/plans/0001-feature-name.md`
-- Review: `codev/reviews/0001-feature-name.md`
+- Specification: `codev/specs/1-feature-name.md`
+- Plan: `codev/plans/1-feature-name.md`
+- Review: `codev/reviews/1-feature-name.md`
 
 ## Git Workflow
 
@@ -38,8 +38,8 @@ Use sequential numbering with descriptive names:
 
 Commit messages format:
 ```
-[Spec 0001] Description of change
-[Spec 0001][Phase: implement] feat: Add feature
+[Spec 1] Description of change
+[Spec 1][Phase: implement] feat: Add feature
 ```
 
 ## CLI Commands

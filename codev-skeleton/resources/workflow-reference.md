@@ -80,19 +80,19 @@ AI agents must stop and wait for human action at these gates.
 af dash start
 
 # Spawn a builder for a project
-af spawn -p 0044
+af spawn -p 44
 
 # Check all builder statuses
 af status
 
 # Send message to builder
-af send 0044 "Check PR comments and address feedback"
+af send 44 "Check PR comments and address feedback"
 
 # Open a file for review
-af open codev/specs/0044-name.md
+af open codev/specs/44-name.md
 
 # Clean up after merge
-af cleanup -p 0044
+af cleanup -p 44
 
 # Stop everything
 af dash stop
@@ -128,16 +128,16 @@ codev import github:owner/repo --dry-run
 
 ```bash
 # Spec review (during Stage 1)
-consult --model gemini --type spec-review spec 0044
-consult --model codex --type spec-review spec 0044
+consult --model gemini --type spec-review spec 44
+consult --model codex --type spec-review spec 44
 
 # Plan review (during Stage 2)
-consult --model gemini --type plan-review plan 0044
-consult --model codex --type plan-review plan 0044
+consult --model gemini --type plan-review plan 44
+consult --model codex --type plan-review plan 44
 
 # Implementation review (during Stage 4, after each phase)
-consult --model gemini --type impl-review spec 0044
-consult --model codex --type impl-review spec 0044
+consult --model gemini --type impl-review spec 44
+consult --model codex --type impl-review spec 44
 
 # PR ready review (during Stage 5)
 consult --model gemini --type pr-ready pr 88
@@ -148,9 +148,9 @@ consult --model gemini --type integration-review pr 88
 consult --model codex --type integration-review pr 88
 
 # Parallel 3-way reviews (run all three concurrently)
-consult --model gemini --type spec-review spec 0044 &
-consult --model codex --type spec-review spec 0044 &
-consult --model claude --type spec-review spec 0044 &
+consult --model gemini --type spec-review spec 44 &
+consult --model codex --type spec-review spec 44 &
+consult --model claude --type spec-review spec 44 &
 wait
 ```
 
