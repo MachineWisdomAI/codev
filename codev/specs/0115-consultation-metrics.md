@@ -37,7 +37,7 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 | `project_id` | TEXT | Porch project ID if applicable (e.g., `0108`, `bugfix-269`), null for manual invocations |
 | `duration_seconds` | REAL NOT NULL | Wall-clock duration from subprocess start to exit |
 | `input_tokens` | INTEGER | Exact input/prompt tokens from structured model output, null if unavailable |
-| `cached_input_tokens` | INTEGER | Cached input tokens (subset of input_tokens with discounted pricing), null if unavailable |
+| `cached_input_tokens` | INTEGER | Cached input tokens with discounted pricing, null if unavailable. For Claude SDK: stores `cache_read_input_tokens` (not `cache_creation_input_tokens`, which has different pricing but is irrelevant since Claude cost comes from SDK). For Codex: `cached_input_tokens`. For Gemini: `cached`. |
 | `output_tokens` | INTEGER | Exact output/completion tokens from structured model output, null if unavailable |
 | `cost_usd` | REAL | Cost in USD: exact from SDK when available, computed from exact tokens × static rates otherwise, null if neither possible |
 | `exit_code` | INTEGER NOT NULL | Subprocess exit code (0 = success) |
@@ -335,7 +335,7 @@ const SUBPROCESS_MODEL_PRICING: Record<string, {
 };
 ```
 
-**Cost formula**: `cost = (input - cached) × inputRate + cached × cachedRate + output × outputRate`. If cached token count is unavailable, fall back to `cost = input × inputRate + output × outputRate` (minor overcount for cached runs, but still based on exact token counts).
+**Cost formula**: `cost = (input - cached) × inputRate + cached × cachedRate + output × outputRate`. All three values (input, cached, output) must be available to compute cost. If any token count is null, store `cost_usd = null` — consistent with R3's data integrity rule ("if exact data is unavailable, store null"). Since all three models provide cached token counts in their structured output, this should not reduce coverage in practice.
 
 Update these constants manually when pricing changes. A future enhancement could fetch pricing from the LiteLLM community-maintained JSON file (`github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json`), but no official provider API exists for programmatic pricing data.
 
