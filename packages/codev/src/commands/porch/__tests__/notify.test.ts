@@ -24,7 +24,14 @@ const mockExecFile = vi.mocked(execFile);
 
 describe('notifyArchitect', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockExecFile.mockReset();
+    // Restore default success-callback implementation after each test
+    mockExecFile.mockImplementation(
+      (_cmd: any, _args: any, _opts: any, cb: any) => {
+        cb(null);
+        return undefined as any;
+      }
+    );
   });
 
   it('calls execFile with correct arguments', () => {
