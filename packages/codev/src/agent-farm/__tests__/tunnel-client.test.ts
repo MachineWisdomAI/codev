@@ -1,14 +1,20 @@
 /**
- * Unit tests for tunnel-client module (Spec 0097 Phase 3)
+ * Unit tests for tunnel-client module (Spec 0097 Phase 3, Spec 0109)
  *
  * Tests pure functions: backoff calculation, path blocklist, hop-by-hop filtering
+ * Tests heartbeat logic: ping/pong cycle, timeout, cleanup, race conditions
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+import WebSocket from 'ws';
 import {
   calculateBackoff,
   isBlockedPath,
   filterHopByHopHeaders,
+  TunnelClient,
+  PING_INTERVAL_MS,
+  PONG_TIMEOUT_MS,
 } from '../lib/tunnel-client.js';
 
 describe('tunnel-client unit tests', () => {
@@ -179,5 +185,271 @@ describe('tunnel-client unit tests', () => {
     it('returns empty object for empty input', () => {
       expect(filterHopByHopHeaders({})).toEqual({});
     });
+  });
+});
+
+/**
+ * Creates a mock WebSocket object with EventEmitter capabilities
+ * for testing heartbeat logic.
+ */
+function createMockWs(): WebSocket & EventEmitter {
+  const emitter = new EventEmitter();
+  // Save original before overriding
+  const originalRemoveAll = emitter.removeAllListeners.bind(emitter);
+  const mock = Object.assign(emitter, {
+    readyState: WebSocket.OPEN,
+    ping: vi.fn(),
+    close: vi.fn(),
+    removeAllListeners: vi.fn((event?: string) => {
+      if (event) {
+        originalRemoveAll(event);
+      } else {
+        originalRemoveAll();
+      }
+      return mock;
+    }),
+  });
+  return mock as unknown as WebSocket & EventEmitter;
+}
+
+function createClient(): TunnelClient {
+  return new TunnelClient({
+    serverUrl: 'https://test.example.com',
+    apiKey: 'ctk_test',
+    towerId: 'test-tower',
+    localPort: 4100,
+  });
+}
+
+describe('heartbeat', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('sends ping at PING_INTERVAL_MS intervals', () => {
+    const client = createClient();
+    const ws = createMockWs();
+
+    // Set internal state so heartbeat can function
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    expect(ws.ping).not.toHaveBeenCalled();
+
+    // Advance to first ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect(ws.ping).toHaveBeenCalledTimes(1);
+
+    // Emit pong to clear timeout
+    ws.emit('pong');
+
+    // Advance to second ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect(ws.ping).toHaveBeenCalledTimes(2);
+
+    (client as any).stopHeartbeat();
+  });
+
+  it('clears timeout when pong is received (no reconnect)', () => {
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    // Trigger ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect(ws.ping).toHaveBeenCalledTimes(1);
+
+    // Emit pong before timeout
+    ws.emit('pong');
+
+    // Advance past pong timeout — should NOT trigger reconnect
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+    expect((client as any).state).toBe('connected');
+
+    (client as any).stopHeartbeat();
+  });
+
+  it('triggers reconnect on pong timeout with console.warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    // Trigger ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+
+    // Do NOT emit pong — let timeout fire
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+
+    expect(warnSpy).toHaveBeenCalledWith('Tunnel heartbeat: pong timeout, reconnecting');
+    expect((client as any).state).toBe('disconnected');
+  });
+
+  it('stops timers on cleanup()', () => {
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    expect((client as any).pingInterval).not.toBeNull();
+
+    (client as any).cleanup();
+
+    expect((client as any).pingInterval).toBeNull();
+    expect((client as any).pongTimeout).toBeNull();
+    expect((client as any).heartbeatWs).toBeNull();
+  });
+
+  it('stops timers on disconnect()', () => {
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    expect((client as any).pingInterval).not.toBeNull();
+
+    client.disconnect();
+
+    expect((client as any).pingInterval).toBeNull();
+    expect((client as any).pongTimeout).toBeNull();
+    expect((client as any).heartbeatWs).toBeNull();
+  });
+
+  it('stale WebSocket guard: old ws timeout does not reconnect new connection', () => {
+    const client = createClient();
+    const oldWs = createMockWs();
+    const newWs = createMockWs();
+
+    // Start heartbeat with old ws
+    (client as any).ws = oldWs;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(oldWs);
+
+    // Trigger ping on old ws
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+
+    // Simulate new connection replacing the old one
+    (client as any).stopHeartbeat();
+    (client as any).ws = newWs;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(newWs);
+
+    // Old ws pong timeout fires — but ws !== this.ws, so no reconnect
+    // The old timeout was cleared by stopHeartbeat, so this is a no-op
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+    expect((client as any).state).toBe('connected');
+
+    (client as any).stopHeartbeat();
+  });
+
+  it('duplicate startHeartbeat calls do not create duplicate timers or listeners', () => {
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+
+    (client as any).startHeartbeat(ws);
+    const firstInterval = (client as any).pingInterval;
+
+    (client as any).startHeartbeat(ws);
+    const secondInterval = (client as any).pingInterval;
+
+    // The interval was replaced (old one cleared)
+    expect(secondInterval).not.toBe(firstInterval);
+
+    // Only one ping should fire after one interval
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect(ws.ping).toHaveBeenCalledTimes(1);
+
+    // Check that pong listener count is not accumulating
+    expect(ws.listenerCount('pong')).toBe(1);
+
+    (client as any).stopHeartbeat();
+  });
+
+  it('ws.ping() throw does not crash and pong timeout handles detection', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+
+    // Make ping throw
+    (ws.ping as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('Socket in transitional state');
+    });
+
+    (client as any).startHeartbeat(ws);
+
+    // Trigger ping — should not crash
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+
+    // Pong timeout should still be armed and fire
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+    expect(warnSpy).toHaveBeenCalledWith('Tunnel heartbeat: pong timeout, reconnecting');
+    expect((client as any).state).toBe('disconnected');
+  });
+
+  it('concurrent close + timeout: only one reconnect', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    // Trigger ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+
+    // Simulate native close event (as doConnect's ws.on('close') would do)
+    // This sets ws to null via cleanup
+    (client as any).cleanup();
+    (client as any).setState('disconnected');
+    (client as any).consecutiveFailures++;
+    // At this point this.ws is null
+
+    // Now the pong timeout fires — but ws !== this.ws (null), so it no-ops
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+
+    // State should still be disconnected (not reconnected twice)
+    expect((client as any).state).toBe('disconnected');
+    // warn should NOT be called because the stale guard prevented it
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('normal pong does not produce any log output (silent success)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = createClient();
+    const ws = createMockWs();
+    (client as any).ws = ws;
+    (client as any).state = 'connected';
+    (client as any).startHeartbeat(ws);
+
+    // Trigger ping
+    vi.advanceTimersByTime(PING_INTERVAL_MS);
+
+    // Emit pong (success case)
+    ws.emit('pong');
+
+    // Advance past the would-be timeout
+    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+
+    // No warn should have been called
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect((client as any).state).toBe('connected');
+
+    (client as any).stopHeartbeat();
   });
 });
