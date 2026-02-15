@@ -41,7 +41,7 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 | `cost_usd` | REAL | Cost in USD: exact from SDK when available, computed from exact tokens × static rates otherwise, null if neither possible |
 | `exit_code` | INTEGER NOT NULL | Subprocess exit code (0 = success) |
 | `workspace_path` | TEXT NOT NULL | Absolute path to the git repository root |
-| `error_message` | TEXT | First 500 chars of stderr if exit_code != 0, null on success |
+| `error_message` | TEXT | Error details (first 500 chars) if exit_code != 0, null on success. For Claude SDK: exception message. For subprocess models: generic "Process exited with code N" (stderr is not captured — it streams to terminal for real-time visibility) |
 
 **Why three seemingly-overlapping columns (review_type, subcommand, protocol)?** These are orthogonal dimensions:
 - **subcommand** = the user action (`pr`, `spec`, `plan`, `impl`, `general`) — determines what query is built
@@ -50,9 +50,17 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 
 All three are needed for meaningful analytics (e.g., "how much does SPIR spec-review cost via the `spec` subcommand vs the `general` subcommand?").
 
-Create `~/.codev/` directory if it does not exist. Use `better-sqlite3` (already a project dependency) for synchronous writes.
+Create `~/.codev/` directory if it does not exist (with `0700` permissions, matching the existing `~/.codev/run/` convention). Use `better-sqlite3` (already a project dependency) for synchronous writes.
 
-**Migration**: Create the table on first access with `CREATE TABLE IF NOT EXISTS`. No migration framework needed for v1 — this is a new database.
+**Database initialization**: On first access:
+1. Create directory with `fs.mkdirSync(~/.codev, { recursive: true, mode: 0o700 })`
+2. Open database with `new Database(dbPath)`
+3. Set pragmas for concurrent access: `PRAGMA journal_mode = WAL` and `PRAGMA busy_timeout = 5000`
+4. Create table with `CREATE TABLE IF NOT EXISTS`
+
+**Concurrency**: 3-way parallel consultations mean three separate processes write to the same database simultaneously. WAL mode enables concurrent reads and serialized writes. The 5-second busy timeout ensures a process retries instead of immediately failing with `SQLITE_BUSY`. Combined with R6's error handling (warn-and-continue on failure), this makes concurrent access robust.
+
+No migration framework needed for v1 — this is a new database.
 
 ### R2: Time measurement
 
@@ -94,6 +102,7 @@ Gemini CLI supports `--output-format json` which returns structured JSON with a 
 
 ```json
 {
+  "response": "The review text appears here...",
   "stats": {
     "models": {
       "[model-name]": {
@@ -109,7 +118,11 @@ Gemini CLI supports `--output-format json` which returns structured JSON with a 
 }
 ```
 
-**Implementation**: Add `--output-format json` to the Gemini command args. Parse the JSON output to extract `stats.models.*.tokens.prompt` (input) and `stats.models.*.tokens.candidates` (output). The actual response text is in the `response` field of the JSON. Gemini CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+**Implementation**: Add `--output-format json` to the Gemini command args. Parse the JSON output to extract `stats.models.*.tokens.prompt` (input) and `stats.models.*.tokens.candidates` (output). Gemini CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+
+**Output unwrapping**: The `response` field contains the actual review text. Extract this and write it to stdout/outputPath. Do NOT write raw JSON to review files — porch expects plain-text reviews.
+
+**Streaming trade-off**: `--output-format json` buffers the entire response before returning (no streaming). This means users see no output until Gemini completes (60-120s). This is an acceptable trade-off: porch invocations (the primary use case) already capture to file, and manual invocations are less common. If the UX impact proves problematic, a future enhancement could use Gemini's `--session-summary <path>` flag (which writes stats to a separate file while streaming text to stdout), but that requires additional verification.
 
 #### Codex CLI — Exact tokens, NO cost
 
@@ -126,7 +139,23 @@ Codex CLI supports `--json` which produces a JSONL (newline-delimited JSON) stre
 }
 ```
 
+Response text appears in `message` events with `role: "assistant"`.
+
 **Implementation**: Add `--json` to the Codex command args. Parse the JSONL output to find `turn.completed` events and sum `usage.input_tokens` and `usage.output_tokens` across all turns. Codex CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+
+**Output unwrapping**: Extract assistant message text from `message` events in the JSONL stream. Write only the extracted review text to stdout/outputPath — not raw JSONL. This requires always piping stdout (not inheriting) and streaming the extracted text to the terminal in real-time as JSONL events arrive.
+
+#### Stdout handling change for subprocess models
+
+Adding JSON output modes (`--output-format json`, `--json`) changes the subprocess stdout from plain text to structured data. To preserve the existing user experience:
+
+1. **Always pipe stdout** for subprocess models (change `stdoutMode` to `'pipe'` unconditionally — currently it's `'pipe'` only when `outputPath` is set)
+2. **Buffer the raw output** for JSON/JSONL parsing after completion
+3. **Extract the review text** from the structured output (Gemini: `response` field; Codex: assistant `message` events)
+4. **Stream extracted text to terminal** in real-time where possible (Codex JSONL streams; Gemini JSON buffers entirely)
+5. **Write extracted text** (not raw JSON) to `outputPath` when specified
+
+This ensures porch review files remain plain text, users see human-readable output, and metrics capture gets structured token data.
 
 #### Error handling
 
@@ -156,6 +185,8 @@ These are optional. When omitted (manual invocations), `protocol` defaults to `m
 
 Add a new subcommand `consult stats` that queries `~/.codev/metrics.db` and displays summary statistics.
 
+**Cold start**: If `metrics.db` does not exist, print "No metrics data found. Run a consultation first." and exit 0.
+
 **Default output** (no flags):
 
 ```
@@ -164,7 +195,7 @@ Consultation Metrics (last 30 days)
 
 Total invocations: 47
 Total duration:    4.2 hours
-Total cost:        $182.50 (estimated, 31 with cost data)
+Total cost:        $182.50 (31 of 47 with cost data)
 Success rate:      93.6% (44/47)
 
 By Model:
@@ -302,6 +333,7 @@ Update these constants manually when pricing changes. A future enhancement could
 - No modification to the consultation subprocesses themselves (Gemini CLI, Codex CLI, Claude SDK internals)
 - No automatic pricing updates — Gemini/Codex pricing constants are updated manually. No official provider API exists for programmatic pricing. Third-party sources (LiteLLM JSON, PricePerToken.com) exist but are out of scope for v1. Claude cost is exact from the SDK and needs no pricing table at all.
 - No metrics export (CSV, etc.) beyond the `--json` flag
+- No data retention/pruning — SQLite handles thousands of rows trivially; revisit if metrics.db exceeds 10MB
 
 ## Acceptance Criteria
 
@@ -326,3 +358,7 @@ Update these constants manually when pricing changes. A future enhancement could
 7. **Unit test**: Filter flags (`--days`, `--model`, `--type`, `--protocol`, `--project`) correctly narrow query results.
 8. **Integration test**: Run `consult --dry-run` with `--protocol` and `--project-id` flags, verify flags are accepted without error.
 9. **Unit test**: SQLite write failure (e.g., read-only path) logs warning but does not throw.
+10. **Unit test**: Gemini JSON output unwrapping — verify `response` field is extracted as plain text, not raw JSON.
+11. **Unit test**: Codex JSONL output unwrapping — verify assistant message text is extracted from `message` events.
+12. **Unit test**: Concurrent MetricsDB writes — verify three rapid inserts from different connections succeed with WAL+busy_timeout.
+13. **Unit test**: `consult stats` with no database file prints "No metrics data found" and exits 0.
