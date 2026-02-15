@@ -270,9 +270,19 @@ server.listen(port, '127.0.0.1', async () => {
     getKnownProjectPaths,
   });
 
-  // Spec 0105 Phase 3: Initialize instance lifecycle module
-  // Must be before reconcileTerminalSessions() so instance APIs are available
-  // as soon as the server starts accepting requests.
+  // TICK-001: Reconcile terminal sessions from previous run.
+  // Must run BEFORE initInstances() so that API request handlers
+  // (getInstances → getTerminalsForProject) cannot race with reconciliation.
+  // Without this ordering, a dashboard poll arriving during reconciliation
+  // triggers on-the-fly shellper reconnection that conflicts with the
+  // reconciliation's own reconnection — the shellper's single-connection
+  // model causes the first client to be replaced, corrupting the session
+  // and deleting the architect terminal's socket file (Bugfix #274).
+  await reconcileTerminalSessions();
+
+  // Spec 0105 Phase 3: Initialize instance lifecycle module.
+  // Placed after reconciliation so getInstances() returns [] during startup
+  // (since _deps is null), preventing race conditions with reconciliation.
   initInstances({
     log,
     projectTerminals: getProjectTerminals(),
@@ -284,9 +294,6 @@ server.listen(port, '127.0.0.1', async () => {
     deleteProjectTerminalSessions,
     getTerminalsForProject,
   });
-
-  // TICK-001: Reconcile terminal sessions from previous run
-  await reconcileTerminalSessions();
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
   await initTunnel(
