@@ -24,7 +24,7 @@ export interface TowerContext {
   shellperManager: SessionManager | null;
   workspaceTerminals: Map<string, WorkspaceTerminals>;
   db: () => Database.Database;
-  broadcastNotification: (n: { type: string; title: string; body: string; project?: string }) => void;
+  broadcastNotification: (n: { type: string; title: string; body: string; workspace?: string }) => void;
   tunnelClient: TunnelClient | null;
   knownWorkspaces: Set<string>;
   server: http.Server;
