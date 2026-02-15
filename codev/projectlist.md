@@ -187,6 +187,21 @@ Projects currently in development (conceived through committed), sorted by prior
       specified_at: "2026-02-15"
     notes: "Vanilla dashboard is dead since React rewrite (0085). Caused 20min confusion when architect edited wrong file."
 
+  - id: "0112"
+    title: "Workspace Rename (project → workspace for repos)"
+    summary: "Rename all uses of 'project' meaning repository to 'workspace' across Tower, CLI, dashboard, and database"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0112-workspace-rename.md
+    dependencies: []
+    tags: [naming, refactor, tower, dashboard]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Mechanical rename. Unanimous 3-way consultation recommended 'workspace' for repos, keep 'project' for work-units. Must ship before 0110 (messaging)."
+
   - id: "0110"
     title: "Messaging Infrastructure"
     summary: "Standardized agent naming, cross-project messaging, WebSocket message bus, POST /api/send endpoint"
@@ -197,7 +212,7 @@ Projects currently in development (conceived through committed), sorted by prior
       spec: codev/specs/0110-messaging-infrastructure.md
       plan: null
       review: null
-    dependencies: ["0108"]
+    dependencies: ["0108", "0112"]
     tags: [messaging, af-send, dashboard, agents]
     timestamps:
       conceived_at: "2026-02-15"
