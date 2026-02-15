@@ -535,6 +535,7 @@ async function runConsultation(
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
+      cwd: workspaceRoot,
       env: fullEnv,
       stdio: ['ignore', stdoutMode, 'inherit'],
     });
@@ -590,10 +591,13 @@ async function runConsultation(
       const outputContent = reviewText ?? rawOutput; // Fallback to raw on parse failure
 
       // Write extracted text to stdout for Gemini (was fully buffered)
+      // For Codex: if real-time streaming worked, text was already emitted.
+      // But if extraction failed (reviewText is null), nothing was streamed — write raw fallback.
       if (model === 'gemini') {
         process.stdout.write(outputContent);
+      } else if (model === 'codex' && !reviewText) {
+        process.stdout.write(rawOutput);
       }
-      // Codex: assistant text was already streamed in real-time via data handler
 
       // Write to output file
       if (outputPath && outputContent.length > 0) {
@@ -632,6 +636,21 @@ async function runConsultation(
       if (tempFile && fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
       }
+
+      // Record metrics for spawn failures
+      if (metricsCtx) {
+        const duration = (Date.now() - startTime) / 1000;
+        recordMetrics(metricsCtx, {
+          durationSeconds: duration,
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+          costUsd: null,
+          exitCode: 1,
+          errorMessage: (error.message || String(error)).substring(0, 500),
+        });
+      }
+
       reject(error);
     });
   });
