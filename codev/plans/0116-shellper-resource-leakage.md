@@ -121,9 +121,10 @@ Note: The second catch block (lines 197-208) already kills via `process.kill(inf
 
 #### Deliverables
 - [ ] `SHELLPER_SOCKET_DIR` env var support in `tower-server.ts`
-- [ ] All E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] All E2E test files that create terminals add terminal cleanup in `afterAll`
-- [ ] Temp socket directories cleaned up in `afterAll`
+- [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
+- [ ] 3 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll`
+- [ ] 2 workspace-activating E2E files already have deactivation — verified, no changes needed
+- [ ] Temp socket directories cleaned up in `afterAll` for all 6 E2E files
 
 #### Implementation Details
 
@@ -149,14 +150,14 @@ Each inline `startTower()` needs two changes:
 
 The complete list of E2E test files with inline `startTower()` that need updating:
 
-| File | Creates terminals? | Needs terminal cleanup? |
-|------|-------------------|------------------------|
-| `tower-terminals.e2e.test.ts` (line 68) | Yes (many) | Yes |
-| `tower-api.e2e.test.ts` (line 69) | Yes (lines 378, 409, 439) | Yes |
-| `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Yes (lines 128, 172) | Yes |
-| `tower-baseline.e2e.test.ts` (line 68) | No | No (socket isolation only) |
-| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | No | No (socket isolation only) |
-| `cli-tower-mode.e2e.test.ts` (line 73) | No | No (socket isolation only) |
+| File | Terminal creation method | Cleanup approach |
+|------|------------------------|------------------|
+| `tower-terminals.e2e.test.ts` (line 68) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
+| `tower-api.e2e.test.ts` (line 69) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
+| `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
+| `tower-baseline.e2e.test.ts` (line 68) | Via workspace activation (`POST /api/workspaces/.../activate`) | Already has `deactivateWorkspace()` in `afterEach` — no changes needed |
+| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Already deactivates inline — no changes needed |
+| `cli-tower-mode.e2e.test.ts` (line 73) | None | Socket isolation only |
 
 Pattern for each file's `startTower()`:
 ```typescript
@@ -183,7 +184,7 @@ async function startTower(port: number): Promise<ChildProcess> {
 
 **3. E2E test teardown — terminal cleanup in `afterAll`**
 
-For the 3 files that create terminals, add terminal cleanup before stopping Tower:
+For the 3 files that create terminals via direct API calls, add terminal cleanup before stopping Tower:
 
 ```typescript
 afterAll(async () => {
@@ -206,7 +207,7 @@ afterAll(async () => {
 });
 ```
 
-For the 3 files that don't create terminals, just add socket dir cleanup in `afterAll`:
+For `tower-baseline` and `bugfix-202`, which already have proper workspace deactivation, only socket dir cleanup is needed in `afterAll`. For `cli-tower-mode`, which creates no terminals at all, same pattern:
 ```typescript
 afterAll(async () => {
   await stopServer(towerProcess);
@@ -242,7 +243,8 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 #### Acceptance Criteria
 - [ ] Test Tower instances use temp dirs for sockets, not `~/.codev/run/`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] `afterAll` in terminal-creating E2E tests kills terminals before stopping Tower
+- [ ] `afterAll` in API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower
+- [ ] Workspace-activating E2E tests (`tower-baseline`, `bugfix-202`) already deactivate properly — verified
 - [ ] Temp socket directories are cleaned up in `afterAll` for all E2E tests
 - [ ] Zero shellper socket files remain after test suite completes
 - [ ] Dev's running shellper sessions are never affected by test runs
@@ -265,63 +267,15 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 - Verify no orphaned processes after creation failure
 
 #### Deliverables
-- [ ] Unit test: `createSession()` failure kills child process (PID liveness verified)
+- [ ] Unit test: `createSession()` failure kills child process (mandatory PID liveness verification via `process.kill(pid, 0)` — spec requirement)
 - [ ] Unit test: periodic cleanup removes stale sockets
 - [ ] Integration test: full lifecycle creates no orphans
 
 #### Implementation Details
 
-**1. Defensive creation test with PID liveness (`session-manager.test.ts`)**
+**1. Defensive creation test with PID liveness verification (`session-manager.test.ts`)**
 
-Add test to the existing `createSession` describe block. The test must verify the child process is actually dead, not just check socket deletion:
-
-```typescript
-it('kills child process when readShellperInfo fails', async () => {
-  // Use a shellper script that hangs (never writes to stdout) to trigger
-  // the readShellperInfo timeout. We need a real process that stays alive
-  // long enough to verify it gets killed.
-  const hangScript = path.join(socketDir, 'hang.js');
-  fs.writeFileSync(hangScript, 'setTimeout(() => {}, 60000);'); // Hang for 60s
-
-  const manager = new SessionManager({
-    socketDir,
-    shellperScript: hangScript,
-    nodeExecutable: process.execPath,
-  });
-
-  let caughtError: Error | null = null;
-  try {
-    await manager.createSession({
-      sessionId: 'fail-test',
-      command: '/bin/echo',
-      args: [],
-      cwd: '/tmp',
-      env: {},
-      cols: 80,
-      rows: 24,
-    });
-  } catch (err) {
-    caughtError = err as Error;
-  }
-
-  expect(caughtError).not.toBeNull();
-
-  // Verify no orphaned socket file
-  expect(fs.existsSync(path.join(socketDir, 'shellper-fail-test.sock'))).toBe(false);
-
-  // Allow a brief delay for process cleanup
-  await new Promise(r => setTimeout(r, 200));
-
-  // Verify orphaned process was killed: try sending signal 0 to check liveness.
-  // If the process is dead, process.kill(pid, 0) throws ESRCH.
-  // Note: We can't easily get the PID from the failed createSession, but we can
-  // verify no node processes are running our hang script by checking /proc or ps.
-  // The key assertion is that child.kill('SIGKILL') was called — verified
-  // indirectly by the fact that the process doesn't survive.
-});
-```
-
-**Alternative PID capture approach**: To directly verify PID liveness as the spec requires, we can use a test-only mechanism. Create a shellper script that writes its PID to a known file before hanging:
+Add test to the existing `createSession` describe block. The spec **requires** PID liveness verification via `process.kill(pid, 0)`. Use a test shellper script that writes its PID to a known file before hanging, so we can capture the PID and verify it's dead after `createSession()` fails:
 
 ```typescript
 it('kills child process when readShellperInfo fails (PID verification)', async () => {
@@ -428,6 +382,17 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 2. Only `tower-terminals.e2e.test.ts` was explicitly targeted; other terminal-creating files missed
 3. Spec says `afterEach/afterAll` but plan only used `afterAll`
 → **Addressed**: (1) Rewrote Phase 2 to modify each file's inline `startTower()` individually. `tower-test-utils.ts` update kept as optional for future use. (2) Enumerated all 6 E2E files in a table with per-file requirements. (3) `afterAll` is appropriate: tests create terminals in `it()` blocks but SIGTERM on Tower stop kills all shellpers for that Tower instance; inter-test leaks within a suite are bounded by the suite's Tower lifetime and cleaned at `afterAll`.
+
+### Iteration 2 (3-way review)
+**Gemini** (APPROVE): Verified plan accuracy against source code. All line number references, file paths, and code patterns check out.
+
+**Codex** (REQUEST_CHANGES):
+1. Teardown semantics weaker than spec — workspace deactivation required, not just terminal DELETE
+2. `tower-baseline` and `bugfix-202` misclassified as "no terminals" — they activate workspaces which create shellper sessions
+3. PID liveness test is marked "alternative" — spec requires it as mandatory
+→ **Addressed**: (1) See rebuttal — the 3 files that create terminals via direct API use terminal DELETE (correct for their creation path); `tower-baseline` and `bugfix-202` already have proper `deactivateWorkspace()` cleanup. (2) Reclassified E2E file table to accurately reflect terminal creation method and existing cleanup for each file. (3) Made PID liveness verification the primary (mandatory) test approach, removed the non-PID indirect test.
+
+**Claude** (APPROVE): Thorough verification with HIGH confidence. All code references accurate, complete spec coverage, sound technical approach.
 
 ## Amendment History
 
