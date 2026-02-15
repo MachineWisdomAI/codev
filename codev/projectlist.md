@@ -194,17 +194,21 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0112"
     title: "Workspace Rename (project → workspace for repos)"
     summary: "Rename all uses of 'project' meaning repository to 'workspace' across Tower, CLI, dashboard, and database"
-    status: conceived
+    status: committed
     priority: high
     release: null
     files:
       spec: codev/specs/0112-workspace-rename.md
+      plan: codev/plans/0112-workspace-rename.md
+      review: codev/reviews/0112-workspace-rename.md
     dependencies: []
     tags: [naming, refactor, tower, dashboard]
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
-    notes: "Mechanical rename. Unanimous 3-way consultation recommended 'workspace' for repos, keep 'project' for work-units. Must ship before 0110 (messaging)."
+      implementing_at: "2026-02-15"
+      committed_at: "2026-02-15"
+    notes: "PR #276 merged. +2360/-1826 across 100 files. DB migration v9 renames project_path → workspace_path."
 
   - id: "0110"
     title: "Messaging Infrastructure"
@@ -250,6 +254,20 @@ Projects currently in development (conceived through committed), sorted by prior
     timestamps:
       conceived_at: "2026-02-15"
     notes: "Investigate whether Minimax can replace Claude in the 3-way consultation pipeline for code reviews."
+
+  - id: "0115"
+    title: "Consultation Metrics & Cost Tracking"
+    summary: "Add time/cost measurement to every consult invocation, store in SQLite for statistical analysis"
+    status: conceived
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0115-consultation-metrics.md
+    dependencies: []
+    tags: [consult, metrics, cost, sqlite]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Track duration, cost, protocol context, review type for every consult call. SQLite storage for analytics queries."
 
 # Low Priority
 
