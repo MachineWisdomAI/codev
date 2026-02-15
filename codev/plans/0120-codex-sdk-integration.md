@@ -16,12 +16,15 @@ Replace the Codex CLI subprocess in `consult/index.ts` with `@openai/codex-sdk`,
 - [ ] Review text captured directly from SDK events — no JSONL file extraction
 - [ ] Usage data (tokens, cost) extracted from SDK structured events
 - [ ] Metrics recording works correctly (duration, tokens, cost, exit code)
-- [ ] System prompt / role passed via SDK config (not temp file)
-- [ ] Read-only sandbox mode preserved via `sandboxMode` thread option
+- [ ] System prompt / role passed via SDK config option (`experimental_instructions_file`)
+- [ ] Read-only sandbox mode preserved via SDK config (`sandbox: 'read-only'`)
 - [ ] Existing `consult -m codex` CLI interface unchanged
 - [ ] `extractReviewText()` codex branch removed (no longer needed)
 - [ ] `extractCodexUsage()` simplified or removed
 - [ ] All existing tests updated, new SDK integration tests added
+
+### Note on system prompt delivery
+The spec says "System prompt / role passed via SDK options (not temp file)." The Codex SDK does not support inline system prompts — it only accepts instructions via `experimental_instructions_file` config, which requires a file path. This is an SDK limitation, not a design choice. The temp file is written, passed as a config key to the SDK constructor, and cleaned up in the `finally` block. This is equivalent to how the Claude SDK receives its `systemPrompt` option — the Codex SDK just requires a file path instead of a string.
 
 ## Phases (Machine Readable)
 
@@ -49,11 +52,13 @@ Replace the Codex CLI subprocess in `consult/index.ts` with `@openai/codex-sdk`,
 - [ ] `@openai/codex-sdk` added to `packages/codev/package.json`
 - [ ] `runCodexConsultation()` function in `consult/index.ts`
 - [ ] Codex routing updated in `runConsultation()` to use SDK path
-- [ ] Real-time streaming via `thread.runStreamed()` events
+- [ ] Real-time streaming via `thread.runStreamed()` events (destructured `{ events }`)
 - [ ] Usage extraction from `turn.completed` event's structured usage data
-- [ ] System prompt passed via SDK config (`experimental_instructions_file` or inline)
-- [ ] Sandbox mode set via `sandboxMode: 'read-only'` thread option
+- [ ] System prompt passed via SDK config (`experimental_instructions_file` config key)
+- [ ] Sandbox mode set via `config: { sandbox: 'read-only' }` on Codex constructor
+- [ ] Model set via `config: { model: 'gpt-5.2-codex' }` on Codex constructor
 - [ ] Dry-run mode updated for Codex SDK path
+- [ ] Unit tests for `runCodexConsultation()` event handling and error paths
 
 #### Implementation Details
 
@@ -61,7 +66,9 @@ Replace the Codex CLI subprocess in `consult/index.ts` with `@openai/codex-sdk`,
 
 ```typescript
 import { Codex } from '@openai/codex-sdk';
-// Uses typed events: ItemCompletedEvent, TurnCompletedEvent
+
+// Codex pricing for cost computation (same values as current SUBPROCESS_MODEL_PRICING)
+const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
 
 async function runCodexConsultation(
   queryText: string,
@@ -76,27 +83,30 @@ async function runCodexConsultation(
   let errorMessage: string | null = null;
   let exitCode = 0;
 
-  // Write role to temp file for experimental_instructions_file config
+  // Write role to temp file — SDK requires file path for instructions
   const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
   fs.writeFileSync(tempFile, role);
 
   try {
+    // Config keys match Codex CLI -c flags (TOML-style)
+    // model, sandbox, and instructions all go in config
     const codex = new Codex({
       config: {
+        model: 'gpt-5.2-codex',
+        sandbox: 'read-only',
         experimental_instructions_file: tempFile,
         model_reasoning_effort: 'medium',
       },
     });
 
     const thread = codex.startThread({
-      model: 'gpt-5.2-codex',
-      sandboxMode: 'read-only',
       workingDirectory: workspaceRoot,
     });
 
-    const streamedTurn = await thread.runStreamed(queryText);
+    // runStreamed() returns { events } — destructure to get the async iterable
+    const { events } = await thread.runStreamed(queryText);
 
-    for await (const event of streamedTurn) {
+    for await (const event of events) {
       if (event.type === 'item.completed') {
         const item = event.item;
         if (item.type === 'agent_message') {
@@ -105,17 +115,19 @@ async function runCodexConsultation(
         }
       }
       if (event.type === 'turn.completed') {
-        // Structured usage data directly from event
-        usageData = {
-          inputTokens: event.usage?.input_tokens ?? null,
-          cachedInputTokens: event.usage?.cached_input_tokens ?? null,
-          outputTokens: event.usage?.output_tokens ?? null,
-          costUsd: null, // Compute from tokens + pricing table
-        };
-        // Compute cost if all token data present
-        if (usageData.inputTokens !== null && usageData.cachedInputTokens !== null && usageData.outputTokens !== null) {
-          usageData.costUsd = computeCostFromTokens('codex', usageData);
+        // Structured usage data directly from SDK event
+        const input = event.usage?.input_tokens ?? null;
+        const cached = event.usage?.cached_input_tokens ?? null;
+        const output = event.usage?.output_tokens ?? null;
+        // Compute cost inline using pricing constants
+        let cost: number | null = null;
+        if (input !== null && cached !== null && output !== null) {
+          const uncached = input - cached;
+          cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
+               + (cached / 1_000_000) * CODEX_PRICING.cachedInputPer1M
+               + (output / 1_000_000) * CODEX_PRICING.outputPer1M;
         }
+        usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
       }
       if (event.type === 'turn.failed') {
         errorMessage = event.error?.message ?? 'Codex turn failed';
@@ -141,7 +153,7 @@ async function runCodexConsultation(
     // Clean up temp file
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
 
-    // Record metrics
+    // Record metrics (always, even on error)
     if (metricsCtx) {
       const duration = (Date.now() - startTime) / 1000;
       recordMetrics(metricsCtx, {
@@ -157,6 +169,11 @@ async function runCodexConsultation(
   }
 }
 ```
+
+**IMPORTANT: Verify SDK types before coding.** After `npm install @openai/codex-sdk`, inspect the actual TypeScript definitions for `Codex`, `Thread`, `ThreadOptions`, `CodexOptions`, and event types. The code sample above is based on SDK documentation and may need adjustments. Key things to verify:
+1. Does `runStreamed()` return `{ events }` or a direct async iterable?
+2. Does `startThread()` accept `model`/`sandboxMode`, or do these go in `config`?
+3. Does the SDK handle `OPENAI_API_KEY` from `process.env` automatically?
 
 **Changes to `runConsultation()` dispatcher:**
 - Add `codex` to `SDK_MODELS` array: `const SDK_MODELS = ['claude', 'codex'];`
@@ -185,14 +202,22 @@ if (model === 'codex') {
 - [ ] All builds pass (`npm run build`)
 
 #### Test Plan
+- **Unit Tests** (in `metrics.test.ts` or a new `codex-sdk.test.ts`):
+  - Codex SDK cost computation: given token counts, verify `CODEX_PRICING` produces correct USD
+  - Codex SDK cost computation with null tokens: verify cost is null
+  - Codex SDK cost with cached tokens: verify uncached input computed correctly
 - **Manual Testing**: Run `consult -m codex --dry-run general "hello"` to verify SDK path
-- **Build**: Verify TypeScript compilation succeeds
+- **Build**: Verify TypeScript compilation succeeds (`npm run build`)
+- **Regression**: Verify `consult -m gemini --dry-run general "hello"` still works via subprocess
+- **Regression**: Verify `consult -m claude --dry-run general "hello"` still works via SDK
 
 #### Risks
 - **Risk**: `@openai/codex-sdk` API may differ from documentation
-  - **Mitigation**: Install SDK first, inspect types before writing implementation
+  - **Mitigation**: Install SDK first, inspect actual TypeScript types before writing implementation. The plan includes explicit verification checklist.
 - **Risk**: `experimental_instructions_file` config key may not work via SDK config
-  - **Mitigation**: Fall back to writing temp file and passing path, same as current approach
+  - **Mitigation**: The SDK `config` option passes through as `-c key=value` to the Codex CLI. This is the same mechanism the current subprocess uses. Verify during implementation.
+- **Risk**: API key not automatically picked up from `process.env`
+  - **Mitigation**: SDK docs say it handles `OPENAI_API_KEY` / `CODEX_API_KEY` automatically. Verify during implementation; if needed, pass explicitly via `env` option.
 
 ---
 
@@ -218,9 +243,9 @@ if (model === 'codex') {
 **Changes to `usage-extractor.ts`:**
 1. Remove `extractCodexUsage()` function (lines 94-153)
 2. Remove codex branch in `extractReviewText()` (lines 191-213)
-3. Remove codex from `SUBPROCESS_MODEL_PRICING` (pricing now computed inline in `runCodexConsultation`)
+3. Remove codex from `SUBPROCESS_MODEL_PRICING` — pricing is now owned by `CODEX_PRICING` constant in `index.ts` next to `runCodexConsultation()`. This follows the same pattern where Claude pricing comes from the SDK result directly. Each SDK-based model owns its own cost computation.
 4. Update `extractUsage()` to remove codex branch — codex usage is now captured directly from SDK events (same as Claude)
-5. Export `computeCost()` (currently private) so `runCodexConsultation()` can use it, or move pricing computation into the new function
+5. `computeCost()` remains private in `usage-extractor.ts` (used only by Gemini now). No need to export it.
 
 **Changes to subprocess handler in `index.ts`:**
 1. Remove the `if (model === 'codex')` block inside `proc.stdout.on('data')` (lines 550-574) — this was the real-time JSONL streaming for codex
@@ -274,9 +299,11 @@ Phase 1 (SDK + runCodexConsultation) ──→ Phase 2 (Cleanup + tests)
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| SDK API differs from docs | M | M | Install first, inspect TypeScript types |
-| Config key doesn't pass instructions | L | M | Use temp file approach (same as current) |
+| SDK API differs from docs | M | M | Install first, inspect TypeScript types before coding |
+| Config key doesn't pass instructions | L | M | Config passes as `-c` flags to CLI; same mechanism as current subprocess |
 | Streaming events have different shapes | L | H | Use SDK's exported types for type safety |
+| API key not auto-detected | L | L | SDK docs say it handles `OPENAI_API_KEY`; verify, pass via `env` if needed |
+| `turn.failed` event doesn't exist | L | M | Handle errors via try/catch on async generator as fallback |
 
 ## Validation Checkpoints
 1. **After Phase 1**: `consult -m codex --dry-run general "test"` shows SDK info, build passes
