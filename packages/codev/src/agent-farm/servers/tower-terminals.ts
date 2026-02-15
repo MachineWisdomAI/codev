@@ -198,6 +198,34 @@ export function deleteTerminalSession(terminalId: string): void {
 }
 
 /**
+ * Remove a terminal from the in-memory workspace registry.
+ * Scans all workspaces to find and remove the terminal by its ID.
+ * This is needed when a single terminal is killed (e.g. af cleanup)
+ * to keep the in-memory state consistent with SQLite.
+ * Bugfix #290: af cleanup didn't remove terminals from in-memory registry.
+ */
+export function removeTerminalFromRegistry(terminalId: string): void {
+  for (const [, entry] of workspaceTerminals) {
+    if (entry.architect === terminalId) {
+      entry.architect = undefined;
+      return;
+    }
+    for (const [builderId, tid] of entry.builders) {
+      if (tid === terminalId) {
+        entry.builders.delete(builderId);
+        return;
+      }
+    }
+    for (const [shellId, tid] of entry.shells) {
+      if (tid === terminalId) {
+        entry.shells.delete(shellId);
+        return;
+      }
+    }
+  }
+}
+
+/**
  * Delete all terminal sessions for a workspace from SQLite.
  * Normalizes path to ensure consistent cleanup regardless of how path was provided.
  */

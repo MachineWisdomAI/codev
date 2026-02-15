@@ -46,6 +46,7 @@ vi.mock('../servers/tower-terminals.js', () => ({
   saveTerminalSession: vi.fn(),
   isSessionPersistent: mockIsSessionPersistent,
   deleteTerminalSession: vi.fn(),
+  removeTerminalFromRegistry: vi.fn(),
   deleteWorkspaceTerminalSessions: vi.fn(),
   saveFileTab: vi.fn(),
   deleteFileTab: vi.fn(),
@@ -509,6 +510,42 @@ describe('tower-routes', () => {
       await handleRequest(req, res, makeCtx());
 
       expect(statusCode()).toBe(400);
+    });
+  });
+
+  // =========================================================================
+  // DELETE /api/terminals/:id (Bugfix #290)
+  // =========================================================================
+
+  describe('DELETE /api/terminals/:id', () => {
+    const terminalId = 'term-123';
+
+    it('removes terminal from both SQLite and in-memory registry on success', async () => {
+      const { killTerminalWithShellper } = await import('../servers/tower-instances.js');
+      (killTerminalWithShellper as any).mockResolvedValueOnce(true);
+
+      const req = makeReq('DELETE', `/api/terminals/${terminalId}`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(204);
+      const { deleteTerminalSession, removeTerminalFromRegistry } = await import('../servers/tower-terminals.js');
+      expect(deleteTerminalSession).toHaveBeenCalledWith(terminalId);
+      expect(removeTerminalFromRegistry).toHaveBeenCalledWith(terminalId);
+    });
+
+    it('does not call cleanup functions when terminal not found', async () => {
+      const { killTerminalWithShellper } = await import('../servers/tower-instances.js');
+      (killTerminalWithShellper as any).mockResolvedValueOnce(false);
+
+      const req = makeReq('DELETE', `/api/terminals/${terminalId}`);
+      const { res, statusCode } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(404);
+      const { deleteTerminalSession, removeTerminalFromRegistry } = await import('../servers/tower-terminals.js');
+      expect(deleteTerminalSession).not.toHaveBeenCalled();
+      expect(removeTerminalFromRegistry).not.toHaveBeenCalled();
     });
   });
 
