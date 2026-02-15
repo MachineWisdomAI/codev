@@ -1,18 +1,80 @@
 id: '0115'
 title: consultation-metrics
 protocol: spir
-phase: specify
+phase: plan
 plan_phases: []
 current_plan_phase: null
 gates:
   spec-approval:
-    status: pending
+    status: approved
+    requested_at: '2026-02-15T13:41:20.793Z'
+    approved_at: '2026-02-15T14:55:57.610Z'
   plan-approval:
     status: pending
   pr-ready:
     status: pending
 iteration: 1
 build_complete: false
-history: []
+history:
+  - iteration: 1
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter1-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter1-codex.txt
+      - model: claude
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter1-claude.txt
+  - iteration: 2
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter2-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter2-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter2-claude.txt
+  - iteration: 3
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter3-gemini.txt
+      - model: codex
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter3-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter3-claude.txt
+  - iteration: 4
+    build_output: ''
+    reviews:
+      - model: gemini
+        verdict: REQUEST_CHANGES
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter4-gemini.txt
+      - model: codex
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter4-codex.txt
+      - model: claude
+        verdict: APPROVE
+        file: >-
+          /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-specify-iter4-claude.txt
 started_at: '2026-02-15T13:11:11.234Z'
-updated_at: '2026-02-15T13:11:11.236Z'
+updated_at: '2026-02-15T14:56:00.478Z'
