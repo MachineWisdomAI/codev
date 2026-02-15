@@ -416,7 +416,8 @@ async function runConsultation(
       config.cli,
       'exec',
       '-c', `experimental_instructions_file=${tempFile}`,
-      '-c', 'model_reasoning_effort=low', // Faster responses (10-20% improvement)
+      '-c', 'model_reasoning_effort=medium', // Balance speed vs review quality
+      '-c', 'sandbox=read-only', // Consult is read-only — no test execution
       '--full-auto',
       query,
     ];

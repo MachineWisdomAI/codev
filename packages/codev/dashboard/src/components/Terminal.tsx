@@ -276,12 +276,27 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       flushTimer = null;
       if (initialBuffer) {
         const filtered = filterDA(initialBuffer);
-        if (filtered) term.write(filtered);
+        if (filtered) {
+          term.write(filtered, () => {
+            // Scroll to bottom after replay buffer is rendered
+            term.scrollToBottom();
+          });
+        }
         initialBuffer = '';
       }
       // Re-fit after buffer flush — CSS layout may have settled since
       // the initial fit(). Uses debounced fit to avoid resize storms.
       debouncedFit();
+      // After fit settles, force-send a resize to the PTY even if dimensions
+      // haven't changed. The replay buffer was generated at shepherd's hardcoded
+      // 200x50 but the browser terminal is smaller — the shell needs a SIGWINCH
+      // to redraw at the correct size. Then scroll to the bottom.
+      setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+        }
+        term.scrollToBottom();
+      }, 350);
     };
 
     ws.onopen = () => {
