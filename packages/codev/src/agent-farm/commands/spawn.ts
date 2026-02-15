@@ -20,6 +20,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { run } from '../utils/shell.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
+import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -144,10 +145,14 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   }
 
   const specName = basename(specFile, '.md');
-  const builderId = projectId;
-  const safeName = specName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-');
-  const branchName = `builder/${safeName}`;
-  const worktreePath = resolve(config.buildersDir, builderId);
+  const protocol = await resolveProtocol(options, config);
+  const strippedId = stripLeadingZeros(projectId);
+  const builderId = buildAgentName('spec', projectId, protocol);
+  // Slug from spec name: e.g., '0109-messaging-infrastructure' → 'messaging-infrastructure'
+  const specSlug = specName.replace(/^[0-9]+-/, '');
+  const worktreeName = `${protocol}-${strippedId}-${specSlug}`;
+  const branchName = `builder/${worktreeName}`;
+  const worktreePath = resolve(config.buildersDir, worktreeName);
 
   // Check for corresponding plan file
   const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
@@ -167,7 +172,6 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await createWorktree(config, branchName, worktreePath);
   }
 
-  const protocol = await resolveProtocol(options, config);
   const protocolDef = loadProtocol(config, protocol);
   const mode = resolveMode(options, protocolDef);
 
@@ -219,9 +223,10 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
   const taskText = options.task!;
   const shortId = generateShortId();
-  const builderId = `task-${shortId}`;
-  const branchName = `builder/task-${shortId}`;
-  const worktreePath = resolve(config.buildersDir, builderId);
+  const builderId = buildAgentName('task', shortId);
+  const worktreeName = `task-${shortId}`;
+  const branchName = `builder/${worktreeName}`;
+  const worktreePath = resolve(config.buildersDir, worktreeName);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (task)`);
   logger.kv('Task', taskText.substring(0, 60) + (taskText.length > 60 ? '...' : ''));
@@ -292,9 +297,10 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
   validateProtocol(config, protocolName);
 
   const shortId = generateShortId();
-  const builderId = `${protocolName}-${shortId}`;
-  const branchName = `builder/${protocolName}-${shortId}`;
-  const worktreePath = resolve(config.buildersDir, builderId);
+  const builderId = buildAgentName('protocol', shortId, protocolName);
+  const worktreeName = `${protocolName}-${shortId}`;
+  const branchName = `builder/${worktreeName}`;
+  const worktreePath = resolve(config.buildersDir, worktreeName);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (protocol)`);
   logger.kv('Protocol', protocolName);
@@ -434,9 +440,10 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   const issue = await fetchGitHubIssue(issueNumber);
 
   const slug = slugify(issue.title);
-  const builderId = `bugfix-${issueNumber}`;
-  const branchName = `builder/bugfix-${issueNumber}-${slug}`;
-  const worktreePath = resolve(config.buildersDir, builderId);
+  const builderId = buildAgentName('bugfix', String(issueNumber));
+  const worktreeName = `bugfix-${issueNumber}-${slug}`;
+  const branchName = `builder/${worktreeName}`;
+  const worktreePath = resolve(config.buildersDir, worktreeName);
 
   const protocol = await resolveProtocol(options, config);
   const protocolDef = loadProtocol(config, protocol);
