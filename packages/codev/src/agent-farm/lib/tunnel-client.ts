@@ -53,6 +53,12 @@ const HOP_BY_HOP_HEADERS = new Set([
 /** Paths that are local-only management endpoints — block from tunnel */
 const BLOCKED_PATH_PREFIX = '/api/tunnel/';
 
+/** Heartbeat ping interval — send a WebSocket ping every 30 seconds */
+export const PING_INTERVAL_MS = 30_000;
+
+/** Pong timeout — if no pong received within 10 seconds, declare connection dead */
+export const PONG_TIMEOUT_MS = 10_000;
+
 /**
  * Calculate reconnection backoff with exponential increase and jitter.
  * Exported for unit testing.
@@ -126,6 +132,10 @@ export class TunnelClient {
   private consecutiveFailures = 0;
   private rateLimitCount = 0;
   private destroyed = false;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null;
+  private pongReceived = false;
+  private heartbeatWs: WebSocket | null = null;
 
   constructor(options: TunnelClientOptions) {
     this.options = options;
@@ -184,6 +194,7 @@ export class TunnelClient {
   disconnect(): void {
     this.destroyed = true;
     this.clearReconnectTimer();
+    this.stopHeartbeat();
     this.cleanup();
     this.setState('disconnected');
   }
@@ -273,6 +284,8 @@ export class TunnelClient {
   }
 
   private cleanup(): void {
+    this.stopHeartbeat();
+
     if (this.h2Session && !this.h2Session.destroyed) {
       this.h2Session.destroy();
     }
@@ -292,6 +305,57 @@ export class TunnelClient {
       this.ws.close();
     }
     this.ws = null;
+  }
+
+  private startHeartbeat(ws: WebSocket): void {
+    this.stopHeartbeat();
+    this.heartbeatWs = ws;
+
+    this.pingInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+
+      this.pongReceived = false;
+      try {
+        ws.ping();
+      } catch {
+        // ws.ping() can throw if the socket is in a transitional state.
+        // Treat as dead connection — the pong timeout will handle reconnect.
+        return;
+      }
+
+      this.pongTimeout = setTimeout(() => {
+        if (!this.pongReceived && ws === this.ws) {
+          console.warn('Tunnel heartbeat: pong timeout, reconnecting');
+          this.cleanup();
+          this.setState('disconnected');
+          this.consecutiveFailures++;
+          this.scheduleReconnect();
+        }
+      }, PONG_TIMEOUT_MS);
+    }, PING_INTERVAL_MS);
+
+    ws.on('pong', () => {
+      this.pongReceived = true;
+      if (this.pongTimeout) {
+        clearTimeout(this.pongTimeout);
+        this.pongTimeout = null;
+      }
+    });
+  }
+
+  private stopHeartbeat(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+    if (this.heartbeatWs) {
+      this.heartbeatWs.removeAllListeners('pong');
+      this.heartbeatWs = null;
+    }
   }
 
   private doConnect(): void {
@@ -403,6 +467,7 @@ export class TunnelClient {
     h2Server.on('session', (session: http2.ServerHttp2Session) => {
       this.h2Session = session;
       this.setState('connected');
+      this.startHeartbeat(ws);
     });
 
     h2Server.on('stream', (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
