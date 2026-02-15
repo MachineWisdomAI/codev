@@ -451,6 +451,7 @@ async function runConsultation(
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
+      cwd: workspaceRoot,
       env: fullEnv,
       stdio: ['ignore', stdoutMode, 'inherit'],
     });
@@ -557,7 +558,7 @@ ${fileList}
 ## How to Review
 **Read the changed files from disk** to review their current content. You have full filesystem access.
 For each changed file listed above, read it and evaluate the code quality, correctness, and test coverage.
-Use \`git diff HEAD~1 -- <file>\` or \`git log -p -- <file>\` if you need to see what specifically changed.
+Do NOT rely on git diffs to determine the current state of code — diffs miss uncommitted changes in worktrees.
 
 ## Comments
 ${prData.comments}
@@ -598,6 +599,11 @@ Please read and review this specification:
   }
 
   query += `
+## How to Review
+**Read the files listed above directly from disk.** You have full filesystem access.
+Do NOT rely on \`git diff\` or \`git log\` to review content — diffs may be truncated or miss uncommitted work.
+Open the spec file, read it in full, and evaluate it directly.
+
 Please review:
 1. Clarity and completeness of requirements
 2. Technical feasibility
@@ -632,7 +638,9 @@ function buildImplQuery(projectNumber: number, workspaceRoot: string, planPhase?
   let changedFiles: string[] = [];
   try {
     const mergeBase = execSync('git merge-base HEAD main', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-    const result = getDiffStat(workspaceRoot, `${mergeBase}..HEAD`);
+    // Use mergeBase (not mergeBase..HEAD) to include uncommitted working tree changes.
+    // The ..HEAD syntax is commit-to-commit and misses uncommitted work in builder worktrees.
+    const result = getDiffStat(workspaceRoot, mergeBase);
     diffStat = result.stat;
     changedFiles = result.files;
   } catch {
@@ -670,7 +678,7 @@ function buildImplQuery(projectNumber: number, workspaceRoot: string, planPhase?
     query += `\n\n## How to Review\n`;
     query += `**Read the changed files from disk** to review their actual content. You have full filesystem access.\n`;
     query += `For each file listed above, read it and evaluate the implementation against the spec/plan.\n`;
-    query += `Use \`git diff main -- <file>\` if you need to see what specifically changed in a file.\n`;
+    query += `Do NOT rely on git diffs to determine the current state of code — diffs miss uncommitted changes in worktrees.\n`;
   } else {
     query += `\n## Instructions\n\nRead the spec and plan files above, then explore the filesystem to find and review the implementation changes.\n`;
   }
@@ -711,6 +719,11 @@ Please read and review this implementation plan:
   }
 
   query += `
+## How to Review
+**Read the files listed above directly from disk.** You have full filesystem access.
+Do NOT rely on \`git diff\` or \`git log\` to review content — diffs may be truncated or miss uncommitted work.
+Open the plan file (and spec if provided), read them in full, and evaluate the plan directly.
+
 Please review:
 1. Alignment with specification requirements
 2. Implementation approach and architecture
@@ -873,4 +886,4 @@ export async function consult(options: ConsultOptions): Promise<void> {
 }
 
 // Exported for testing
-export { getDiffStat as _getDiffStat };
+export { getDiffStat as _getDiffStat, buildSpecQuery as _buildSpecQuery, buildPlanQuery as _buildPlanQuery };
