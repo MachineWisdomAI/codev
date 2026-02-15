@@ -259,6 +259,36 @@ Projects currently in development (conceived through committed), sorted by prior
       integrated_at: "2026-02-15"
     notes: "Track duration, cost, protocol context, review type for every consult call. SQLite storage for analytics queries."
 
+  - id: "0116"
+    title: "Shellper Resource Leakage Prevention"
+    summary: "Periodic runtime cleanup, E2E test hygiene, defensive session creation to prevent posix_spawnp crashes"
+    status: committed
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0116-shellper-resource-leakage.md
+    dependencies: []
+    tags: [shellper, reliability, testing, stability]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Addresses posix_spawnp crashes from accumulated orphaned shellper sockets. Builder spawned."
+
+  - id: "0117"
+    title: "Consolidate Shellper Session Creation"
+    summary: "Extract duplicated shellper session creation code (6 call sites) into a single factory function"
+    status: committed
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0117-consolidate-session-creation.md
+    dependencies: []
+    tags: [shellper, refactor, code-hygiene]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Six files assemble the same cols/rows/cwd/env options bag for createSession(). Should be one function."
+
 # Low Priority
 
   - id: "0023"
@@ -1117,7 +1147,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0116** - Reserve this number for your next project
+**0118** - Reserve this number for your next project
 
 ---
 

@@ -43,14 +43,18 @@ cd packages/codev
 npm run build
 npm pack
 
-# 2. Stop Tower, install, clean up, restart (minimize downtime)
-af tower stop
+# 2. Install (Tower stays up — running process already loaded old code)
 npm install -g ./cluesmith-codev-*.tgz
-rm ./cluesmith-codev-*.tgz
-af tower start
+
+# 3. Restart (only this step needs downtime)
+af tower stop && af tower start
 ```
 
-Build and pack **before** stopping Tower so it's down for the minimum time. Do NOT use `npm link` — it breaks global installs.
+- Install while Tower is running — it doesn't affect the running process
+- Do NOT stop Tower before installing — unnecessary downtime
+- Do NOT delete the tarball — keep it for debugging if restart fails
+- Do NOT build between stop and start
+- Do NOT use `npm link` — it breaks global installs
 
 ### Testing
 
@@ -266,6 +270,20 @@ For detailed commands, configuration, and architecture, see:
 - `codev/resources/commands/agent-farm.md` - Full CLI reference
 - `codev/resources/arch.md` - Terminal architecture, state management
 - `codev/resources/workflow-reference.md` - Stage-by-stage workflow
+
+### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
+
+**When a worktree already exists for a project:**
+1. Use `af spawn -p XXXX --resume`
+2. If `--resume` fails → **ASK THE USER**
+3. Only destroy if the user explicitly says to
+
+**NEVER run without EXPLICIT user request:**
+- `git worktree remove` (with or without --force)
+- `git branch -D` on builder branches
+- `af cleanup` followed by fresh spawn
+
+**You are NOT qualified to judge what's expendable.** It is NEVER your call to delete a worktree.
 
 ### Pre-Spawn Rule
 
