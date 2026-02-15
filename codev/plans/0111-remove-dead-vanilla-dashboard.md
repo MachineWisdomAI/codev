@@ -66,16 +66,20 @@ Files **not** modified:
 - [ ] Package contents verified
 
 #### Implementation Details
+All npm commands run from `packages/codev/`:
+
 1. `npm run build` — verify clean build
 2. `npm test` — verify all tests pass
 3. `npm pack --dry-run` — verify no `templates/dashboard/` files in package output
-4. `grep -r "templates/dashboard" packages/codev/src/` — verify no stale source references
+4. `grep -r "templates/dashboard" packages/codev/` — verify no stale references (searches all of `packages/codev/`, not just `src/`)
+5. Verify `packages/codev/dashboard/dist/` exists and is intact (React dashboard unaffected)
 
 #### Acceptance Criteria
 - [ ] Build succeeds with zero errors
 - [ ] All tests pass
 - [ ] No `templates/dashboard/` entries in `npm pack --dry-run` output
-- [ ] No stale references in source code
+- [ ] No stale references in `packages/codev/`
+- [ ] React dashboard dist directory intact
 
 #### Rollback Strategy
 If verification fails, revert Phase 1 commit and investigate.
