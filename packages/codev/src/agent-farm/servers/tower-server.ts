@@ -40,7 +40,6 @@ import {
   deleteProjectTerminalSessions,
   getTerminalsForProject,
   reconcileTerminalSessions,
-  startGateWatcher,
 } from './tower-terminals.js';
 import {
   setupUpgradeHandler,
@@ -143,7 +142,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   // 6. Tear down instance module (Spec 0105 Phase 3)
   shutdownInstances();
 
-  // 7. Tear down terminal module (Spec 0105 Phase 4) — stops gate watcher, shuts down terminal manager
+  // 7. Tear down terminal module (Spec 0105 Phase 4) — shuts down terminal manager
   shutdownTerminals();
 
   log('INFO', 'Graceful shutdown complete');
@@ -288,10 +287,6 @@ server.listen(port, '127.0.0.1', async () => {
 
   // TICK-001: Reconcile terminal sessions from previous run
   await reconcileTerminalSessions();
-
-  // Spec 0100: Start background gate watcher for af send notifications
-  startGateWatcher();
-  log('INFO', 'Gate watcher started (10s poll interval)');
 
   // Spec 0097 Phase 4 / Spec 0105 Phase 2: Initialize cloud tunnel
   await initTunnel(
