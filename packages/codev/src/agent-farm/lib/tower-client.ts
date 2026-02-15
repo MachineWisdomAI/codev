@@ -19,9 +19,9 @@ const LOCAL_KEY_PATH = resolve(AGENT_FARM_DIR, 'local-key');
 const REQUEST_TIMEOUT_MS = 10000;
 
 /**
- * Project info returned by tower API
+ * Workspace info returned by tower API
  */
-export interface TowerProject {
+export interface TowerWorkspace {
   path: string;
   name: string;
   active: boolean;
@@ -30,9 +30,9 @@ export interface TowerProject {
 }
 
 /**
- * Project status with detailed info
+ * Workspace status with detailed info
  */
-export interface TowerProjectStatus {
+export interface TowerWorkspaceStatus {
   path: string;
   name: string;
   active: boolean;
@@ -57,8 +57,8 @@ export interface TowerProjectStatus {
 export interface TowerHealth {
   status: 'healthy' | 'degraded';
   uptime: number;
-  activeProjects: number;
-  totalProjects: number;
+  activeWorkspaces: number;
+  totalWorkspaces: number;
   memoryUsage: number;
   timestamp: string;
 }

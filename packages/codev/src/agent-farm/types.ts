@@ -48,7 +48,7 @@ export interface DashboardState {
 }
 
 export interface Config {
-  projectRoot: string;
+  workspaceRoot: string;
   codevDir: string;
   buildersDir: string;
   stateDir: string;

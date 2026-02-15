@@ -82,7 +82,7 @@ CREATE TRIGGER IF NOT EXISTS builders_updated_at
 
 /**
  * Global registry schema (global.db)
- * Stores terminal sessions and migrations across all projects
+ * Stores terminal sessions and migrations across all workspaces
  */
 export const GLOBAL_SCHEMA = `
 -- Schema versioning
@@ -92,10 +92,10 @@ CREATE TABLE IF NOT EXISTS _migrations (
 );
 
 -- Terminal sessions (Spec 0090 TICK-001)
--- Tracks all terminal sessions across all projects for persistence and reconciliation
+-- Tracks all terminal sessions across all workspaces for persistence and reconciliation
 CREATE TABLE IF NOT EXISTS terminal_sessions (
   id TEXT PRIMARY KEY,                    -- terminal UUID from PtyManager
-  project_path TEXT NOT NULL,             -- project this terminal belongs to
+  project_path TEXT NOT NULL,             -- workspace this terminal belongs to
   type TEXT NOT NULL                      -- 'architect', 'builder', 'shell'
     CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,                           -- builder ID or shell ID (null for architect)
