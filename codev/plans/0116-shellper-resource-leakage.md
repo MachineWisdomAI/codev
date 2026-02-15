@@ -155,7 +155,7 @@ The complete list of E2E test files with inline `startTower()` that need updatin
 |------|------------------------|------------------|
 | `tower-terminals.e2e.test.ts` (line 68) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
 | `tower-api.e2e.test.ts` (line 69) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
-| `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
+| `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Workspace activation (line 121) + Direct API terminals | Workspace deactivation + Terminal DELETE in `afterAll` |
 | `tower-baseline.e2e.test.ts` (line 68) | Via workspace activation (`POST /api/workspaces/.../activate`) | Already has `deactivateWorkspace()` in `afterEach` — no changes needed |
 | `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Defensive terminal DELETE in `afterAll` (inline deactivation not failure-safe) |
 | `cli-tower-mode.e2e.test.ts` (line 73) | Direct API via `TowerClient.createTerminal()` (lines 235, 250, 260, 272) | Terminal DELETE in `afterAll` |
@@ -185,11 +185,17 @@ async function startTower(port: number): Promise<ChildProcess> {
 
 **3. E2E test teardown — terminal cleanup in `afterAll`**
 
-For the 4 files that create terminals via direct API calls, add terminal cleanup before stopping Tower:
+For files that create terminals via direct API calls, add terminal cleanup before stopping Tower. For `bugfix-199`, which also activates a workspace, add workspace deactivation before terminal DELETE:
 
 ```typescript
 afterAll(async () => {
-  // Kill all terminals via Tower API before stopping
+  // Deactivate workspace if activated (bugfix-199 pattern — cleans up workspace-spawned terminals)
+  // For files that only use direct API terminals, skip this step.
+  try {
+    const encodedPath = toBase64URL(testProjectDir);
+    await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encodedPath}/deactivate`, { method: 'POST' });
+  } catch { /* may not have activated, or Tower may be down */ }
+  // Kill all remaining terminals via Tower API before stopping
   try {
     const listRes = await fetch(`http://localhost:${TEST_TOWER_PORT}/api/terminals`);
     if (listRes.ok) {
@@ -207,6 +213,11 @@ afterAll(async () => {
   // ... existing DB cleanup
 });
 ```
+
+**Per-file teardown strategy:**
+- **`bugfix-199`**: Workspace deactivation + terminal DELETE (activates workspace AND creates API terminals)
+- **`tower-terminals`, `tower-api`, `cli-tower-mode`**: Terminal DELETE only (no workspace activation, or workspace already deactivated in `afterEach`)
+- **`bugfix-202`**: Defensive terminal DELETE only (inline deactivation as primary, afterAll DELETE as failure-safe)
 
 For `tower-baseline`, which already has `deactivateWorkspace()` in `afterEach`, only socket dir cleanup is needed in `afterAll`:
 ```typescript
@@ -416,6 +427,16 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 
 **Claude** (APPROVE): Minor suggestion — spec test scenario #4 (100-session stress test) not explicitly in Phase 3 deliverables.
 → **Noted**: Stress test is deferred — the core spec requirements (PID liveness, periodic cleanup, socket isolation) are all covered. 100-session lifecycle testing is better suited for a dedicated performance/stability test suite.
+
+### Iteration 5 (3-way review)
+**Gemini** (APPROVE): Comprehensive plan that correctly targets all leak vectors.
+
+**Codex** (REQUEST_CHANGES):
+1. `bugfix-199` activates a workspace but plan only had terminal DELETE — workspace deactivation needed
+2. Broader concern about spec "afterEach/afterAll deactivates workspaces" not fully preserved
+→ **Addressed**: (1) Reclassified `bugfix-199` to include workspace deactivation + terminal DELETE in `afterAll`. Updated per-file teardown strategy. (2) The plan now specifies the appropriate teardown for each file's creation path: workspace deactivation where workspaces are activated, terminal DELETE where terminals are created via API, both where applicable.
+
+**Claude** (APPROVE): Mature, thoroughly iterated plan with verified code references.
 
 ## Amendment History
 
