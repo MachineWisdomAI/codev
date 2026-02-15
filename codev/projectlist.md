@@ -175,17 +175,21 @@ Projects currently in development (conceived through committed), sorted by prior
   - id: "0111"
     title: "Remove Dead Vanilla Dashboard Code"
     summary: "Delete templates/dashboard/ (16 dead files replaced by React dashboard in 0085)"
-    status: conceived
+    status: integrated
     priority: medium
     release: null
     files:
       spec: codev/specs/0111-remove-dead-vanilla-dashboard.md
+      plan: codev/plans/0111-remove-dead-vanilla-dashboard.md
+      review: codev/reviews/0111-remove-dead-vanilla-dashboard.md
     dependencies: []
     tags: [cleanup, dead-code, dashboard]
     timestamps:
       conceived_at: "2026-02-15"
       specified_at: "2026-02-15"
-    notes: "Vanilla dashboard is dead since React rewrite (0085). Caused 20min confusion when architect edited wrong file."
+      implementing_at: "2026-02-15"
+      integrated_at: "2026-02-15"
+    notes: "PR #273 merged. -4614 lines of dead vanilla JS dashboard code removed."
 
   - id: "0112"
     title: "Workspace Rename (project → workspace for repos)"
