@@ -265,7 +265,7 @@ server.listen(port, '127.0.0.1', async () => {
   }
 
   // Periodic cleanup: catch orphaned sockets during Tower lifetime (not just at startup)
-  const cleanupIntervalMs = parseInt(process.env.SHELLPER_CLEANUP_INTERVAL_MS || '60000', 10);
+  const cleanupIntervalMs = Math.max(parseInt(process.env.SHELLPER_CLEANUP_INTERVAL_MS || '60000', 10) || 60000, 1000);
   shellperCleanupInterval = setInterval(async () => {
     try {
       const cleaned = await shellperManager!.cleanupStaleSockets();
