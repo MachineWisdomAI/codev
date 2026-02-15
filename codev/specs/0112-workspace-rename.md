@@ -45,7 +45,9 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 | `idx_terminal_sessions_project` | `idx_terminal_sessions_workspace` |
 | `idx_file_tabs_project` | `idx_file_tabs_workspace` |
 
-**Migration**: Add a new migration version that renames columns and the table. SQLite requires CREATE-new, INSERT-SELECT, DROP-old for table renames with column renames.
+**Migration**: Add migration **v9** to `global.db` (the only database with affected tables; `state.db` is unaffected). SQLite requires CREATE-new, INSERT-SELECT, DROP-old for table renames with column renames. Follow the existing pattern used in v7/v8 migrations.
+
+**Schema comments**: Update inline comments in `GLOBAL_SCHEMA` (e.g., `"-- project this terminal belongs to"` → `"-- workspace this terminal belongs to"`, `"across all projects"` → `"across all workspaces"`).
 
 #### Type Definitions (`tower-types.ts`)
 
@@ -153,10 +155,12 @@ Rename all uses of "project" that mean "repository/codebase" to **"workspace"** 
 
 #### Dashboard (`dashboard/src/`)
 
-| Before | After |
-|--------|-------|
-| `DashboardState.projectName` | `DashboardState.workspaceName` |
-| Display references to "Project" | "Workspace" where appropriate |
+| File | Before | After |
+|------|--------|-------|
+| `lib/api.ts` | `DashboardState.projectName` | `DashboardState.workspaceName` |
+| `components/App.tsx` | `state.projectName` (document title) | `state.workspaceName` |
+| `components/StatusPanel.tsx` | `projectName` in header bar | `workspaceName` |
+| Display references to "Project" | "Workspace" where referring to repo | Keep "Projects" for work-unit list |
 
 #### Spawn/Cleanup (Ambiguous Files — Handle Carefully)
 
@@ -164,10 +168,12 @@ These files use BOTH meanings. Only rename the repo-meaning uses:
 
 | File | Keep (work-unit) | Rename (repo) |
 |------|-------------------|---------------|
-| `spawn.ts` | `projectId`, `options.project` | `config.projectRoot` usage context only |
-| `cleanup.ts` | `projectId`, `options.project` | `config.projectRoot` usage context only |
-| `spawn-worktree.ts` | `projectId` param | `registration.projectPath` → `registration.workspacePath` |
+| `spawn.ts` | `projectId`, `options.project` | `{ projectPath: config.projectRoot }` → `{ workspacePath: config.projectRoot }` in registration objects |
+| `cleanup.ts` | `projectId`, `options.project` | (none — `config.projectRoot` itself is NOT renamed, and there are no repo-meaning local variables) |
+| `spawn-worktree.ts` | `projectId` param | `{ projectPath: config.projectRoot }` → `{ workspacePath: config.projectRoot }` in registration objects |
 | `spawn-roles.ts` | `projectId` param | (none — all uses are work-unit) |
+
+**Clarification on `config.projectRoot`**: The config property `config.projectRoot` is NEVER renamed (it's a generic config concept). However, when it's used as a value in objects like `{ projectPath: config.projectRoot }`, the **property name** `projectPath` is a repo-meaning identifier and gets renamed to `workspacePath`. The value (`config.projectRoot`) stays the same.
 
 ### What NOT to Rename
 
