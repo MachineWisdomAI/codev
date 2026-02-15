@@ -122,7 +122,7 @@ Note: The second catch block (lines 197-208) already kills via `process.kill(inf
 #### Deliverables
 - [ ] `SHELLPER_SOCKET_DIR` env var support in `tower-server.ts`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] 3 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll`
+- [ ] 4 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll`
 - [ ] 2 workspace-activating E2E files already have deactivation — verified, no changes needed
 - [ ] Temp socket directories cleaned up in `afterAll` for all 6 E2E files
 
@@ -157,7 +157,7 @@ The complete list of E2E test files with inline `startTower()` that need updatin
 | `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
 | `tower-baseline.e2e.test.ts` (line 68) | Via workspace activation (`POST /api/workspaces/.../activate`) | Already has `deactivateWorkspace()` in `afterEach` — no changes needed |
 | `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Already deactivates inline — no changes needed |
-| `cli-tower-mode.e2e.test.ts` (line 73) | None | Socket isolation only |
+| `cli-tower-mode.e2e.test.ts` (line 73) | Direct API via `TowerClient.createTerminal()` (lines 235, 250, 260, 272) | Terminal DELETE in `afterAll` |
 
 Pattern for each file's `startTower()`:
 ```typescript
@@ -184,7 +184,7 @@ async function startTower(port: number): Promise<ChildProcess> {
 
 **3. E2E test teardown — terminal cleanup in `afterAll`**
 
-For the 3 files that create terminals via direct API calls, add terminal cleanup before stopping Tower:
+For the 4 files that create terminals via direct API calls, add terminal cleanup before stopping Tower:
 
 ```typescript
 afterAll(async () => {
@@ -207,7 +207,7 @@ afterAll(async () => {
 });
 ```
 
-For `tower-baseline` and `bugfix-202`, which already have proper workspace deactivation, only socket dir cleanup is needed in `afterAll`. For `cli-tower-mode`, which creates no terminals at all, same pattern:
+For `tower-baseline` and `bugfix-202`, which already have proper workspace deactivation, only socket dir cleanup is needed in `afterAll`:
 ```typescript
 afterAll(async () => {
   await stopServer(towerProcess);
@@ -237,13 +237,13 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 - `packages/codev/src/agent-farm/__tests__/bugfix-199-zombie-tab.e2e.test.ts` — Socket isolation + terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/tower-baseline.e2e.test.ts` — Socket isolation only
 - `packages/codev/src/agent-farm/__tests__/bugfix-202-stale-temp-projects.e2e.test.ts` — Socket isolation only
-- `packages/codev/src/agent-farm/__tests__/cli-tower-mode.e2e.test.ts` — Socket isolation only
+- `packages/codev/src/agent-farm/__tests__/cli-tower-mode.e2e.test.ts` — Socket isolation + terminal cleanup
 - `packages/codev/src/agent-farm/__tests__/helpers/tower-test-utils.ts` — Add optional `socketDir` param
 
 #### Acceptance Criteria
 - [ ] Test Tower instances use temp dirs for sockets, not `~/.codev/run/`
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
-- [ ] `afterAll` in API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower
+- [ ] `afterAll` in all 4 API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower
 - [ ] Workspace-activating E2E tests (`tower-baseline`, `bugfix-202`) already deactivate properly — verified
 - [ ] Temp socket directories are cleaned up in `afterAll` for all E2E tests
 - [ ] Zero shellper socket files remain after test suite completes
@@ -393,6 +393,14 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 → **Addressed**: (1) See rebuttal — the 3 files that create terminals via direct API use terminal DELETE (correct for their creation path); `tower-baseline` and `bugfix-202` already have proper `deactivateWorkspace()` cleanup. (2) Reclassified E2E file table to accurately reflect terminal creation method and existing cleanup for each file. (3) Made PID liveness verification the primary (mandatory) test approach, removed the non-PID indirect test.
 
 **Claude** (APPROVE): Thorough verification with HIGH confidence. All code references accurate, complete spec coverage, sound technical approach.
+
+### Iteration 3 (3-way review)
+**Gemini** (REQUEST_CHANGES): `cli-tower-mode.e2e.test.ts` creates terminals via `TowerClient.createTerminal()` (lines 235, 250, 260, 272) but plan classified it as "no terminals / socket isolation only."
+→ **Addressed**: Verified — Gemini is correct. Reclassified `cli-tower-mode.e2e.test.ts` to require terminal DELETE in `afterAll`. Updated deliverable count from 3 to 4 API-terminal-creating files.
+
+**Codex** (APPROVE): Plan is implementable and materially aligned with spec requirements.
+
+**Claude** (APPROVE): Thoroughly verified plan with accurate code references, complete spec coverage, and sound technical approach.
 
 ## Amendment History
 
