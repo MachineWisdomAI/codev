@@ -1,8 +1,8 @@
 /**
  * codev init - Create a new codev project
  *
- * Creates a minimal codev structure. Framework files (protocols, roles)
- * are provided by the embedded skeleton at runtime, not copied to the project.
+ * Creates a codev structure with protocols, roles, consult-types, and
+ * resource templates copied from the embedded skeleton.
  */
 
 import * as fs from 'node:fs';
@@ -17,6 +17,7 @@ import {
   copyProjectlistArchive,
   copyConsultTypes,
   copyResourceTemplates,
+  copyRoles,
   copyProtocols,
   copySkills,
   copyRootFiles,
@@ -123,6 +124,17 @@ export async function init(projectName?: string, options: InitOptions = {}): Pro
   }
   for (const file of consultTypesResult.copied) {
     console.log(chalk.green('  +'), `codev/consult-types/${file}`);
+    fileCount++;
+  }
+
+  // Copy role definitions (architect, builder, consultant prompts)
+  const rolesResult = copyRoles(targetDir, skeletonDir);
+  if (rolesResult.directoryCreated) {
+    console.log(chalk.green('  +'), 'codev/roles/');
+    fileCount++;
+  }
+  for (const file of rolesResult.copied) {
+    console.log(chalk.green('  +'), `codev/roles/${file}`);
     fileCount++;
   }
 

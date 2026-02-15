@@ -109,6 +109,26 @@ describe('init command', () => {
       }
     });
 
+    // Regression test for issue #266: codev init does not copy roles/
+    it('should copy roles directory with architect, builder, consultant', async () => {
+      const projectDir = path.join(testBaseDir, 'roles-test');
+
+      const { init } = await import('../commands/init.js');
+      const originalCwd = process.cwd();
+      process.chdir(testBaseDir);
+
+      try {
+        await init('roles-test', { yes: true });
+
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'roles'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'roles', 'architect.md'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'roles', 'builder.md'))).toBe(true);
+        expect(fs.existsSync(path.join(projectDir, 'codev', 'roles', 'consultant.md'))).toBe(true);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
     it('should create .gitignore with codev entries', async () => {
       const projectDir = path.join(testBaseDir, 'gitignore-test');
 

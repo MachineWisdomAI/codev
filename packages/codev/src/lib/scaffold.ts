@@ -448,6 +448,61 @@ export function copySkills(
   return { copied, skipped, directoryCreated };
 }
 
+interface CopyRolesOptions {
+  skipExisting?: boolean;
+}
+
+interface CopyRolesResult {
+  copied: string[];
+  skipped: string[];
+  directoryCreated: boolean;
+}
+
+/**
+ * Copy roles directory from skeleton to codev/roles/.
+ * Contains role prompts (architect, builder, consultant) for agent sessions.
+ */
+export function copyRoles(
+  targetDir: string,
+  skeletonDir: string,
+  options: CopyRolesOptions = {}
+): CopyRolesResult {
+  const { skipExisting = false } = options;
+  const rolesDir = path.join(targetDir, 'codev', 'roles');
+  const srcDir = path.join(skeletonDir, 'roles');
+  const copied: string[] = [];
+  const skipped: string[] = [];
+  let directoryCreated = false;
+
+  // Ensure roles directory exists
+  if (!fs.existsSync(rolesDir)) {
+    fs.mkdirSync(rolesDir, { recursive: true });
+    directoryCreated = true;
+  }
+
+  // If source directory doesn't exist, return early
+  if (!fs.existsSync(srcDir)) {
+    return { copied, skipped, directoryCreated };
+  }
+
+  // Copy all .md files from skeleton roles
+  const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.md'));
+  for (const file of files) {
+    const destPath = path.join(rolesDir, file);
+    const srcPath = path.join(srcDir, file);
+
+    if (skipExisting && fs.existsSync(destPath)) {
+      skipped.push(file);
+      continue;
+    }
+
+    fs.copyFileSync(srcPath, destPath);
+    copied.push(file);
+  }
+
+  return { copied, skipped, directoryCreated };
+}
+
 interface CopyProtocolsOptions {
   skipExisting?: boolean;
 }
