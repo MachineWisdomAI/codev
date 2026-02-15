@@ -114,23 +114,26 @@ Core functions:
 1. Parse target using `parseAddress()` from Phase 1 (case-insensitive)
 2. If project specified: find workspace by basename match across `getWorkspaceTerminals()` keys. **If multiple workspaces match the same basename, return an error** (ambiguous target) rather than picking one.
 3. If no project: use `fallbackWorkspace` (sent by CLI from CWD detection). If `fallbackWorkspace` is null/missing, return error with message "Cannot resolve agent without project context."
-4. Within the workspace: match agent name against `architect`, `builders` map (exact, case-insensitive), `builders` map (prefix, case-insensitive)
+4. Within the workspace: match agent name against `architect`, `builders` map (exact, case-insensitive), `builders` map (prefix, case-insensitive). **If prefix match returns multiple candidates** (e.g., bare ID `01` matches both `builder-spir-0109` and `builder-spir-0110`), return an error with the list of ambiguous matches rather than picking one.
 
 **New route in `packages/codev/src/agent-farm/servers/tower-routes.ts`**:
 ```
 POST /api/send
-Body: { to: string, message: string, from?: string, workspace?: string, options?: { raw?: boolean, noEnter?: boolean, interrupt?: boolean } }
+Body: { to: string, message: string, from?: string, fromWorkspace?: string, workspace?: string, options?: { raw?: boolean, noEnter?: boolean, interrupt?: boolean } }
 Response: { ok: true, terminalId: string, resolvedTo: string }
 Error responses:
   400: { error: "INVALID_PARAMS", message: "..." } — missing `to` or `message`, empty strings, malformed address
   404: { error: "NOT_FOUND", message: "..." } — target agent or project not found
-  409: { error: "AMBIGUOUS", message: "..." } — multiple projects match basename
+  409: { error: "AMBIGUOUS", message: "..." } — multiple projects or agents match
 ```
+
+- `workspace`: the **sender's** workspace path (used for target resolution when no `project:` prefix)
+- `fromWorkspace`: the **sender's** workspace path (used to populate `from.project` in the broadcast). In practice, `workspace` and `fromWorkspace` are the same for same-project sends. For cross-project sends (where `to` contains `project:`), `fromWorkspace` identifies where the sender lives.
 
 Handler:
 1. Validate body — `to` (string, non-empty) and `message` (string, non-empty) are required. Return 400 if missing.
 2. Call `resolveTarget(body.to, body.workspace)` to find terminal ID. Return 404/409 on resolution failure.
-3. Determine `from` field: if `body.from` is provided, use it. Otherwise, default to `"unknown"`. The `from` in the MessageFrame broadcast uses `{ project: resolvedWorkspaceName, agent: body.from ?? "unknown" }`.
+3. Determine `from` field for broadcast: `{ project: basename(body.fromWorkspace ?? body.workspace ?? "unknown"), agent: body.from ?? "unknown" }`. The sender's project is derived from the sender's workspace path, **not** the destination workspace.
 4. Format message (reuse `formatArchitectMessage`/`formatBuilderMessage` from shared util)
 5. Write to terminal via `session.write()`
 6. Broadcast structured message via `broadcastMessage()` (no-op until Phase 3)
@@ -141,7 +144,7 @@ Handler:
 - Both `commands/send.ts` (CLI) and `servers/tower-routes.ts` (server) import from the shared location
 
 **New method on `TowerClient`** (`lib/tower-client.ts`):
-- `sendMessage(to: string, message: string, from?: string, workspace?: string, options?: SendOptions): Promise<{ ok: boolean; resolvedTo: string }>`
+- `sendMessage(to: string, message: string, from?: string, workspace?: string, fromWorkspace?: string, options?: SendOptions): Promise<{ ok: boolean; resolvedTo: string }>`
 
 #### Acceptance Criteria
 - [ ] `POST /api/send` with `{ to: "architect", message: "test" }` writes to architect terminal
@@ -150,11 +153,13 @@ Handler:
 - [ ] `POST /api/send` with `{ to: "0109" }` resolves via prefix match (backwards compat)
 - [ ] `POST /api/send` with missing `to` returns 400
 - [ ] `POST /api/send` with ambiguous project basename returns 409
+- [ ] `POST /api/send` with ambiguous agent prefix (multiple matches) returns 409
 - [ ] `POST /api/send` with no `from` broadcasts with `from.agent = "unknown"`
+- [ ] `POST /api/send` cross-project: `from.project` in broadcast reflects sender's workspace, not destination
 - [ ] Existing `POST /api/terminals/:id/write` still works
 
 #### Test Plan
-- **Unit Tests**: `tower-messages.test.ts` — test `resolveTarget()` with exact names, prefix matches, cross-project addresses, missing targets, ambiguous basenames, null fallback workspace
+- **Unit Tests**: `tower-messages.test.ts` — test `resolveTarget()` with exact names, prefix matches, cross-project addresses, missing targets, ambiguous basenames, ambiguous agent prefixes (multiple matches → error), null fallback workspace
 - **Unit Tests**: `message-format.test.ts` — test formatting functions produce expected output
 - **Unit Tests**: Input validation — missing fields, empty strings, malformed addresses return correct error codes
 
@@ -282,6 +287,7 @@ Phase 1 (Naming) ──→ Phase 2 (Tower Send) ──→ Phase 3 (Message Bus) 
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
 | Workspace basename collision | L | L | Return 409 AMBIGUOUS error, require unique project name |
+| Bare ID prefix matches multiple builders | L | M | Return 409 AMBIGUOUS error with list of candidates |
 | State.db naming mismatch with running builders | M | L | Only new spawns get new names; prefix match handles old IDs |
 | WebSocket subscriber memory leak | L | M | Cleanup on close/error events |
 | Message format changes break existing tooling | L | M | Existing writeTerminal API preserved |
