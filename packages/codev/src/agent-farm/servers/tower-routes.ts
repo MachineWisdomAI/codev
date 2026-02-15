@@ -47,6 +47,7 @@ import {
   saveTerminalSession,
   isSessionPersistent,
   deleteTerminalSession,
+  removeTerminalFromRegistry,
   deleteWorkspaceTerminalSessions,
   saveFileTab,
   deleteFileTab,
@@ -453,6 +454,10 @@ async function handleTerminalRoutes(
 
     // TICK-001: Delete from SQLite
     deleteTerminalSession(terminalId);
+
+    // Bugfix #290: Also remove from in-memory registry so dashboard
+    // stops showing tabs for cleaned-up builders
+    removeTerminalFromRegistry(terminalId);
 
     res.writeHead(204);
     res.end();

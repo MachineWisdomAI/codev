@@ -20,6 +20,7 @@ import {
   saveTerminalSession,
   isSessionPersistent,
   deleteTerminalSession,
+  removeTerminalFromRegistry,
   deleteWorkspaceTerminalSessions,
   saveFileTab,
   deleteFileTab,
@@ -371,6 +372,62 @@ describe('tower-terminals', () => {
       const manager1 = getTerminalManager();
       const manager2 = getTerminalManager();
       expect(manager1).toBe(manager2);
+    });
+  });
+
+  // =========================================================================
+  // removeTerminalFromRegistry (Bugfix #290)
+  // =========================================================================
+
+  describe('removeTerminalFromRegistry', () => {
+    it('removes a builder terminal from the registry', () => {
+      const entry = getWorkspaceTerminalsEntry('/project');
+      entry.builders.set('builder-1', 'term-abc');
+      entry.builders.set('builder-2', 'term-def');
+
+      removeTerminalFromRegistry('term-abc');
+
+      expect(entry.builders.has('builder-1')).toBe(false);
+      expect(entry.builders.has('builder-2')).toBe(true);
+    });
+
+    it('removes a shell terminal from the registry', () => {
+      const entry = getWorkspaceTerminalsEntry('/project');
+      entry.shells.set('shell-1', 'term-shell');
+
+      removeTerminalFromRegistry('term-shell');
+
+      expect(entry.shells.has('shell-1')).toBe(false);
+    });
+
+    it('removes an architect terminal from the registry', () => {
+      const entry = getWorkspaceTerminalsEntry('/project');
+      entry.architect = 'term-arch';
+
+      removeTerminalFromRegistry('term-arch');
+
+      expect(entry.architect).toBeUndefined();
+    });
+
+    it('is a no-op when terminal ID does not exist', () => {
+      const entry = getWorkspaceTerminalsEntry('/project');
+      entry.builders.set('builder-1', 'term-abc');
+
+      removeTerminalFromRegistry('nonexistent');
+
+      expect(entry.builders.has('builder-1')).toBe(true);
+    });
+
+    it('scans across multiple workspaces', () => {
+      const entry1 = getWorkspaceTerminalsEntry('/project-a');
+      entry1.builders.set('builder-1', 'term-a');
+      const entry2 = getWorkspaceTerminalsEntry('/project-b');
+      entry2.builders.set('builder-2', 'term-b');
+
+      removeTerminalFromRegistry('term-b');
+
+      expect(entry1.builders.has('builder-1')).toBe(true);
+      expect(entry2.builders.has('builder-2')).toBe(false);
     });
   });
 
