@@ -33,6 +33,7 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 | `model` | TEXT NOT NULL | Model identifier: `gemini`, `codex`, `claude` |
 | `review_type` | TEXT | Review type flag: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`, or null for general |
 | `subcommand` | TEXT NOT NULL | Consult subcommand: `pr`, `spec`, `plan`, `impl`, `general` |
+<!-- REVIEW(@architect): How come we have both review type and subcommand and ptotocol? They seem to overlap? Should we clean this up too? -->
 | `protocol` | TEXT | Protocol context: `spir`, `tick`, `bugfix`, `manual` |
 | `project_id` | TEXT | Porch project ID if applicable (e.g., `0108`, `bugfix-269`), null for manual invocations |
 | `duration_seconds` | REAL NOT NULL | Wall-clock duration from subprocess start to exit |
@@ -66,12 +67,15 @@ Where possible, parse token usage from subprocess output:
 - **Claude (Agent SDK)**: The SDK `result` message may include usage metadata. If `message.usage` or similar fields are present, capture them. The Claude SDK streams messages — check the final `result` event for usage data.
 
 **Important**: Token/cost capture is best-effort. If a model's CLI does not expose token counts, store null. Never fail a consultation because token parsing failed. Wrap all parsing in try/catch and log warnings to stderr on parse failure.
+<!-- REVIEW(@architect): Please, please do not include any bogus data in our results, e.g. estimates of token count if the full token count is not available. Data in the table must be fully determined, not hallucinated or guessed. -->
+<!-- REVIEW(@architect): Please thoroughly investigate all the command line options available that get the agents themselves to estimate cost and token usage. -->
 
 ### R4: Protocol and project context
 
 When porch invokes `consult`, it must pass protocol and project context so the metrics record knows what triggered it.
 
 **Mechanism**: Add two new CLI flags to the `consult` command:
+<!-- REVIEW(@architect): Isn't it implicit from the type of review? -->
 
 ```
 --protocol <spir|tick|bugfix>
@@ -207,6 +211,7 @@ Create a `parseTokenUsage(model: string, output: string): TokenUsage | null` fun
 3. Log a debug-level message when parsing fails so we can update patterns
 
 Cost estimation uses a static pricing table:
+<!-- REVIEW(@architect): Again investigate other mechaniss as well. E.g. the claude agent sdk presumably has a structured approach to getting this. -->
 
 ```typescript
 const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
@@ -225,6 +230,7 @@ Update these constants manually when pricing changes. They are only used for est
 - No modification to the consultation subprocesses themselves (Gemini CLI, Codex CLI, Claude SDK internals)
 - No API-level token tracking — we instrument at the `consult` CLI level, not inside each model's SDK
 - No automatic pricing updates — pricing constants are updated manually
+<!-- REVIEW(@architect): Is there an online service ot some such we can query to get this information in real time since prices and models change? -->
 - No metrics export (CSV, etc.) beyond the `--json` flag
 
 ## Acceptance Criteria
