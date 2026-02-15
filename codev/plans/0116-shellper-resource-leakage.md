@@ -124,7 +124,7 @@ Note: The second catch block (lines 197-208) already kills via `process.kill(inf
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
 - [ ] 4 API-terminal-creating E2E files add terminal DELETE cleanup in `afterAll` (`bugfix-199` also adds workspace deactivation before DELETE)
 - [ ] `tower-baseline` already has `deactivateWorkspace()` in `afterEach` — verified, no changes needed
-- [ ] `bugfix-202` adds defensive terminal DELETE in `afterAll` as failure-safe (inline deactivation is not guaranteed on assertion failure)
+- [ ] `bugfix-202` adds defensive workspace deactivation + terminal DELETE in `afterAll` as failure-safe (inline deactivation is primary)
 - [ ] Temp socket directories cleaned up in `afterAll` for all 6 E2E files
 
 #### Implementation Details
@@ -147,7 +147,7 @@ const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.code
 
 Each inline `startTower()` needs two changes:
 1. Create a temp socket dir and pass it via `SHELLPER_SOCKET_DIR` env var
-2. Return both the process and the socket dir path for cleanup
+2. Track the socket dir in a module-level array for cleanup in `afterAll`
 
 The complete list of E2E test files with inline `startTower()` that need updating:
 
@@ -157,7 +157,7 @@ The complete list of E2E test files with inline `startTower()` that need updatin
 | `tower-api.e2e.test.ts` (line 69) | Direct API (`POST /api/terminals`) | Terminal DELETE in `afterAll` |
 | `bugfix-199-zombie-tab.e2e.test.ts` (line 51) | Workspace activation (line 121) + Direct API terminals | Workspace deactivation + Terminal DELETE in `afterAll` |
 | `tower-baseline.e2e.test.ts` (line 68) | Via workspace activation (`POST /api/workspaces/.../activate`) | Already has `deactivateWorkspace()` in `afterEach` — no changes needed |
-| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Defensive terminal DELETE in `afterAll` (inline deactivation not failure-safe) |
+| `bugfix-202-stale-temp-projects.e2e.test.ts` (line 51) | Via workspace activation (inline in each test) | Defensive workspace deactivation + terminal DELETE in `afterAll` (inline deactivation is primary; `afterAll` is failure-safe) |
 | `cli-tower-mode.e2e.test.ts` (line 73) | Direct API via `TowerClient.createTerminal()` (lines 235, 250, 260, 272) | Terminal DELETE in `afterAll` |
 
 Pattern for each file's `startTower()`:
@@ -165,10 +165,12 @@ Pattern for each file's `startTower()`:
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-let testSocketDir: string | null = null;
+// Array tracks all socket dirs — safe for files with multiple startTower() calls (e.g., tower-baseline)
+const testSocketDirs: string[] = [];
 
 async function startTower(port: number): Promise<ChildProcess> {
-  testSocketDir = mkdtempSync(resolve(tmpdir(), 'codev-test-sockets-'));
+  const socketDir = mkdtempSync(resolve(tmpdir(), 'codev-test-sockets-'));
+  testSocketDirs.push(socketDir);
   const proc = spawn('node', [TOWER_SERVER_PATH, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
@@ -176,12 +178,14 @@ async function startTower(port: number): Promise<ChildProcess> {
       ...process.env,
       NODE_ENV: 'test',
       AF_TEST_DB: `test-${port}.db`,
-      SHELLPER_SOCKET_DIR: testSocketDir,
+      SHELLPER_SOCKET_DIR: socketDir,
     },
   });
   // ... rest of existing startTower logic
 }
 ```
+
+**Note**: `tower-baseline.e2e.test.ts` calls `startTower()` 8+ times across multiple describe blocks. The array pattern ensures all socket dirs are tracked and cleaned up, even if earlier dirs were created by describe blocks that already finished.
 
 **3. E2E test teardown — terminal cleanup in `afterAll`**
 
@@ -206,10 +210,11 @@ afterAll(async () => {
     }
   } catch { /* Tower may already be down */ }
   await stopServer(towerProcess);
-  // Clean up temp socket dir and DB files
-  if (testSocketDir) {
-    try { rmSync(testSocketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  // Clean up all temp socket dirs and DB files
+  for (const dir of testSocketDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  testSocketDirs.length = 0;
   // ... existing DB cleanup
 });
 ```
@@ -217,20 +222,21 @@ afterAll(async () => {
 **Per-file teardown strategy:**
 - **`bugfix-199`**: Workspace deactivation + terminal DELETE (activates workspace AND creates API terminals)
 - **`tower-terminals`, `tower-api`, `cli-tower-mode`**: Terminal DELETE only (no workspace activation, or workspace already deactivated in `afterEach`)
-- **`bugfix-202`**: Defensive terminal DELETE only (inline deactivation as primary, afterAll DELETE as failure-safe)
+- **`bugfix-202`**: Defensive workspace deactivation + terminal DELETE (inline deactivation is primary; `afterAll` catches anything missed on assertion failure)
 
-For `tower-baseline`, which already has `deactivateWorkspace()` in `afterEach`, only socket dir cleanup is needed in `afterAll`:
+For `tower-baseline`, which already has `deactivateWorkspace()` in `afterEach`, only socket dir cleanup is needed in `afterAll`. Note: `tower-baseline` calls `startTower()` 8+ times, so the array pattern is essential here:
 ```typescript
 afterAll(async () => {
   await stopServer(towerProcess);
-  if (testSocketDir) {
-    try { rmSync(testSocketDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  for (const dir of testSocketDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  testSocketDirs.length = 0;
   // ... existing DB cleanup
 });
 ```
 
-For `bugfix-202`, inline deactivation is not failure-safe (if an assertion fails before the inline `deactivate` call, sessions leak). Add defensive terminal DELETE in `afterAll` matching the pattern used for the 4 API-terminal-creating files above. This is additive safety — it catches anything the inline deactivation misses.
+For `bugfix-202`, inline deactivation happens before assertions in test 1 (line 132) and inside try/finally in test 2 (line 167), so it is mostly failure-safe. However, for consistency and belt-and-suspenders safety, add defensive workspace deactivation + terminal DELETE in `afterAll` matching the pattern used for `bugfix-199`. This catches any edge case where inline deactivation is bypassed.
 
 **4. Optional: Update `tower-test-utils.ts` for future use**
 
@@ -259,7 +265,7 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 - [ ] All 6 E2E test files pass `SHELLPER_SOCKET_DIR` to their inline `startTower()`
 - [ ] `afterAll` in all 4 API-terminal-creating E2E tests kills terminals via DELETE before stopping Tower (with workspace deactivation where workspaces are activated, e.g., `bugfix-199`)
 - [ ] `tower-baseline` already deactivates properly via `afterEach` — verified
-- [ ] `bugfix-202` has defensive terminal DELETE in `afterAll` as failure-safe backup
+- [ ] `bugfix-202` has defensive workspace deactivation + terminal DELETE in `afterAll` as failure-safe backup
 - [ ] Temp socket directories are cleaned up in `afterAll` for all E2E tests
 - [ ] Zero shellper socket files remain after test suite completes
 - [ ] Dev's running shellper sessions are never affected by test runs
@@ -437,6 +443,16 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 → **Addressed**: (1) Reclassified `bugfix-199` to include workspace deactivation + terminal DELETE in `afterAll`. Updated per-file teardown strategy. (2) The plan now specifies the appropriate teardown for each file's creation path: workspace deactivation where workspaces are activated, terminal DELETE where terminals are created via API, both where applicable.
 
 **Claude** (APPROVE): Mature, thoroughly iterated plan with verified code references.
+
+### Iteration 6 (3-way review)
+**Gemini** (APPROVE): Comprehensive plan with robust periodic cleanup, defensive process handling, and rigorous test isolation.
+
+**Codex** (REQUEST_CHANGES):
+1. `bugfix-202` needs failure-safe workspace deactivation hooks, not just terminal DELETE fallback
+2. Socket-dir lifecycle inconsistent: text says "return both" but pattern uses single mutable variable; multi-start files like `tower-baseline` would overwrite
+→ **Addressed**: (1) Added defensive workspace deactivation + terminal DELETE in `afterAll` for `bugfix-202` (consistent with `bugfix-199` pattern). (2) Changed socket-dir pattern from single `testSocketDir` variable to `testSocketDirs` array, ensuring deterministic cleanup across multi-start files.
+
+**Claude** (APPROVE): Mature, thoroughly verified plan with accurate code references, complete spec coverage, and sound per-file cleanup strategy.
 
 ## Amendment History
 
