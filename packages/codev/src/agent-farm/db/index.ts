@@ -480,6 +480,66 @@ function ensureGlobalDatabase(): Database.Database {
     console.log('[info] Renamed shepherd columns to shellper in terminal_sessions (Spec 0106)');
   }
 
+  // Migration v9: Rename project_path → workspace_path in all tables (Spec 0112)
+  const v9 = db.prepare('SELECT version FROM _migrations WHERE version = 9').get();
+  if (!v9) {
+    try {
+      // 1. Rename terminal_sessions.project_path → workspace_path
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS terminal_sessions_new (
+          id TEXT PRIMARY KEY,
+          workspace_path TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('architect', 'builder', 'shell')),
+          role_id TEXT,
+          pid INTEGER,
+          shellper_socket TEXT,
+          shellper_pid INTEGER,
+          shellper_start_time INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO terminal_sessions_new
+          SELECT id, project_path, type, role_id, pid, shellper_socket, shellper_pid, shellper_start_time, created_at
+          FROM terminal_sessions;
+        DROP TABLE terminal_sessions;
+        ALTER TABLE terminal_sessions_new RENAME TO terminal_sessions;
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_workspace ON terminal_sessions(workspace_path);
+        CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
+      `);
+
+      // 2. Rename file_tabs.project_path → workspace_path
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS file_tabs_new (
+          id TEXT PRIMARY KEY,
+          workspace_path TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO file_tabs_new
+          SELECT id, project_path, file_path, created_at
+          FROM file_tabs;
+        DROP TABLE file_tabs;
+        ALTER TABLE file_tabs_new RENAME TO file_tabs;
+        CREATE INDEX IF NOT EXISTS idx_file_tabs_workspace ON file_tabs(workspace_path);
+      `);
+
+      // 3. Rename known_projects → known_workspaces with project_path → workspace_path
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS known_workspaces (
+          workspace_path TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT OR IGNORE INTO known_workspaces (workspace_path, name, last_launched_at)
+          SELECT project_path, name, last_launched_at FROM known_projects;
+        DROP TABLE IF EXISTS known_projects;
+      `);
+    } catch {
+      // Tables may already be in the correct schema (fresh install)
+    }
+    db.prepare('INSERT INTO _migrations (version) VALUES (9)').run();
+    console.log('[info] Renamed project_path → workspace_path in global tables (Spec 0112)');
+  }
+
   return db;
 }
 

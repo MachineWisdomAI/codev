@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS _migrations (
 -- Tracks all terminal sessions across all workspaces for persistence and reconciliation
 CREATE TABLE IF NOT EXISTS terminal_sessions (
   id TEXT PRIMARY KEY,                    -- terminal UUID from PtyManager
-  project_path TEXT NOT NULL,             -- workspace this terminal belongs to
+  workspace_path TEXT NOT NULL,           -- workspace this terminal belongs to
   type TEXT NOT NULL                      -- 'architect', 'builder', 'shell'
     CHECK(type IN ('architect', 'builder', 'shell')),
   role_id TEXT,                           -- builder ID or shell ID (null for architect)
@@ -106,6 +106,6 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_terminal_sessions_project ON terminal_sessions(project_path);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_workspace ON terminal_sessions(workspace_path);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
 `;
