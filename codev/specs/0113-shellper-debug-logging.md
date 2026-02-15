@@ -42,7 +42,7 @@ Log to stderr (which is currently ignored — see R5):
 
 ### R3: Session lifecycle logging in Tower (`session-manager.ts`)
 
-SessionManager should accept an optional `logger` callback in `SessionManagerConfig` (signature: `(message: string) => void`). When provided, log:
+SessionManager should accept an optional `logger` callback in `SessionManagerConfig` (signature: `(message: string) => void`). Tower MUST always provide this callback when constructing SessionManager (wired to Tower's `log()` utility). When provided, log:
 
 | Event | What to log |
 |-------|-------------|
@@ -73,7 +73,7 @@ Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignor
 
 - Spawn with `stdio: ['ignore', 'pipe', 'pipe']`
 - Buffer last 50 lines of stderr per session in SessionManager (lines truncated at 1000 chars; non-UTF-8 bytes replaced with `?`)
-- When a session exits, crashes, or is killed, include the stderr tail in the Tower log:
+- When a session exits, crashes, or is killed, log the stderr tail after the stderr stream emits `close` (which guarantees all buffered data has been read). If the stream is already closed at the time of the exit/kill event, log immediately.
   ```
   Session {id} exited (code={code}). Last stderr:
     Shellper received SIGTERM, shutting down
@@ -109,7 +109,7 @@ Tower-side logs (R3, R4, R5) use the existing `log()` utility in tower-server.ts
 
 ## Testing
 
-Existing test files (`session-manager.test.ts`, `shellper-protocol.test.ts`) should be updated to account for the `stdio` config change from `'ignore'` to `'pipe'` for stderr.
+Existing test files (`session-manager.test.ts`, `tower-shellper-integration.test.ts`) should be updated to account for the `stdio` config change from `'ignore'` to `'pipe'` for stderr. (`shellper-protocol.test.ts` tests wire protocol encoding and is unaffected.)
 
 New test coverage expected:
 - **stderr capture**: Verify that shellper stderr output is buffered and surfaced when the process exits (by code and by signal)
