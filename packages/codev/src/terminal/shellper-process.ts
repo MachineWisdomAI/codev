@@ -70,6 +70,7 @@ export class ShellperProcess extends EventEmitter {
     private readonly ptyFactory: () => IShellperPty,
     private readonly socketPath: string,
     replayBufferLines: number = 10_000,
+    private readonly log: (msg: string) => void = () => {},
   ) {
     super();
     this.replayBuffer = new ShellperReplayBuffer(replayBufferLines);
@@ -131,6 +132,8 @@ export class ShellperProcess extends EventEmitter {
       // and send an EXIT frame, corrupting the state of the new PTY.
       if (this.pty !== pty) return;
 
+      this.log(`PTY exited: code=${exitInfo.exitCode}, signal=${exitInfo.signal ?? null}`);
+
       this.exited = true;
       const exitFrame = encodeExit({
         code: exitInfo.exitCode,
@@ -174,9 +177,12 @@ export class ShellperProcess extends EventEmitter {
    * time — a new connection closes the previous one.
    */
   handleConnection(socket: net.Socket): void {
+    const hadPrevious = this.currentConnection != null && !this.currentConnection.destroyed;
+    this.log(`Connection accepted (replacing=${hadPrevious})`);
+
     // Close previous connection if any
-    if (this.currentConnection && !this.currentConnection.destroyed) {
-      this.currentConnection.destroy();
+    if (hadPrevious) {
+      this.currentConnection!.destroy();
     }
     this.currentConnection = socket;
 
@@ -189,6 +195,7 @@ export class ShellperProcess extends EventEmitter {
     });
 
     parser.on('error', (err) => {
+      this.log(`Protocol error: ${err.message}`);
       this.emit('protocol-error', err);
       socket.destroy();
     });
@@ -196,6 +203,7 @@ export class ShellperProcess extends EventEmitter {
     socket.on('close', () => {
       if (this.currentConnection === socket) {
         this.currentConnection = null;
+        this.log('Connection closed');
       }
     });
 
@@ -243,22 +251,26 @@ export class ShellperProcess extends EventEmitter {
   private handleHello(socket: net.Socket, payload: Buffer): void {
     try {
       const hello = parseJsonPayload<HelloMessage>(payload);
+      this.log(`HELLO: version=${hello.version}`);
       this.emit('hello', hello);
     } catch {
+      this.log('Protocol error: Invalid HELLO payload');
       this.emit('protocol-error', new Error('Invalid HELLO payload'));
       socket.destroy();
       return;
     }
 
     // Send WELCOME response
+    const pid = this.pty?.pid ?? -1;
     const welcome = encodeWelcome({
       version: PROTOCOL_VERSION,
-      pid: this.pty?.pid ?? -1,
+      pid,
       cols: this.cols,
       rows: this.rows,
       startTime: this.startTime,
     });
     socket.write(welcome);
+    this.log(`WELCOME sent: pid=${pid}, version=${PROTOCOL_VERSION}`);
 
     // Send replay buffer
     const replayData = this.replayBuffer.getReplayData();
@@ -282,6 +294,7 @@ export class ShellperProcess extends EventEmitter {
         this.pty.resize(msg.cols, msg.rows);
       }
     } catch {
+      this.log('Protocol error: Invalid RESIZE payload');
       this.emit('protocol-error', new Error('Invalid RESIZE payload'));
       socket.destroy();
     }
@@ -291,6 +304,7 @@ export class ShellperProcess extends EventEmitter {
     try {
       const msg = parseJsonPayload<SignalMessage>(payload);
       if (!ALLOWED_SIGNALS.has(msg.signal)) {
+        this.log(`Protocol error: Signal ${msg.signal} not in allowlist`);
         this.emit('protocol-error', new Error(`Signal ${msg.signal} not in allowlist`));
         return;
       }
@@ -298,6 +312,7 @@ export class ShellperProcess extends EventEmitter {
         this.pty.kill(msg.signal);
       }
     } catch {
+      this.log('Protocol error: Invalid SIGNAL payload');
       this.emit('protocol-error', new Error('Invalid SIGNAL payload'));
       socket.destroy();
     }
@@ -306,6 +321,8 @@ export class ShellperProcess extends EventEmitter {
   private handleSpawn(socket: net.Socket, payload: Buffer): void {
     try {
       const msg = parseJsonPayload<SpawnMessage>(payload);
+      const oldPid = this.pty?.pid ?? -1;
+      this.log(`SPAWN: command=${msg.command}, killing old PTY pid=${oldPid}`);
 
       // Kill old PTY if still alive
       if (this.pty && !this.exited) {
@@ -319,6 +336,7 @@ export class ShellperProcess extends EventEmitter {
       this.spawnPty(msg.command, msg.args, msg.cwd, msg.env, this.cols, this.rows);
       this.emit('spawn', msg);
     } catch {
+      this.log('Protocol error: Invalid SPAWN payload');
       this.emit('protocol-error', new Error('Invalid SPAWN payload'));
       socket.destroy();
     }
