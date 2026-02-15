@@ -237,6 +237,20 @@ Projects currently in development (conceived through committed), sorted by prior
       conceived_at: "2026-02-15"
     notes: "Triggered by unexplained life architect shellper death on 2026-02-15. Currently zero diagnostic info when sessions die."
 
+  - id: "0114"
+    title: "Investigate Minimax for Code Reviews"
+    summary: "Evaluate Minimax as a replacement for Claude in consult 3-way code reviews"
+    status: conceived
+    priority: medium
+    release: null
+    files:
+      spec: null
+    dependencies: []
+    tags: [consult, code-review, models]
+    timestamps:
+      conceived_at: "2026-02-15"
+    notes: "Investigate whether Minimax can replace Claude in the 3-way consultation pipeline for code reviews."
+
 # Low Priority
 
   - id: "0023"
