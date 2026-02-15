@@ -25,8 +25,6 @@ let mockWsInstance: {
   onmessage: ((ev: { data: ArrayBuffer }) => void) | null;
   readyState: number;
 };
-let mockFitFn: ReturnType<typeof vi.fn>;
-
 // Mock @xterm/xterm — capture scrollToBottom calls
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
@@ -53,15 +51,9 @@ vi.mock('@xterm/xterm', () => {
   return { Terminal: MockTerminal };
 });
 
-// Mock addons — capture fit() calls
+// Mock addons
 vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit = vi.fn();
-    dispose = vi.fn();
-    constructor() {
-      mockFitFn = this.fit;
-    }
-  },
+  FitAddon: class { fit = vi.fn(); dispose = vi.fn(); },
 }));
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class { constructor() { throw new Error('no webgl'); } },
