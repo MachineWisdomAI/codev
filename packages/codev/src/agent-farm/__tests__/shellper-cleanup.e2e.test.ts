@@ -84,6 +84,7 @@ describe('Spec 0116: Shellper cleanup E2E', () => {
   }, 30_000);
 
   afterAll(async () => {
+    if (!tower) return;
     await cleanupAllTerminals(TEST_TOWER_PORT);
     await tower.stop();
     cleanupTestDb(TEST_TOWER_PORT);

@@ -26,6 +26,7 @@ import {
 const TEST_TOWER_PORT = 14600;
 
 let tower: TowerHandle;
+const activatedWorkspaces: string[] = [];
 
 describe('Bugfix #202: Stale temp workspace directories filtered from workspace list', () => {
   beforeAll(async () => {
@@ -33,7 +34,13 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
   }, 30_000);
 
   afterAll(async () => {
-    // Defensive workspace deactivation + terminal cleanup (failure-safe)
+    if (!tower) return;
+    // Defensive workspace deactivation (failure-safe for aborted tests)
+    for (const encoded of activatedWorkspaces) {
+      try {
+        await fetch(`http://localhost:${TEST_TOWER_PORT}/api/workspaces/${encoded}/deactivate`, { method: 'POST' });
+      } catch { /* tower may already be down */ }
+    }
     await cleanupAllTerminals(TEST_TOWER_PORT);
     await tower.stop();
     cleanupTestDb(TEST_TOWER_PORT);
@@ -54,6 +61,7 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
     );
 
     const encodedPath = encodeWorkspacePath(tempProjectDir);
+    activatedWorkspaces.push(encodedPath);
 
     // Step 2: Activate the workspace (registers in tower's terminal_sessions)
     const activateRes = await fetch(`${base}/api/workspaces/${encodedPath}/activate`, {
@@ -101,6 +109,7 @@ describe('Bugfix #202: Stale temp workspace directories filtered from workspace 
     );
 
     const encodedPath = encodeWorkspacePath(tempProjectDir);
+    activatedWorkspaces.push(encodedPath);
 
     try {
       // Activate the workspace
