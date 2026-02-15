@@ -82,21 +82,23 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
    private nextConnectionId = 0;
    ```
 
-2. Update `handleConnection()` (line 180): Remove automatic replacement. Instead, add socket to map after HELLO (once we know clientType). Set up parser and socket event handlers. On socket close/error, remove from map.
+2. Update `handleConnection()` (line 180): Remove automatic replacement. The socket is NOT added to the map here — it enters a "pre-HELLO" state where no frames are forwarded to it. Set up parser and socket event handlers. Track the socket in a local variable so close/error handlers can clean up even if HELLO never arrives. On socket close/error: if the connection was added to the map, remove it; if still pre-HELLO, just destroy and log.
 
-3. Update `handleHello()` (line 252): Parse `clientType` from HELLO. Generate connection ID. If `clientType === 'tower'`, find and destroy any existing tower connection. Add connection to map. Send WELCOME and REPLAY.
+3. **Pre-HELLO frame gating**: In `handleFrame()`, before dispatching any frame, check whether the socket has completed HELLO. Non-HELLO frames received before handshake are silently ignored. This prevents an unauthenticated socket from sending DATA/RESIZE/SIGNAL/SPAWN to the PTY. Implementation: track a `handshakeComplete` flag per socket (set to true in `handleHello()` after successful handshake).
 
-4. Update `handleFrame()` (line 218): Pass connection ID to frame handlers that need access control. For SIGNAL and SPAWN: look up connection in map, check if `clientType === 'tower'`, silently ignore if not.
+4. Update `handleHello()` (line 252): Parse `clientType` from HELLO. Generate connection ID. If `clientType === 'tower'`, find and destroy any existing tower connection. Add connection to map, set `handshakeComplete = true`. Send WELCOME and REPLAY.
 
-5. Update PTY data broadcast (line 118-127): Replace single `currentConnection.write()` with iteration over all connections in map. On write failure, destroy and remove that connection.
+5. Update `handleFrame()` (line 218): Check `handshakeComplete` flag first — ignore all non-HELLO frames if false. Pass connection ID to frame handlers that need access control. For SIGNAL and SPAWN: look up connection in map, check if `clientType === 'tower'`, silently ignore if not.
 
-6. Update PTY exit broadcast (line 130-149): Same broadcast pattern as data — send EXIT frame to all connections.
+6. Update PTY data broadcast (line 118-127): Replace single `currentConnection.write()` with iteration over all connections in map. On write failure, destroy and remove that connection.
 
-7. Update `shutdown()` (line 369-385): Iterate and destroy all connections in map, then clear the map.
+7. Update PTY exit broadcast (line 130-149): Same broadcast pattern as data — send EXIT frame to all connections.
 
-8. Update `handleData()` (line 283): No change needed — any client can send DATA.
+8. Update `shutdown()` (line 369-385): Iterate and destroy all connections in map, then clear the map. Also destroy any pre-HELLO sockets not yet in the map.
 
-9. Update `handleResize()` (line 289): No change needed — any client can send RESIZE (last resize wins).
+9. Update `handleData()` (line 283): No change needed — any client can send DATA (gated by handshakeComplete check in step 3).
+
+10. Update `handleResize()` (line 289): No change needed — any client can send RESIZE (last resize wins, gated by handshakeComplete).
 
 **`packages/codev/src/terminal/shellper-client.ts`**:
 - Update `connect()` (line 111): Change HELLO encoding from `{ version: PROTOCOL_VERSION }` to `{ version: PROTOCOL_VERSION, clientType: 'tower' }`.
@@ -111,6 +113,8 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 - Add new test: "broadcast EXIT to multiple clients" — both receive EXIT frame.
 - Add new test: "failed write removes client from map" — destroy one socket's writable side, verify it's removed on next broadcast.
 - Add new test: "independent REPLAY on each connect" — connect tower, generate output, connect terminal, verify terminal gets REPLAY.
+- Add new test: "pre-HELLO DATA frames are ignored" — connect socket, send DATA without HELLO first, verify PTY received nothing.
+- Add new test: "socket close before HELLO completes cleanly" — connect, close immediately without HELLO, no crash or leak.
 - Update existing "new connection replaces old one" test → "new tower connection replaces old tower connection".
 
 #### Acceptance Criteria
@@ -153,7 +157,8 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 - [ ] Socket path discovery from SQLite `terminal_sessions` table
 - [ ] Fallback: scan `~/.codev/run/shellper-*.sock`
 - [ ] `--browser` flag preserved (existing behavior)
-- [ ] Unit tests for socket discovery logic
+- [ ] Unit tests for socket discovery logic (with workspace scoping)
+- [ ] Unit tests for terminal attach lifecycle (handshake, data flow, detach, cleanup)
 
 #### Implementation Details
 
@@ -163,7 +168,9 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
    ```typescript
    function findShellperSocket(builderId: string): string | null
    ```
-   - Query SQLite global DB: `SELECT shellper_socket FROM terminal_sessions WHERE role_id = ? AND shellper_socket IS NOT NULL`
+   - Resolve the builder's workspace path from the builder record (already available via `findBuilderById()`)
+   - Query SQLite global DB: `SELECT shellper_socket FROM terminal_sessions WHERE role_id = ? AND workspace_path = ? AND shellper_socket IS NOT NULL ORDER BY created_at DESC LIMIT 1`
+   - The `workspace_path` scope prevents cross-workspace collisions when the same role_id exists in multiple workspaces
    - If no result, scan `~/.codev/run/shellper-*.sock` for a matching socket
    - Return socket path or null
 
@@ -207,12 +214,22 @@ Replace shellper's single-connection model with a multi-client `Map<string, net.
 - [ ] Terminal state restored on disconnect (raw mode disabled)
 
 #### Test Plan
-- **Unit Tests**: Socket discovery function (mock SQLite, mock filesystem)
-- **Integration**: Manual test with running builder — attach, type commands, verify output, detach
+- **Unit Tests** (in `packages/codev/src/agent-farm/__tests__/attach.test.ts`):
+  - Socket discovery: mock SQLite returning socket path, verify correct query with workspace scoping
+  - Socket discovery: mock SQLite returning no rows, verify fallback scan behavior
+  - Socket discovery: multiple rows for same role_id, verify most recent selected
+  - `attachTerminal()` with mock socket: verify HELLO sent with `clientType: 'terminal'`
+  - `attachTerminal()` with mock socket: verify WELCOME response completes handshake
+  - `attachTerminal()` with mock socket: verify DATA frames written to stdout
+  - `attachTerminal()` with mock socket: verify stdin bytes sent as DATA frames
+  - `attachTerminal()` with mock socket: verify Ctrl-\ (0x1c) triggers detach and cleanup
+  - `attachTerminal()` with mock socket: verify EXIT frame triggers cleanup and exit
+  - `attachTerminal()` cleanup: verify raw mode restored on disconnect (mock process.stdin.setRawMode)
 - **Manual Testing**:
   - Start Tower + builder, `af attach -p <id>`, verify dual-view
   - Disconnect af attach, verify Tower still works
   - Restart Tower, verify af attach still connected
+  - Kill af attach process (Ctrl-\), verify terminal state restored
 
 #### Risks
 - **Risk**: Raw mode not properly restored on crash
@@ -241,6 +258,23 @@ Phase 1 (Protocol & Multi-Client) ──→ Phase 2 (af attach)
 | RESIZE conflicts | Low | Low | Last resize wins, same as current |
 | Slow client degrades broadcast | Low | Medium | Failed writes remove client from map immediately |
 | Raw terminal state not restored | Low | High | try/finally + process exit handlers |
+
+## Consultation Log
+
+### Iteration 1 (Gemini, Codex, Claude)
+
+**Gemini** (APPROVE): Comprehensive and technically sound. No blocking issues.
+
+**Codex** (REQUEST_CHANGES): Three issues: (1) missing pre-HELLO frame gating — frames before handshake could affect PTY, (2) socket discovery query ambiguous without workspace scoping, (3) Phase 2 test plan too thin — only socket discovery unit tested.
+
+**Claude** (APPROVE): Two minor issues: (1) socket discovery needs workspace_path scope to avoid cross-workspace collisions, (2) pre-HELLO connection lifecycle edge case should be explicit.
+
+**Changes made**:
+1. Added explicit pre-HELLO frame gating with `handshakeComplete` flag — non-HELLO frames ignored until handshake completes
+2. Added socket close-before-HELLO cleanup handling in `handleConnection()`
+3. Scoped socket discovery query with `workspace_path` and `ORDER BY created_at DESC LIMIT 1`
+4. Expanded Phase 2 test plan with 10 automated unit tests for terminal attach lifecycle (handshake, data flow, detach, cleanup, raw mode restoration)
+5. Added two new Phase 1 test cases: pre-HELLO DATA ignored, socket close before HELLO
 
 ## Validation Checkpoints
 1. **After Phase 1**: Multiple test clients can connect to shellper simultaneously, both receive data, tower replacement works, access control works
