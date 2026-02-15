@@ -58,6 +58,7 @@ const rateLimitCleanupInterval = startRateLimitCleanup();
 
 // Shellper session manager (initialized at startup)
 let shellperManager: SessionManager | null = null;
+let shellperCleanupInterval: NodeJS.Timeout | null = null;
 
 // Parse arguments with Commander
 const program = new Command()
@@ -133,8 +134,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
     log('INFO', 'Shellper sessions will continue running (sockets close on process exit)');
   }
 
-  // 4. Stop rate limit cleanup
+  // 4. Stop rate limit cleanup and shellper periodic cleanup
   clearInterval(rateLimitCleanupInterval);
+  if (shellperCleanupInterval) clearInterval(shellperCleanupInterval);
 
   // 5. Disconnect tunnel (Spec 0097 Phase 4 / Spec 0105 Phase 2)
   shutdownTunnel();
@@ -249,7 +251,7 @@ server.listen(port, '127.0.0.1', async () => {
   log('INFO', `Tower server listening at http://localhost:${port}`);
 
   // Initialize shellper session manager for persistent terminals
-  const socketDir = path.join(homedir(), '.codev', 'run');
+  const socketDir = process.env.SHELLPER_SOCKET_DIR || path.join(homedir(), '.codev', 'run');
   const shellperScript = path.join(__dirname, '..', '..', 'terminal', 'shellper-main.js');
   shellperManager = new SessionManager({
     socketDir,
@@ -261,6 +263,20 @@ server.listen(port, '127.0.0.1', async () => {
   if (staleCleaned > 0) {
     log('INFO', `Cleaned up ${staleCleaned} stale shellper socket(s)`);
   }
+
+  // Periodic cleanup: catch orphaned sockets during Tower lifetime (not just at startup)
+  const cleanupIntervalMs = Math.max(parseInt(process.env.SHELLPER_CLEANUP_INTERVAL_MS || '60000', 10) || 60000, 1000);
+  shellperCleanupInterval = setInterval(async () => {
+    try {
+      const cleaned = await shellperManager!.cleanupStaleSockets();
+      if (cleaned > 0) {
+        log('INFO', `Periodic cleanup: removed ${cleaned} stale shellper socket(s)`);
+      }
+    } catch (err) {
+      log('ERROR', `Periodic shellper cleanup failed: ${(err as Error).message}`);
+    }
+  }, cleanupIntervalMs);
+
   log('INFO', 'Shellper session manager initialized');
 
   // Spec 0105 Phase 4: Initialize terminal management module
