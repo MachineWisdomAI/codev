@@ -10,6 +10,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { loadState } from '../state.js';
 import { TowerClient } from '../lib/tower-client.js';
 import { getConfig } from '../utils/index.js';
+import { resolveAgentName } from '../utils/agent-names.js';
 
 const MAX_FILE_SIZE = 48 * 1024; // 48KB limit per spec
 
@@ -62,7 +63,12 @@ async function sendToBuilder(
   options: SendOptions
 ): Promise<void> {
   const state = loadState();
-  const builder = state.builders.find((b) => b.id === builderId);
+  const { builder, ambiguous } = resolveAgentName(builderId, state.builders);
+
+  if (ambiguous) {
+    const candidates = ambiguous.map(b => b.id).join(', ');
+    throw new Error(`Ambiguous builder ID '${builderId}' matches multiple builders: ${candidates}. Use the full name.`);
+  }
 
   if (!builder) {
     throw new Error(`Builder ${builderId} not found. Use 'af status' to see active builders.`);
@@ -245,14 +251,29 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * Detect the current builder ID from worktree path
- * Returns null if not in a builder worktree
+ * Detect the current builder ID from worktree path.
+ * Looks up the canonical builder ID from state.db by matching worktree path.
+ * Falls back to the worktree directory name if no match in state.db.
+ * Returns null if not in a builder worktree.
  */
 function detectCurrentBuilderId(): string | null {
   const cwd = process.cwd();
-  // Builder worktrees are at .builders/<id>/
+  // Builder worktrees are at .builders/<dir-name>/
   const match = cwd.match(/\.builders\/([^/]+)/);
-  return match ? match[1] : null;
+  if (!match) return null;
+
+  const worktreeDirName = match[1];
+
+  // Look up the canonical builder ID from state.db by matching worktree path
+  const state = loadState();
+  const builder = state.builders.find(b => {
+    if (!b.worktree) return false;
+    // Match on the worktree directory name (last segment of the path)
+    const builderWorktreeDir = b.worktree.split('/').pop();
+    return builderWorktreeDir === worktreeDirName;
+  });
+
+  return builder ? builder.id : worktreeDirName;
 }
 
 /**
