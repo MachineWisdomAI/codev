@@ -11,11 +11,11 @@ plan_phases:
     status: complete
   - id: phase_3
     title: Stats Subcommand and CLI Routing
-    status: in_progress
+    status: complete
   - id: phase_4
     title: Porch Integration and Tests
-    status: pending
-current_plan_phase: phase_3
+    status: in_progress
+current_plan_phase: phase_4
 gates:
   spec-approval:
     status: approved
@@ -171,4 +171,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev-public/.builders/0115/codev/projects/0115-consultation-metrics/0115-phase_2-iter1-claude.txt
 started_at: '2026-02-15T13:11:11.234Z'
-updated_at: '2026-02-15T15:42:18.258Z'
+updated_at: '2026-02-15T17:15:53.845Z'
