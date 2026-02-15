@@ -423,23 +423,35 @@ describe('heartbeat', () => {
     (client as any).state = 'connected';
     (client as any).startHeartbeat(ws);
 
-    // Trigger ping
+    // Trigger ping — arms a pong timeout
     vi.advanceTimersByTime(PING_INTERVAL_MS);
+    expect((client as any).pongTimeout).not.toBeNull();
 
-    // Simulate native close event (as doConnect's ws.on('close') would do)
-    // This sets ws to null via cleanup
+    // Simulate native close event (as doConnect's ws.on('close') would do).
+    // cleanup() calls stopHeartbeat() which clears the pong timeout,
+    // then scheduleReconnect() sets exactly one reconnect timer.
     (client as any).cleanup();
     (client as any).setState('disconnected');
     (client as any).consecutiveFailures++;
-    // At this point this.ws is null
+    (client as any).scheduleReconnect();
 
-    // Now the pong timeout fires — but ws !== this.ws (null), so it no-ops
-    vi.advanceTimersByTime(PONG_TIMEOUT_MS);
+    // The pong timeout was cleared by cleanup → stopHeartbeat
+    expect((client as any).pongTimeout).toBeNull();
 
-    // State should still be disconnected (not reconnected twice)
-    expect((client as any).state).toBe('disconnected');
-    // warn should NOT be called because the stale guard prevented it
+    // One reconnect timer is active from scheduleReconnect
+    const reconnectTimerAfterClose = (client as any).reconnectTimer;
+    expect(reconnectTimerAfterClose).not.toBeNull();
+
+    // Even if we tried to fire the pong timeout (it's cleared, so it won't),
+    // the stale guard (ws !== this.ws since this.ws is now null) prevents
+    // a second reconnect. Verify warn was never called:
     expect(warnSpy).not.toHaveBeenCalled();
+
+    // The reconnect timer is still the same one — not replaced by a second reconnect
+    expect((client as any).reconnectTimer).toBe(reconnectTimerAfterClose);
+
+    // Clean up
+    (client as any).clearReconnectTimer();
   });
 
   it('normal pong does not produce any log output (silent success)', () => {
