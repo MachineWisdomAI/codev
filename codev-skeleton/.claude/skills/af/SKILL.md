@@ -28,13 +28,13 @@ af dash open               # Open dashboard in browser
 ## Builder Management
 
 ```bash
-af spawn -p 0003           # Spawn builder for spec (strict mode, default)
-af spawn --soft -p 0003    # Spawn builder (soft mode)
+af spawn -p 3           # Spawn builder for spec (strict mode, default)
+af spawn --soft -p 3    # Spawn builder (soft mode)
 af spawn --issue 42        # Spawn builder for a bugfix
-af spawn -p 0003 --resume  # Resume builder in existing worktree
+af spawn -p 3 --resume  # Resume builder in existing worktree
 af status                  # Check all builder status
-af cleanup --project 0003  # Clean up builder worktree (safe)
-af cleanup --project 0003 -f  # Force cleanup
+af cleanup --project 3  # Clean up builder worktree (safe)
+af cleanup --project 3 -f  # Force cleanup
 ```
 
 ### Resuming Builders
@@ -43,10 +43,10 @@ When a builder's Claude process dies but the worktree and porch state survive,
 use `--resume` to restart it without recreating the worktree:
 
 ```bash
-af spawn -p 0003 --resume
+af spawn -p 3 --resume
 ```
 
-This reuses the existing `.builders/0003` worktree, creates a fresh terminal
+This reuses the existing `.builders/3` worktree, creates a fresh terminal
 session registered with the Tower (so it appears in the dashboard), and lets
 porch pick up from whatever phase the builder was in. Works with all spawn
 modes: `-p`, `--issue`, `--task`, `--protocol`, `--worktree`.

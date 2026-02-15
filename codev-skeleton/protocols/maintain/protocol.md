@@ -57,8 +57,8 @@ Each maintenance run creates a numbered file in `codev/maintain/`:
 
 ```
 codev/maintain/
-├── 0001.md
-├── 0002.md
+├── 1.md
+├── 2.md
 └── ...
 ```
 
@@ -285,15 +285,15 @@ Extract actionable wisdom from review documents into `codev/resources/lessons-le
 # Lessons Learned
 
 ## Testing
-- [From 0001] Always use XDG sandboxing in tests to avoid touching real $HOME
-- [From 0009] Verify dependencies actually export what you expect
+- [From 1] Always use XDG sandboxing in tests to avoid touching real $HOME
+- [From 9] Verify dependencies actually export what you expect
 
 ## Architecture
-- [From 0008] Single source of truth beats distributed state
-- [From 0031] SQLite with WAL mode handles concurrency better than JSON files
+- [From 8] Single source of truth beats distributed state
+- [From 31] SQLite with WAL mode handles concurrency better than JSON files
 
 ## Process
-- [From 0001] Multi-agent consultation catches issues humans miss
+- [From 1] Multi-agent consultation catches issues humans miss
 ```
 
 ### Sync CLAUDE.md ↔ AGENTS.md

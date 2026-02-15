@@ -11,11 +11,11 @@ Every project goes through stages. Not all projects reach completion:
 **Active Lifecycle:**
 1. **conceived** - Initial idea captured. Spec file may exist but is not yet approved. **AI agents must stop here after writing a spec.**
 2. **specified** - Specification approved by human. **ONLY the human can mark a project as specified.**
-3. **planned** - Implementation plan created (codev/plans/NNNN-name.md exists)
+3. **planned** - Implementation plan created (codev/plans/NNN-name.md exists)
 4. **implementing** - Actively being worked on (one or more phases in progress)
 5. **implemented** - Code complete, tests passing, PR created and awaiting review
 6. **committed** - PR merged to main branch
-7. **integrated** - Merged to main, deployed to production, validated, reviewed (codev/reviews/NNNN-name.md exists), and **explicitly approved by project owner**. **ONLY the human can mark a project as integrated** - AI agents must never transition to this status on their own.
+7. **integrated** - Merged to main, deployed to production, validated, reviewed (codev/reviews/NNN-name.md exists), and **explicitly approved by project owner**. **ONLY the human can mark a project as integrated** - AI agents must never transition to this status on their own.
 
 **Terminal States:**
 - **abandoned** - Project canceled/rejected, will not be implemented (explain reason in notes)
@@ -25,15 +25,15 @@ Every project goes through stages. Not all projects reach completion:
 
 ```yaml
 projects:
-  - id: "NNNN"              # Four-digit project number
+  - id: "NNN"              # Project number (no leading zeros)
     title: "Brief title"
     summary: "One-sentence description of what this project does"
     status: conceived|specified|planned|implementing|implemented|committed|integrated|abandoned|on-hold
     priority: high|medium|low
     files:
-      spec: codev/specs/NNNN-name.md       # Required after "specified"
-      plan: codev/plans/NNNN-name.md       # Required after "planned"
-      review: codev/reviews/NNNN-name.md   # Required after "integrated"
+      spec: codev/specs/NNN-name.md       # Required after "specified"
+      plan: codev/plans/NNN-name.md       # Required after "planned"
+      review: codev/reviews/NNN-name.md   # Required after "integrated"
     dependencies: []         # List of project IDs this depends on
     tags: []                # Categories (e.g., auth, billing, ui)
     notes: ""               # Optional notes about status or decisions
@@ -41,7 +41,7 @@ projects:
 
 ## Numbering Rules
 
-1. **Sequential**: Use next available number (0001-9999)
+1. **Sequential**: Use next available number (1, 2, 3...)
 2. **Reservation**: Add entry to this file FIRST before creating spec
 3. **Renumbering**: If collision detected, newer project gets renumbered
 4. **Gaps OK**: Deleted projects leave gaps (don't reuse numbers)
@@ -110,7 +110,7 @@ Use consistent tags across projects for filtering:
 ```yaml
 projects:
   # Example project entry (replace with your actual projects)
-  - id: "0001"
+  - id: "1"
     title: "Example Project"
     summary: "Brief description of what this project accomplishes"
     status: conceived
@@ -126,7 +126,7 @@ projects:
 
 ## Next Available Number
 
-**0002** - Reserve this number for your next project
+**2** - Reserve this number for your next project
 
 ---
 

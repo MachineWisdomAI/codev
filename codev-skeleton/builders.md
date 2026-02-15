@@ -18,8 +18,8 @@ Track active builder agents here. Update manually or via `architect status`.
 <!-- Add builders below as they are spawned -->
 
 <!-- Example:
-## Builder 0003: Feature Name
-- **Branch**: builder/0003-feature-name
+## Builder 3: Feature Name
+- **Branch**: builder/3-feature-name
 - **Port**: 7681
 - **Status**: implementing
 - **Phase**: 2/4

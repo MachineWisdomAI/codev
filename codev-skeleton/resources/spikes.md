@@ -43,7 +43,7 @@ Store spikes in `codev/spikes/{spec-number}/`:
 
 ```
 codev/spikes/
-└── 0062/
+└── 62/
     ├── spike-api-behavior.ts
     ├── spike-event-handoff.ts
     └── spike-storage-roundtrip.ts
@@ -63,7 +63,7 @@ Each spike file should:
  * 2. [Another test case]
  * 3. [Edge case]
  *
- * Run with: npx tsx codev/spikes/0062/spike-name.ts
+ * Run with: npx tsx codev/spikes/62/spike-name.ts
  */
 
 // Self-contained, runnable code that validates the assumption
@@ -115,4 +115,4 @@ Why:
 - Keeps build fast and focused on production code
 - Prevents spike code from accidentally shipping
 
-Run spikes directly: `npx tsx codev/spikes/0062/spike-name.ts`
+Run spikes directly: `npx tsx codev/spikes/62/spike-name.ts`

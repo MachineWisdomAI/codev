@@ -77,7 +77,7 @@ consult -m <model> spec <number>
 ```
 
 **Arguments:**
-- `number` - Spec number to review (e.g., `42` for `codev/specs/0042-*.md`)
+- `number` - Spec number to review (e.g., `42` for `codev/specs/42-*.md`)
 
 **Description:**
 
@@ -111,7 +111,7 @@ consult -m <model> plan <number>
 ```
 
 **Arguments:**
-- `number` - Plan number to review (e.g., `42` for `codev/plans/0042-*.md`)
+- `number` - Plan number to review (e.g., `42` for `codev/plans/42-*.md`)
 
 **Description:**
 
@@ -310,7 +310,7 @@ cp $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md codev/roles/
 All consultations are logged to `.consult/history.log`:
 
 ```
-2024-01-15T10:30:00.000Z model=gemini duration=142.3s query=Review spec 0042...
+2024-01-15T10:30:00.000Z model=gemini duration=142.3s query=Review spec 42...
 ```
 
 ---

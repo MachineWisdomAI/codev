@@ -77,5 +77,5 @@ Roles are markdown files in `codev/roles/`. Create your own by adding `.md` file
 
 - The `-m` flag is **required** — `consult pr 42` will fail without it
 - PR numbers are GitHub PR numbers, not spec numbers
-- Spec/plan numbers match the `0042` prefix in filenames (pass just `42`, not `0042`)
+- Spec/plan numbers match the `42` prefix in filenames (pass just `42`, not `42`)
 - General queries must be **quoted**: `consult -m gemini general "your question here"`

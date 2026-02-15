@@ -164,7 +164,7 @@ If you encounter issues you can't resolve:
 
 Example:
 ```
-## BLOCKED: Spec 0077
+## BLOCKED: Spec 77
 Can't find the auth helper mentioned in spec. Options:
 1. Create a new auth helper
 2. Use a third-party library

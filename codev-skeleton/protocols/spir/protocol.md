@@ -553,9 +553,9 @@ Execute for each phase in the plan. Each phase follows a build-verify cycle.
 
 ### Specifications and Plans
 Format: `####-descriptive-name.md`
-- Use sequential numbering (0001, 0002, etc.)
+- Use sequential numbering (1, 2, etc.)
 - Same filename in both `specs/` and `plans/` directories
-- Example: `0001-user-authentication.md`
+- Example: `1-user-authentication.md`
 
 ## Status Tracking
 
@@ -578,10 +578,10 @@ For specification/plan documents:
 
 Examples:
 ```
-[Spec 0001] Initial specification draft
-[Spec 0001] Specification with multi-agent review
-[Spec 0001] Specification with user feedback
-[Spec 0001] Final approved specification
+[Spec 1] Initial specification draft
+[Spec 1] Specification with multi-agent review
+[Spec 1] Specification with user feedback
+[Spec 1] Final approved specification
 ```
 
 For implementation:
@@ -593,7 +593,7 @@ For implementation:
 
 Example:
 ```
-[Spec 0001][Phase: user-auth] feat: Add password hashing service
+[Spec 1][Phase: user-auth] feat: Add password hashing service
 
 Implements bcrypt-based password hashing with configurable rounds
 ```
@@ -605,7 +605,7 @@ spir/####-<spec-name>/<phase-name>
 
 Example:
 ```
-spir/0001-user-authentication/database-schema
+spir/1-user-authentication/database-schema
 ```
 
 
