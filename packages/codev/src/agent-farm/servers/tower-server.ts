@@ -272,7 +272,7 @@ server.listen(port, '127.0.0.1', async () => {
 
   // TICK-001: Reconcile terminal sessions from previous run.
   // Must run BEFORE initInstances() so that API request handlers
-  // (getInstances → getTerminalsForProject) cannot race with reconciliation.
+  // (getInstances → getTerminalsForWorkspace) cannot race with reconciliation.
   // Without this ordering, a dashboard poll arriving during reconciliation
   // triggers on-the-fly shellper reconnection that conflicts with the
   // reconciliation's own reconnection — the shellper's single-connection

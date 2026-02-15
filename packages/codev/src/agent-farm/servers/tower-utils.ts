@@ -168,7 +168,7 @@ export const MIME_TYPES: Record<string, string> = {
 
 /**
  * Build architect command args with role prompt injected.
- * Writes the role to .architect-role.md in the project dir and adds
+ * Writes the role to .architect-role.md in the workspace dir and adds
  * --append-system-prompt to the args (matching how builders receive theirs).
  * Returns the modified args array.
  */

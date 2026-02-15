@@ -35,6 +35,20 @@ describe('StatusPanel', () => {
     expect(screen.getByText('Loading...')).toBeTruthy();
   });
 
+  it('shows workspace name in header when available', () => {
+    const stateWithWorkspace: DashboardState = {
+      ...emptyState,
+      workspaceName: 'my-project',
+    };
+    render(<StatusPanel state={stateWithWorkspace} onRefresh={() => {}} />);
+    expect(screen.getByText('my-project – Agent Farm')).toBeTruthy();
+  });
+
+  it('shows default header when no workspace name', () => {
+    render(<StatusPanel state={emptyState} onRefresh={() => {}} />);
+    expect(screen.getByText('Agent Farm Dashboard')).toBeTruthy();
+  });
+
   it('shows empty messages for empty state', () => {
     render(<StatusPanel state={emptyState} onRefresh={() => {}} />);
     expect(screen.getByText('No builders spawned')).toBeTruthy();

@@ -108,4 +108,21 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_workspace ON terminal_sessions(workspace_path);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_type ON terminal_sessions(type);
+
+-- File tabs (Spec 0099 Phase 4)
+CREATE TABLE IF NOT EXISTS file_tabs (
+  id TEXT PRIMARY KEY,
+  workspace_path TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_tabs_workspace ON file_tabs(workspace_path);
+
+-- Known workspaces (persistent workspace registry)
+CREATE TABLE IF NOT EXISTS known_workspaces (
+  workspace_path TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  last_launched_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;

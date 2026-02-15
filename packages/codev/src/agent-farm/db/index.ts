@@ -307,17 +307,37 @@ function ensureGlobalDatabase(): Database.Database {
   const db = new Database(dbPath);
   configurePragmas(db);
 
-  // Run schema (creates tables if they don't exist)
-  db.exec(GLOBAL_SCHEMA);
+  // Current migration version — bump when adding new migrations
+  const GLOBAL_CURRENT_VERSION = 9;
 
-  // Check if migration is needed
-  const migrated = db.prepare('SELECT version FROM _migrations WHERE version = 1').get();
+  // Detect fresh vs existing database by checking if content tables exist.
+  // On existing databases, GLOBAL_SCHEMA must NOT run because it references column names
+  // (workspace_path) that don't exist until migration v9 renames them from project_path.
+  // We check terminal_sessions (not _migrations) because _migrations could exist but be empty
+  // in a partially-initialized legacy DB — running GLOBAL_SCHEMA on such a DB would fail
+  // since CREATE INDEX on workspace_path would reference a non-existent column.
+  const tableCheck = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='terminal_sessions'"
+  ).get();
+  const isFresh = !tableCheck;
 
-  if (!migrated) {
-    // Fresh install, just mark migration as done
-    db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (1)').run();
+  if (isFresh) {
+    // Fresh install: create all tables at their latest state
+    db.exec(GLOBAL_SCHEMA);
+    // Mark all migrations as done — schema already reflects final state
+    for (let v = 1; v <= GLOBAL_CURRENT_VERSION; v++) {
+      db.prepare('INSERT OR IGNORE INTO _migrations (version) VALUES (?)').run(v);
+    }
     console.log('[info] Created new global.db at', dbPath);
+    return db;
   }
+
+  // Existing database: only run migrations (skip GLOBAL_SCHEMA to avoid column name conflicts)
+  // Ensure _migrations table exists for tracking
+  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
 
   // Migration v2: No-op (previously added columns to port_allocations, now removed by Spec 0098)
   const v2 = db.prepare('SELECT version FROM _migrations WHERE version = 2').get();
@@ -481,9 +501,11 @@ function ensureGlobalDatabase(): Database.Database {
   }
 
   // Migration v9: Rename project_path → workspace_path in all tables (Spec 0112)
+  // Note: Fresh installs never reach here (handled above), so old column names are guaranteed.
+  // Wrapped in a transaction for atomicity — all three renames succeed or none do.
   const v9 = db.prepare('SELECT version FROM _migrations WHERE version = 9').get();
   if (!v9) {
-    try {
+    const migrate = db.transaction(() => {
       // 1. Rename terminal_sessions.project_path → workspace_path
       db.exec(`
         CREATE TABLE IF NOT EXISTS terminal_sessions_new (
@@ -533,10 +555,10 @@ function ensureGlobalDatabase(): Database.Database {
           SELECT project_path, name, last_launched_at FROM known_projects;
         DROP TABLE IF EXISTS known_projects;
       `);
-    } catch {
-      // Tables may already be in the correct schema (fresh install)
-    }
-    db.prepare('INSERT INTO _migrations (version) VALUES (9)').run();
+
+      db.prepare('INSERT INTO _migrations (version) VALUES (9)').run();
+    });
+    migrate();
     console.log('[info] Renamed project_path → workspace_path in global tables (Spec 0112)');
   }
 
