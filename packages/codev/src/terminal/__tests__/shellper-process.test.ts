@@ -653,6 +653,152 @@ describe('ShellperProcess', () => {
     });
   });
 
+  describe('log callback', () => {
+    it('logs connection accepted on new connection', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logs.some((m) => m.includes('Connection accepted'))).toBe(true);
+      socket.destroy();
+    });
+
+    it('logs connection replacing when second client connects', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket: socket1 } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { socket: socket2 } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logs.some((m) => m.includes('replacing=true'))).toBe(true);
+      socket1.destroy();
+      socket2.destroy();
+    });
+
+    it('logs HELLO version on handshake', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logs.some((m) => m.includes('HELLO: version='))).toBe(true);
+      socket.destroy();
+    });
+
+    it('logs WELCOME sent after handshake', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logs.some((m) => m.includes('WELCOME sent: pid='))).toBe(true);
+      socket.destroy();
+    });
+
+    it('logs PTY exit with code and signal', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      mockPty.simulateExit(1, 15);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(logs.some((m) => m.includes('PTY exited: code=1, signal=15'))).toBe(true);
+    });
+
+    it('logs SPAWN command and old PID', async () => {
+      let ptyCount = 0;
+      const ptys: MockPty[] = [];
+      const logs: string[] = [];
+
+      shellper = new ShellperProcess(
+        () => {
+          const pty = new MockPty();
+          pty.pid = 12345 + ptyCount++;
+          ptys.push(pty);
+          return pty;
+        },
+        socketPath,
+        10_000,
+        (msg) => logs.push(msg),
+      );
+
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      const { socket } = await connectAndHandshake(socketPath);
+
+      socket.write(
+        encodeSpawn({
+          command: '/bin/zsh',
+          args: [],
+          cwd: '/tmp',
+          env: {},
+        }),
+      );
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(logs.some((m) => m.includes('SPAWN: command=/bin/zsh'))).toBe(true);
+      expect(logs.some((m) => m.includes('killing old PTY pid=12345'))).toBe(true);
+      socket.destroy();
+    });
+
+    it('logs protocol errors', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+
+      // Send a RESIZE frame with invalid JSON payload
+      const badPayload = Buffer.from('not-json');
+      const header = Buffer.allocUnsafe(5);
+      header[0] = FrameType.RESIZE;
+      header.writeUInt32BE(badPayload.length, 1);
+      socket.write(Buffer.concat([header, badPayload]));
+
+      await new Promise((r) => setTimeout(r, 100));
+      expect(logs.some((m) => m.includes('Protocol error: Invalid RESIZE payload'))).toBe(true);
+    });
+
+    it('logs connection closed', async () => {
+      const logs: string[] = [];
+      shellper = new ShellperProcess(createMockPty, socketPath, 10_000, (msg) => logs.push(msg));
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+      await new Promise((r) => setTimeout(r, 50));
+
+      socket.destroy();
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(logs.some((m) => m.includes('Connection closed'))).toBe(true);
+    });
+
+    it('uses no-op logger by default (no errors)', async () => {
+      // Constructor without log callback should use default no-op
+      shellper = new ShellperProcess(createMockPty, socketPath);
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+
+      const { socket } = await connectAndHandshake(socketPath);
+      mockPty.simulateExit(0);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should not throw
+      socket.destroy();
+    });
+  });
+
   describe('getPid', () => {
     it('returns PTY pid after start', async () => {
       shellper = new ShellperProcess(createMockPty, socketPath);

@@ -26,6 +26,20 @@ import { ShellperProcess, type IShellperPty, type PtyOptions } from './shellper-
 // The package uses "type": "module", so bare `require()` is not available.
 const require = createRequire(import.meta.url);
 
+/** EPIPE-safe stderr logger with ISO timestamp. Silently ignores broken pipe errors. */
+function logStderr(message: string): void {
+  try {
+    process.stderr.write(`[${new Date().toISOString()}] ${message}\n`);
+  } catch (err: unknown) {
+    // EPIPE: Tower closed the read end of the pipe (e.g., after restart).
+    // Node.js ignores SIGPIPE via libuv, so we just get an error on write.
+    // Re-throw non-EPIPE errors so they aren't silently swallowed.
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code !== 'EPIPE') {
+      throw err;
+    }
+  }
+}
+
 interface ShellperConfig {
   command: string;
   args: string[];
@@ -135,7 +149,10 @@ async function main(): Promise<void> {
     createRealPty,
     config.socketPath,
     config.replayBufferLines ?? 10_000,
+    logStderr,
   );
+
+  logStderr(`Shellper started: pid=${process.pid}, command=${config.command}, socket=${config.socketPath}`);
 
   // Start the shellper (spawns PTY and listens on socket)
   await shellper.start(
@@ -146,6 +163,9 @@ async function main(): Promise<void> {
     config.cols,
     config.rows,
   );
+
+  logStderr(`PTY spawned: pid=${shellper.getPid()}, cols=${config.cols}, rows=${config.rows}`);
+  logStderr(`Socket listening: ${config.socketPath}`);
 
   // Write PID and start time to stdout, then close stdout
   const info = JSON.stringify({
@@ -163,6 +183,7 @@ async function main(): Promise<void> {
 
   // Handle SIGTERM: graceful shutdown
   process.on('SIGTERM', () => {
+    logStderr('Shellper received SIGTERM, shutting down');
     shellper.shutdown();
     // Clean up socket file
     try {
@@ -174,7 +195,8 @@ async function main(): Promise<void> {
   });
 
   // When the child process exits and no connection is active, exit the shellper
-  shellper.on('exit', () => {
+  shellper.on('exit', (exitInfo: { exitCode: number; signal?: number }) => {
+    logStderr(`PTY exited: code=${exitInfo.exitCode}, signal=${exitInfo.signal ?? null}`);
     // Don't exit immediately — Tower might send a SPAWN frame to restart.
     // The shellper stays alive as long as the socket server is running.
     // If Tower never reconnects, the shellper will be cleaned up by stale
@@ -182,11 +204,11 @@ async function main(): Promise<void> {
   });
 
   shellper.on('error', (err) => {
-    process.stderr.write(`Shellper error: ${err.message}\n`);
+    logStderr(`Shellper error: ${err.message}`);
   });
 }
 
 main().catch((err) => {
-  process.stderr.write(`Shellper fatal: ${err.message}\n`);
+  logStderr(`Shellper fatal: ${err.message}`);
   process.exit(1);
 });

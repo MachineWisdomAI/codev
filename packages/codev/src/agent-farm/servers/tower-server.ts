@@ -255,6 +255,7 @@ server.listen(port, '127.0.0.1', async () => {
     socketDir,
     shellperScript,
     nodeExecutable: process.execPath,
+    logger: (msg: string) => log('INFO', msg),
   });
   const staleCleaned = await shellperManager.cleanupStaleSockets();
   if (staleCleaned > 0) {

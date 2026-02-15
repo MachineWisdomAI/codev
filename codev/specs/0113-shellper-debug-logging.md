@@ -42,7 +42,7 @@ Log to stderr (which is currently ignored — see R5):
 
 ### R3: Session lifecycle logging in Tower (`session-manager.ts`)
 
-SessionManager should accept an optional logger and log:
+SessionManager should accept an optional `logger` callback in `SessionManagerConfig` (signature: `(message: string) => void`). Tower MUST always provide this callback when constructing SessionManager (wired to Tower's `log()` utility). When provided, log:
 
 | Event | What to log |
 |-------|-------------|
@@ -72,8 +72,10 @@ SessionManager should accept an optional logger and log:
 Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignore']` — stderr is discarded. Change to capture stderr:
 
 - Spawn with `stdio: ['ignore', 'pipe', 'pipe']`
-- Buffer last N lines (e.g., 50) of stderr per session in SessionManager
-- When a session exits or crashes, include the stderr tail in the Tower log:
+- Buffer last 500 lines of stderr per session in SessionManager (lines truncated at 10000 chars; non-UTF-8 bytes replaced with `?`)
+- When a session exits, crashes, or is killed, log the stderr tail after the stderr stream emits `close` (which guarantees all buffered data has been read). If the stream is already closed at the time of the exit/kill event, log immediately. If `close` has not fired within 1000ms of the process exit, log the buffer as-is with a `(stderr incomplete)` note.
+- When `createSession` fails (shellper exits before session establishment), include the captured startup stderr in the failure log.
+- **Limitation**: Reconnected sessions (after Tower restart) will not have stderr capture, since stderr is only available for child processes spawned by this Tower instance. This is acceptable — reconnected shellpers were already running successfully.
   ```
   Session {id} exited (code={code}). Last stderr:
     Shellper received SIGTERM, shutting down
@@ -83,7 +85,7 @@ Currently, shellper processes are spawned with `stdio: ['ignore', 'pipe', 'ignor
 
 ### R6: Log format
 
-All shellper-side logs (R1, R2) use a simple timestamped format to stderr:
+All shellper-side logs (R1, R2) use a simple timestamped format to stderr. Stderr writes must silently ignore EPIPE errors (which occur when Tower has closed the pipe's read end, e.g., after Tower restart). A helper function should wrap `process.stderr.write()` with a try/catch for this.
 
 ```
 [2026-02-15T12:00:00.000Z] PTY spawned: pid=1234, cols=200, rows=50
@@ -105,4 +107,14 @@ Tower-side logs (R3, R4, R5) use the existing `log()` utility in tower-server.ts
 2. When a reconnection fails, the log explains why (process dead, PID reused, socket missing, connect refused)
 3. When auto-restart fires, the log shows the restart count and delay
 4. `shellper-main.ts` logs startup, SIGTERM, and PTY exit to stderr
-5. All new logging is at INFO level (not DEBUG) — this is operational logging we always want
+5. All new logging is always emitted (not gated behind a debug flag). Shellper-side logs (R1, R2) are plain timestamped text to stderr with no level token. Tower-side logs (R3, R4, R5) use the existing `log()` utility which includes level.
+
+## Testing
+
+Existing test files (`session-manager.test.ts`, `tower-shellper-integration.test.ts`) should be updated to account for the `stdio` config change from `'ignore'` to `'pipe'` for stderr. (`shellper-protocol.test.ts` tests wire protocol encoding and is unaffected.)
+
+New test coverage expected:
+- **stderr capture**: Verify that shellper stderr output is buffered and surfaced when the process exits (by code and by signal)
+- **stderr truncation**: Verify the 500-line / 10000-char limits
+- **reconnect failure reasons**: Verify each `return null` path in `reconnectSession` now provides a reason string in the log
+- **auto-restart logging**: Verify restart count and delay appear in log output

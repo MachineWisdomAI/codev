@@ -98,9 +98,9 @@ export class PtySession extends EventEmitter {
       this.onPtyData(data);
     });
 
-    this.pty.onExit(({ exitCode }) => {
+    this.pty.onExit(({ exitCode, signal }) => {
       this.exitCode = exitCode;
-      this.emit('exit', exitCode);
+      this.emit('exit', exitCode, signal);
       this.cleanup();
     });
   }
@@ -135,7 +135,7 @@ export class PtySession extends EventEmitter {
     // Handle shellper exit (process inside shellper exited)
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
-      this.emit('exit', exitInfo.code);
+      this.emit('exit', exitInfo.code, exitInfo.signal);
       // For shellper-backed sessions, cleanup closes disk log and clients
       // but doesn't clear the ring buffer (shellper may still have replay data)
       this.cleanupShellper();

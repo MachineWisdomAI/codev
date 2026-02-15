@@ -403,13 +403,13 @@ export async function launchInstance(workspacePath: string): Promise<{ success: 
 
             // Clean up cache/SQLite when the shellper session exits
             if (ptySession) {
-              ptySession.on('exit', () => {
+              ptySession.on('exit', (exitCode?: number, signal?: number | string | null) => {
                 const currentEntry = _deps!.getWorkspaceTerminalsEntry(resolvedPath);
                 if (currentEntry.architect === session.id) {
                   currentEntry.architect = undefined;
                 }
                 _deps!.deleteTerminalSession(session.id);
-                _deps!.log('INFO', `Architect shellper session exited for ${workspacePath}`);
+                _deps!.log('INFO', `Architect shellper session exited for ${workspacePath} (code=${exitCode ?? null}, signal=${signal ?? null})`);
               });
             }
 
