@@ -37,6 +37,7 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 | `project_id` | TEXT | Porch project ID if applicable (e.g., `0108`, `bugfix-269`), null for manual invocations |
 | `duration_seconds` | REAL NOT NULL | Wall-clock duration from subprocess start to exit |
 | `input_tokens` | INTEGER | Exact input/prompt tokens from structured model output, null if unavailable |
+| `cached_input_tokens` | INTEGER | Cached input tokens (subset of input_tokens with discounted pricing), null if unavailable |
 | `output_tokens` | INTEGER | Exact output/completion tokens from structured model output, null if unavailable |
 | `cost_usd` | REAL | Cost in USD: exact from SDK when available, computed from exact tokens × static rates otherwise, null if neither possible |
 | `exit_code` | INTEGER NOT NULL | Subprocess exit code (0 = success) |
@@ -159,10 +160,12 @@ This ensures porch review files remain plain text, users see human-readable outp
 
 #### Error handling
 
-Token/cost capture must never cause a consultation to fail. Wrap all structured output parsing in try/catch. If parsing fails:
-1. Store null for `input_tokens`, `output_tokens`, and `cost_usd`
+**Token/cost extraction**: Must never cause a consultation to fail. Wrap all structured output parsing in try/catch. If parsing fails:
+1. Store null for `input_tokens`, `cached_input_tokens`, `output_tokens`, and `cost_usd`
 2. Log a warning to stderr with the parse error details
 3. Continue normally — the consultation result is still valid
+
+**Response text extraction failure (critical fallback)**: If JSON/JSONL parsing fails when extracting the review text (e.g., malformed output, unexpected format), the raw subprocess output MUST be written to stdout/outputPath as-is. This ensures porch review files are never empty — even if they contain raw JSON, downstream verdict parsing can still attempt to find the VERDICT block in the text. Metrics should record the consultation with null token/cost data. This is the "degrade gracefully" principle: a metrics parsing failure must never break the consultation pipeline.
 
 ### R4: Protocol and project context
 
@@ -184,6 +187,8 @@ These are optional. When omitted (manual invocations), `protocol` defaults to `m
 ### R5: `consult stats` subcommand
 
 Add a new subcommand `consult stats` that queries `~/.codev/metrics.db` and displays summary statistics.
+
+**CLI routing**: The current `consult` command requires `-m, --model` (it's a `requiredOption` in Commander). The `stats` subcommand does NOT need a model. Handle this by intercepting `stats` before Commander's option validation — either by making `-m` optional and checking it's present for non-stats subcommands, or by registering `stats` as a separate Commander subcommand (e.g., `codev consult-stats`). The recommended approach is making `-m` optional in Commander and validating it in the handler code, since `consult stats` is semantically part of the `consult` command family.
 
 **Cold start**: If `metrics.db` does not exist, print "No metrics data found. Run a consultation first." and exit 0.
 
@@ -269,7 +274,7 @@ Keep the existing `logQuery()` text log as-is. It serves a different purpose (pe
 |------|--------|
 | `packages/codev/src/commands/consult/index.ts` | Add `--protocol` and `--project-id` flags to `ConsultOptions`. Capture Claude SDK `result` message for usage data. Add `--output-format json` to Gemini args; add `--json` to Codex args. After each consultation completes, call `MetricsDB.record()`. |
 | `packages/codev/src/commands/porch/next.ts` | Add `--protocol` and `--project-id` flags to consultation command templates |
-| `packages/codev/src/cli.ts` | Add `--protocol` and `--project-id` option definitions; add `stats` subcommand routing |
+| `packages/codev/src/cli.ts` | Add `--protocol` and `--project-id` option definitions; make `-m` optional (required for all subcommands except `stats`); add `stats` subcommand routing |
 
 ### MetricsDB API
 
@@ -283,6 +288,7 @@ interface MetricsRecord {
   projectId: string | null;
   durationSeconds: number;
   inputTokens: number | null;
+  cachedInputTokens: number | null;
   outputTokens: number | null;
   costUsd: number | null;
   exitCode: number;
@@ -318,11 +324,18 @@ The function should:
 
 ```typescript
 // Static pricing — only used for Gemini and Codex (Claude provides exact cost via SDK)
-const SUBPROCESS_MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
-  codex:  { inputPer1M: 2.00, outputPer1M: 8.00 },   // gpt-5.2-codex pricing
-  gemini: { inputPer1M: 1.25, outputPer1M: 10.00 },   // gemini-3-pro-preview pricing
+// Includes cached input rates to avoid overcharging on cache-heavy runs
+const SUBPROCESS_MODEL_PRICING: Record<string, {
+  inputPer1M: number;
+  cachedInputPer1M: number;
+  outputPer1M: number;
+}> = {
+  codex:  { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 },   // gpt-5.2-codex
+  gemini: { inputPer1M: 1.25, cachedInputPer1M: 0.315, outputPer1M: 10.00 },  // gemini-3-pro-preview
 };
 ```
+
+**Cost formula**: `cost = (input - cached) × inputRate + cached × cachedRate + output × outputRate`. If cached token count is unavailable, fall back to `cost = input × inputRate + output × outputRate` (minor overcount for cached runs, but still based on exact token counts).
 
 Update these constants manually when pricing changes. A future enhancement could fetch pricing from the LiteLLM community-maintained JSON file (`github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json`), but no official provider API exists for programmatic pricing data.
 
@@ -362,3 +375,4 @@ Update these constants manually when pricing changes. A future enhancement could
 11. **Unit test**: Codex JSONL output unwrapping — verify assistant message text is extracted from `message` events.
 12. **Unit test**: Concurrent MetricsDB writes — verify three rapid inserts from different connections succeed with WAL+busy_timeout.
 13. **Unit test**: `consult stats` with no database file prints "No metrics data found" and exits 0.
+14. **Unit test**: JSON parsing failure fallback — when Gemini output is not valid JSON, raw output is written to outputPath and metrics record has null token/cost data.
