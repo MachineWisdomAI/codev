@@ -119,7 +119,7 @@ describe('PtySession', () => {
     exitCallback({ exitCode: 0 });
     expect(session.status).toBe('exited');
     expect(session.info.exitCode).toBe(0);
-    expect(exitSpy).toHaveBeenCalledWith(0);
+    expect(exitSpy).toHaveBeenCalledWith(0, undefined);
   });
 
   it('handles failed send to client gracefully', () => {

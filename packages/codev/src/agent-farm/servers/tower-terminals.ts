@@ -563,6 +563,7 @@ export async function getTerminalsForWorkspace(
           };
         }
 
+        _deps.log('INFO', `On-the-fly shellper reconnect for ${dbSession.id}`);
         const client = await _deps.shellperManager.reconnectSession(
           dbSession.id,
           dbSession.shellper_socket,
@@ -587,15 +588,16 @@ export async function getTerminalsForWorkspace(
               deleteTerminalSession(newSession.id);
             });
           }
+          const originalSessionId = dbSession.id;
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
             dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
-          _deps.log('INFO', `Reconnected to shellper on-the-fly → ${newSession.id}`);
+          _deps.log('INFO', `On-the-fly reconnect succeeded for ${originalSessionId} → ${newSession.id}`);
         }
       } catch (err) {
-        _deps.log('WARN', `Failed shellper on-the-fly reconnect for ${dbSession.id}: ${(err as Error).message}`);
+        _deps.log('WARN', `On-the-fly reconnect failed for ${dbSession.id}: ${(err as Error).message}`);
       }
     }
 
