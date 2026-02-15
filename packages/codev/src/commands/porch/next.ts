@@ -434,7 +434,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = verifyConfig.models.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlag}${contextFlag} --protocol ${state.protocol} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       tasks.push({
@@ -469,7 +469,7 @@ async function handleBuildVerify(
       }
 
       const consultCmds = missingModels.map(
-        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
+        m => `consult --model ${m} --type ${verifyConfig.type}${planPhaseFlagPartial}${contextFlagPartial} --protocol ${state.protocol} --project-id ${state.id} --output "${getReviewFilePath(workspaceRoot, state, m)}" ${consultType} ${state.id}`
       );
 
       return {
