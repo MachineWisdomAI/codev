@@ -179,6 +179,8 @@ export class SessionManager extends EventEmitter {
         ? `. Startup stderr:\n  ${stderrLines.join('\n  ')}`
         : '';
       this.log(`Session ${opts.sessionId} creation failed: ${(err as Error).message}${stderrSuffix}`);
+      // Kill orphaned child process using handle (not PID — may not be available yet)
+      try { child.kill('SIGKILL'); } catch { /* already dead or no permission */ }
       this.unlinkSocketIfExists(socketPath);
       throw err;
     }
