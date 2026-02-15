@@ -988,17 +988,20 @@
       // Position dialog next to click
       const dialog = document.querySelector('.dialog');
       const rect = event.target.getBoundingClientRect();
-      const dialogWidth = 700;
+      // Use actual rendered width (CSS max-width: 90vw constrains on mobile)
+      const dialogWidth = Math.min(700, window.innerWidth * 0.9);
       const dialogHeight = 350;
+      const margin = 10;
 
       // Position to the right of the line number, with some padding
       let left = rect.right + 10;
       let top = rect.top;
 
       // Keep dialog in viewport
-      if (left + dialogWidth > window.innerWidth) {
-        left = window.innerWidth - dialogWidth - 20;
+      if (left + dialogWidth > window.innerWidth - margin) {
+        left = (window.innerWidth - dialogWidth) / 2;
       }
+      if (left < margin) left = margin;
       if (top + dialogHeight > window.innerHeight) {
         top = window.innerHeight - dialogHeight - 20;
       }
