@@ -21,7 +21,7 @@ import { homedir, tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { PtySessionInfo } from '../../terminal/pty-session.js';
-import { DEFAULT_COLS, DEFAULT_ROWS } from '../../terminal/index.js';
+import { DEFAULT_COLS, defaultSessionOptions } from '../../terminal/index.js';
 import type { SSEClient } from './tower-types.js';
 import { parseJsonBody, isRequestAllowed } from '../utils/server-utils.js';
 import {
@@ -355,9 +355,8 @@ async function handleTerminalCreate(
           args: args || [],
           cwd,
           env: sessionEnv,
+          ...defaultSessionOptions(),
           cols: cols || DEFAULT_COLS,
-          rows: DEFAULT_ROWS,
-          restartOnExit: false,
         });
 
         const replayData = client.getReplayData() ?? Buffer.alloc(0);
@@ -1246,9 +1245,7 @@ async function handleWorkspaceShellCreate(
           args: shellArgs,
           cwd: workspacePath,
           env: shellEnv,
-          cols: DEFAULT_COLS,
-          rows: DEFAULT_ROWS,
-          restartOnExit: false,
+          ...defaultSessionOptions(),
         });
 
         const replayData = client.getReplayData() ?? Buffer.alloc(0);

@@ -10,7 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PtySession } from './pty-session.js';
 import type { PtySessionConfig, PtySessionInfo } from './pty-session.js';
 import { decodeFrame, encodeControl, encodeData } from './ws-protocol.js';
-import { DEFAULT_COLS, DEFAULT_ROWS } from './index.js';
+import { defaultSessionOptions } from './index.js';
 
 export interface TerminalManagerConfig {
   workspaceRoot: string;
@@ -73,12 +73,13 @@ export class TerminalManager {
       LC_ALL: process.env.LC_ALL ?? '',
     };
 
+    const defaults = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {
       id,
       command: shell,
       args: req.args ?? [],
-      cols: req.cols ?? DEFAULT_COLS,
-      rows: req.rows ?? DEFAULT_ROWS,
+      cols: req.cols ?? defaults.cols,
+      rows: req.rows ?? defaults.rows,
       cwd: req.cwd ?? this.config.workspaceRoot,
       env: { ...baseEnv, ...req.env },
       label: req.label ?? `terminal-${id.slice(0, 8)}`,
@@ -119,12 +120,13 @@ export class TerminalManager {
     }
 
     const id = randomUUID();
+    const { cols, rows } = defaultSessionOptions();
     const sessionConfig: PtySessionConfig = {
       id,
       command: '', // Not used for shellper-backed sessions
       args: [],
-      cols: DEFAULT_COLS,
-      rows: DEFAULT_ROWS,
+      cols,
+      rows,
       cwd: opts.cwd,
       env: {},
       label: opts.label,
