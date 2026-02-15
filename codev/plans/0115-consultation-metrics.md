@@ -105,10 +105,16 @@ function extractReviewText(model: string, output: string): string | null
 
 #### Implementation Details
 
+**Timestamp capture**: Record `timestamp = new Date().toISOString()` at invocation start (before spawning subprocess or starting SDK session). This is the invocation start time per spec R1, not the completion time.
+
+**Protocol default**: When `protocol` is not provided via `--protocol` flag (manual invocations), default to `'manual'`. When `projectId` is not provided, default to `null`. Apply these defaults in the `consult()` function before calling `MetricsDB.record()`.
+
+**Do NOT modify or remove the existing `logQuery()` call** — it serves a different purpose (per-project quick history) per spec R7.
+
 **Claude path** (`runClaudeConsultation`, lines 272-337):
 - Capture the `result` message when `message.type === 'result'` and `message.subtype === 'success'`. Store a reference to it.
 - After the for-await loop, call `extractUsage('claude', '', sdkResult)` to get usage data.
-- After writing output file (line 326-330), call `MetricsDB.record()` with the captured data.
+- After writing output file (line 326-330), call `MetricsDB.record()` with the captured data (using the `timestamp` captured at start).
 - On SDK error (line 319-322), still record metrics with `exitCode: 1`, `errorMessage: exception.message.substring(0, 500)`, null tokens/cost.
 
 **Subprocess path** (`runConsultation`, lines 342-501):
@@ -162,14 +168,23 @@ function extractReviewText(model: string, output: string): string | null
 
 **`cli.ts`** (lines 84-114):
 - Change `.requiredOption('-m, --model ...')` to `.option('-m, --model ...')` (make optional)
-- In the action handler (line 97-113): if `subcommand === 'stats'`, import and call `handleStats(args, options)` then return. Otherwise, validate that `options.model` is present (throw if missing).
-- Add new options: `--protocol <name>` and `--project-id <id>` to the consult command definition.
+- In the action handler (line 97-113): if `subcommand === 'stats'`, import and call `handleStats(args, options)` then return. Otherwise, validate that `options.model` is present (throw `"Missing required option: -m, --model"` if missing).
+- Add new options to the consult command definition:
+  - `--protocol <name>` — protocol context (spir, tick, bugfix)
+  - `--project-id <id>` — porch project ID
 
 **`stats.ts`**:
 - `handleStats(args: string[], options)` function
 - Check if `~/.codev/metrics.db` exists. If not: print "No metrics data found. Run a consultation first." and return.
-- Parse flags: `--days`, `--model`, `--type`, `--protocol`, `--project`, `--last`, `--json`
-- Note: `--model` in stats context means "filter by model" not "use model"
+- Stats-specific flags (defined as Commander options on the consult command, but only used when `subcommand === 'stats'`):
+  - `--days <N>` — limit to last N days (default: 30)
+  - `--model <name>` — filter by model (note: in stats context this means "filter by", not "use")
+  - `--type <name>` — filter by review type
+  - `--protocol <name>` — filter by protocol
+  - `--project <id>` — filter by project ID
+  - `--last <N>` — show last N individual invocations (table format)
+  - `--json` — output as JSON instead of table
+- All these flags are registered on the consult command in `cli.ts` with `.option()` so Commander knows about them (avoids unknown option issues). They are simply ignored for non-stats subcommands.
 - Default view (no `--last`): summary table matching spec R5 format
 - `--last N`: individual invocations table
 - `--json`: output as JSON
@@ -198,7 +213,7 @@ function extractReviewText(model: string, output: string): string | null
 
 #### Files
 - **Modify** `packages/codev/src/commands/porch/next.ts`
-- **Create** `packages/codev/tests/unit/consult-metrics.test.ts`
+- **Create** `packages/codev/src/commands/consult/__tests__/metrics.test.ts`
 
 #### Implementation Details
 
@@ -206,7 +221,7 @@ function extractReviewText(model: string, output: string): string | null
 - Append `--protocol ${state.protocol} --project-id ${state.id}` to the consultation command template strings.
 - `state.protocol` and `state.id` are already in scope at these locations.
 
-**Tests** (`consult-metrics.test.ts`):
+**Tests** (`packages/codev/src/commands/consult/__tests__/metrics.test.ts`) — co-located with source per project convention:
 All 14 spec tests:
 1. MetricsDB.record() + query() round-trip
 2. MetricsDB.summary() aggregation
