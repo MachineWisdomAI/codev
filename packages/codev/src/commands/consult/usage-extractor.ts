@@ -103,28 +103,35 @@ function extractCodexUsage(output: string): UsageData | null {
   let outputMissing = false;
 
   for (const line of lines) {
-    const event = JSON.parse(line);
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      // Skip non-JSON lines (e.g. progress output, debug messages)
+      continue;
+    }
     if (event.type === 'turn.completed') {
       foundTurn = true;
-      if (!event.usage) {
+      const usage = event.usage as Record<string, unknown> | undefined;
+      if (!usage) {
         // Turn completed without usage data — all totals are unknowable
         inputMissing = true;
         cachedMissing = true;
         outputMissing = true;
         continue;
       }
-      if (typeof event.usage.input_tokens === 'number') {
-        totalInput += event.usage.input_tokens;
+      if (typeof usage.input_tokens === 'number') {
+        totalInput += usage.input_tokens;
       } else {
         inputMissing = true;
       }
-      if (typeof event.usage.cached_input_tokens === 'number') {
-        totalCached += event.usage.cached_input_tokens;
+      if (typeof usage.cached_input_tokens === 'number') {
+        totalCached += usage.cached_input_tokens;
       } else {
         cachedMissing = true;
       }
-      if (typeof event.usage.output_tokens === 'number') {
-        totalOutput += event.usage.output_tokens;
+      if (typeof usage.output_tokens === 'number') {
+        totalOutput += usage.output_tokens;
       } else {
         outputMissing = true;
       }
@@ -186,7 +193,13 @@ export function extractReviewText(model: string, output: string): string | null 
       const textParts: string[] = [];
 
       for (const line of lines) {
-        const event = JSON.parse(line);
+        let event: Record<string, unknown>;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          // Skip non-JSON lines (e.g. progress output, debug messages)
+          continue;
+        }
         if (event.type === 'message' && event.role === 'assistant') {
           if (typeof event.content === 'string') {
             textParts.push(event.content);
