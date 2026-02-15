@@ -33,16 +33,22 @@ Store all consultation metrics in a global SQLite database at `~/.codev/metrics.
 | `model` | TEXT NOT NULL | Model identifier: `gemini`, `codex`, `claude` |
 | `review_type` | TEXT | Review type flag: `spec-review`, `plan-review`, `impl-review`, `pr-ready`, `integration-review`, or null for general |
 | `subcommand` | TEXT NOT NULL | Consult subcommand: `pr`, `spec`, `plan`, `impl`, `general` |
-<!-- REVIEW(@architect): How come we have both review type and subcommand and ptotocol? They seem to overlap? Should we clean this up too? -->
 | `protocol` | TEXT | Protocol context: `spir`, `tick`, `bugfix`, `manual` |
 | `project_id` | TEXT | Porch project ID if applicable (e.g., `0108`, `bugfix-269`), null for manual invocations |
 | `duration_seconds` | REAL NOT NULL | Wall-clock duration from subprocess start to exit |
-| `input_tokens` | INTEGER | Input/prompt tokens if parseable from subprocess output, null otherwise |
-| `output_tokens` | INTEGER | Output/completion tokens if parseable, null otherwise |
-| `cost_usd` | REAL | Estimated cost in USD if calculable, null otherwise |
+| `input_tokens` | INTEGER | Exact input/prompt tokens from structured model output, null if unavailable |
+| `output_tokens` | INTEGER | Exact output/completion tokens from structured model output, null if unavailable |
+| `cost_usd` | REAL | Cost in USD: exact from SDK when available, computed from exact tokens × static rates otherwise, null if neither possible |
 | `exit_code` | INTEGER NOT NULL | Subprocess exit code (0 = success) |
 | `workspace_path` | TEXT NOT NULL | Absolute path to the git repository root |
 | `error_message` | TEXT | First 500 chars of stderr if exit_code != 0, null on success |
+
+**Why three seemingly-overlapping columns (review_type, subcommand, protocol)?** These are orthogonal dimensions:
+- **subcommand** = the user action (`pr`, `spec`, `plan`, `impl`, `general`) — determines what query is built
+- **review_type** = the consultation style/prompt (`spec-review`, `impl-review`, etc.) — determines how the model reviews. A `spec` subcommand can use different review types; `general` has no review type at all
+- **protocol** = orchestration context (`spir`, `tick`, `bugfix`, `manual`) — distinguishes automated from manual invocations and enables per-protocol cost analysis. Not derivable from review_type: a `spec-review` can be triggered by SPIR, TICK, or manually
+
+All three are needed for meaningful analytics (e.g., "how much does SPIR spec-review cost via the `spec` subcommand vs the `general` subcommand?").
 
 Create `~/.codev/` directory if it does not exist. Use `better-sqlite3` (already a project dependency) for synchronous writes.
 
@@ -60,22 +66,82 @@ This is partially done already — `runConsultation()` captures `startTime` and 
 
 ### R3: Token and cost capture
 
-Where possible, parse token usage from subprocess output:
+Each model provides structured mechanisms for reporting exact token counts. **Data integrity is paramount**: only store values that come directly from the model or are computed from exact token counts. Never estimate, approximate, or guess. If exact data is unavailable, store null.
 
-- **Codex (OpenAI)**: Codex CLI prints a summary line on exit that may include token counts. If present, parse `input_tokens` and `output_tokens`. Cost can be estimated using known per-token pricing for `gpt-5.2-codex` (store pricing as a config constant, update manually when pricing changes).
-- **Gemini**: Gemini CLI may report usage statistics. If parseable, capture tokens and estimate cost using Gemini 3 Pro pricing.
-- **Claude (Agent SDK)**: The SDK `result` message may include usage metadata. If `message.usage` or similar fields are present, capture them. The Claude SDK streams messages — check the final `result` event for usage data.
+#### Claude (Agent SDK) — Exact tokens AND exact cost
 
-**Important**: Token/cost capture is best-effort. If a model's CLI does not expose token counts, store null. Never fail a consultation because token parsing failed. Wrap all parsing in try/catch and log warnings to stderr on parse failure.
-<!-- REVIEW(@architect): Please, please do not include any bogus data in our results, e.g. estimates of token count if the full token count is not available. Data in the table must be fully determined, not hallucinated or guessed. -->
-<!-- REVIEW(@architect): Please thoroughly investigate all the command line options available that get the agents themselves to estimate cost and token usage. -->
+The Claude Agent SDK's `query()` async generator yields `SDKResultMessage` when `type === "result"`. This message provides:
+
+```typescript
+// Fields available on SDKResultMessage (subtype === "success"):
+{
+  total_cost_usd: number;          // Exact cost computed by Anthropic
+  duration_ms: number;             // SDK-measured duration
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+  };
+}
+```
+
+**Implementation**: Capture the `result` message in `runClaudeConsultation()` (currently the result message is only checked for errors at line 318-322 of index.ts). Store `total_cost_usd` directly — no static pricing needed for Claude.
+
+#### Gemini CLI — Exact tokens, NO cost
+
+Gemini CLI supports `--output-format json` which returns structured JSON with a `stats` block:
+
+```json
+{
+  "stats": {
+    "models": {
+      "[model-name]": {
+        "tokens": {
+          "prompt": 1200,
+          "candidates": 450,
+          "total": 1650,
+          "cached": 800
+        }
+      }
+    }
+  }
+}
+```
+
+**Implementation**: Add `--output-format json` to the Gemini command args. Parse the JSON output to extract `stats.models.*.tokens.prompt` (input) and `stats.models.*.tokens.candidates` (output). The actual response text is in the `response` field of the JSON. Gemini CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+
+#### Codex CLI — Exact tokens, NO cost
+
+Codex CLI supports `--json` which produces a JSONL (newline-delimited JSON) stream. The `turn.completed` event includes usage:
+
+```json
+{
+  "type": "turn.completed",
+  "usage": {
+    "input_tokens": 24763,
+    "cached_input_tokens": 24448,
+    "output_tokens": 122
+  }
+}
+```
+
+**Implementation**: Add `--json` to the Codex command args. Parse the JSONL output to find `turn.completed` events and sum `usage.input_tokens` and `usage.output_tokens` across all turns. Codex CLI does **not** report cost — compute it from exact tokens using the static pricing table.
+
+#### Error handling
+
+Token/cost capture must never cause a consultation to fail. Wrap all structured output parsing in try/catch. If parsing fails:
+1. Store null for `input_tokens`, `output_tokens`, and `cost_usd`
+2. Log a warning to stderr with the parse error details
+3. Continue normally — the consultation result is still valid
 
 ### R4: Protocol and project context
 
 When porch invokes `consult`, it must pass protocol and project context so the metrics record knows what triggered it.
 
+**Why protocol is not implicit from review type**: Review types like `spec-review` and `impl-review` are used by multiple protocols (SPIR, TICK, BUGFIX all run `impl-review`). The protocol field answers "which workflow triggered this?" which cannot be derived from the review type alone. Manual invocations (e.g., `consult -m claude spec 42`) have a review type but no protocol — storing `manual` as the protocol distinguishes ad-hoc usage from automated porch-driven usage.
+
 **Mechanism**: Add two new CLI flags to the `consult` command:
-<!-- REVIEW(@architect): Isn't it implicit from the type of review? -->
 
 ```
 --protocol <spir|tick|bugfix>
@@ -164,15 +230,15 @@ Keep the existing `logQuery()` text log as-is. It serves a different purpose (pe
 |------|---------|
 | `packages/codev/src/commands/consult/metrics.ts` | MetricsDB class: open/create database, insert row, query for stats |
 | `packages/codev/src/commands/consult/stats.ts` | `consult stats` subcommand implementation |
-| `packages/codev/src/commands/consult/token-parser.ts` | Best-effort token/cost parsing from subprocess output |
+| `packages/codev/src/commands/consult/usage-extractor.ts` | Extract token counts and cost from structured model output (JSON, JSONL, SDK result) |
 
 ### Modified files
 
 | File | Change |
 |------|--------|
-| `packages/codev/src/commands/consult/index.ts` | Add `--protocol` and `--project-id` flags to `ConsultOptions`. After each consultation completes, call `MetricsDB.record()`. |
+| `packages/codev/src/commands/consult/index.ts` | Add `--protocol` and `--project-id` flags to `ConsultOptions`. Capture Claude SDK `result` message for usage data. Add `--output-format json` to Gemini args; add `--json` to Codex args. After each consultation completes, call `MetricsDB.record()`. |
 | `packages/codev/src/commands/porch/next.ts` | Add `--protocol` and `--project-id` flags to consultation command templates |
-| CLI argument parser (wherever `consult` subcommands are registered) | Add `stats` subcommand routing and flag parsing |
+| `packages/codev/src/cli.ts` | Add `--protocol` and `--project-id` option definitions; add `stats` subcommand routing |
 
 ### MetricsDB API
 
@@ -202,35 +268,39 @@ class MetricsDB {
 }
 ```
 
-### Token parsing strategy
+### Token/cost extraction strategy
 
-Create a `parseTokenUsage(model: string, output: string): TokenUsage | null` function that attempts to extract token counts from subprocess stdout/stderr. This is inherently fragile — CLI output formats change. The function should:
+Create a `extractUsage(model: string, output: string, sdkResult?: SDKResultMessage): UsageData | null` function that extracts token counts and cost from structured model output. Unlike regex-based parsing, this uses the structured JSON output modes documented in R3.
 
-1. Use model-specific regex patterns to find token counts
-2. Return null (not throw) if parsing fails
-3. Log a debug-level message when parsing fails so we can update patterns
+The function should:
 
-Cost estimation uses a static pricing table:
-<!-- REVIEW(@architect): Again investigate other mechaniss as well. E.g. the claude agent sdk presumably has a structured approach to getting this. -->
+1. For Claude: read `total_cost_usd`, `usage.input_tokens`, `usage.output_tokens` directly from the `SDKResultMessage` — no parsing needed
+2. For Gemini: parse the JSON output (`--output-format json`) and extract `stats.models.*.tokens.prompt/candidates`
+3. For Codex: parse the JSONL output (`--json`) and extract `turn.completed` events with `usage` fields
+4. Return null (not throw) if extraction fails
+5. Log a warning to stderr on extraction failure
+
+#### Cost computation
+
+- **Claude**: Use `total_cost_usd` from `SDKResultMessage` — this is exact cost computed by Anthropic. No static pricing table needed.
+- **Gemini and Codex**: Compute cost from exact token counts using a static pricing table. This is labeled as "computed" (not "estimated") because the token counts are exact — only the per-token rates are static snapshots.
 
 ```typescript
-const MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
+// Static pricing — only used for Gemini and Codex (Claude provides exact cost via SDK)
+const SUBPROCESS_MODEL_PRICING: Record<string, { inputPer1M: number; outputPer1M: number }> = {
   codex:  { inputPer1M: 2.00, outputPer1M: 8.00 },   // gpt-5.2-codex pricing
   gemini: { inputPer1M: 1.25, outputPer1M: 10.00 },   // gemini-3-pro-preview pricing
-  claude: { inputPer1M: 15.00, outputPer1M: 75.00 },   // claude-opus-4-6 pricing
 };
 ```
 
-Update these constants manually when pricing changes. They are only used for estimation.
+Update these constants manually when pricing changes. A future enhancement could fetch pricing from the LiteLLM community-maintained JSON file (`github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json`), but no official provider API exists for programmatic pricing data.
 
 ## Non-Requirements
 
 - No real-time dashboard or web UI for metrics
 - No alerting on cost thresholds (can be added later as a separate spec)
 - No modification to the consultation subprocesses themselves (Gemini CLI, Codex CLI, Claude SDK internals)
-- No API-level token tracking — we instrument at the `consult` CLI level, not inside each model's SDK
-- No automatic pricing updates — pricing constants are updated manually
-<!-- REVIEW(@architect): Is there an online service ot some such we can query to get this information in real time since prices and models change? -->
+- No automatic pricing updates — Gemini/Codex pricing constants are updated manually. No official provider API exists for programmatic pricing. Third-party sources (LiteLLM JSON, PricePerToken.com) exist but are out of scope for v1. Claude cost is exact from the SDK and needs no pricing table at all.
 - No metrics export (CSV, etc.) beyond the `--json` flag
 
 ## Acceptance Criteria
@@ -249,8 +319,10 @@ Update these constants manually when pricing changes. They are only used for est
 
 1. **Unit test**: `MetricsDB.record()` inserts a row; `MetricsDB.query()` retrieves it with correct values. Use a temp file for the test database.
 2. **Unit test**: `MetricsDB.summary()` correctly aggregates duration, cost, and success rate across multiple rows.
-3. **Unit test**: `parseTokenUsage()` extracts tokens from sample Codex output; returns null for unparseable output.
-4. **Unit test**: `consult stats` formatting — verify table output matches expected format for known data.
-5. **Unit test**: Filter flags (`--days`, `--model`, `--type`, `--protocol`, `--project`) correctly narrow query results.
-6. **Integration test**: Run `consult --dry-run` with `--protocol` and `--project-id` flags, verify flags are accepted without error.
-7. **Unit test**: SQLite write failure (e.g., read-only path) logs warning but does not throw.
+3. **Unit test**: `extractUsage()` correctly parses sample Gemini JSON output (`stats.models.*.tokens`); returns null for malformed JSON.
+4. **Unit test**: `extractUsage()` correctly parses sample Codex JSONL output (`turn.completed` events with `usage`); handles multiple turns.
+5. **Unit test**: `extractUsage()` correctly reads Claude SDK result message fields (`total_cost_usd`, `usage.input_tokens`, `usage.output_tokens`).
+6. **Unit test**: `consult stats` formatting — verify table output matches expected format for known data.
+7. **Unit test**: Filter flags (`--days`, `--model`, `--type`, `--protocol`, `--project`) correctly narrow query results.
+8. **Integration test**: Run `consult --dry-run` with `--protocol` and `--project-id` flags, verify flags are accepted without error.
+9. **Unit test**: SQLite write failure (e.g., read-only path) logs warning but does not throw.
