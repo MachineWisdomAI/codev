@@ -55,6 +55,7 @@ After the existing startup cleanup call (line 260-263), add an interval:
 
 ```typescript
 // After line 263, add:
+const CLEANUP_INTERVAL_MS = parseInt(process.env.SHELLPER_CLEANUP_INTERVAL_MS || '60000', 10);
 const shellperCleanupInterval = setInterval(async () => {
   try {
     const cleaned = await shellperManager!.cleanupStaleSockets();
@@ -64,7 +65,7 @@ const shellperCleanupInterval = setInterval(async () => {
   } catch (err) {
     log('ERROR', `Periodic shellper cleanup failed: ${(err as Error).message}`);
   }
-}, 60_000);
+}, CLEANUP_INTERVAL_MS);
 ```
 
 In `gracefulShutdown()` (after line 137 where `rateLimitCleanupInterval` is cleared):
@@ -285,11 +286,14 @@ export function cleanupTestWorkspace(workspacePath: string, socketDir?: string):
 #### Objectives
 - Add unit tests for the defensive creation fix with PID liveness verification
 - Add integration tests for periodic cleanup behavior
+- Add E2E test for Tower-level periodic cleanup timer execution
 - Verify no orphaned processes after creation failure
 
 #### Deliverables
 - [ ] Unit test: `createSession()` failure kills child process (mandatory PID liveness verification via `process.kill(pid, 0)` — spec requirement)
 - [ ] Unit test: periodic cleanup removes stale sockets
+- [ ] E2E test: Tower periodic cleanup timer fires and removes stale sockets during runtime (spec success criteria #1, #3)
+- [ ] E2E test: Tower graceful shutdown completes without hanging (validates `clearInterval` — a leaked interval would keep the process alive)
 - [ ] Integration test: full lifecycle creates no orphans
 
 #### Implementation Details
@@ -336,21 +340,87 @@ it('kills child process when readShellperInfo fails (PID verification)', async (
 
 Test that `cleanupStaleSockets()` can be called repeatedly and correctly identifies stale vs live sockets. This extends the existing `cleanupStaleSockets` test block in `session-manager.test.ts`.
 
-**3. Socket isolation test**
+**3. E2E test: Tower periodic cleanup timer fires during runtime**
+
+This directly validates spec success criteria #1 ("Periodic cleanup removes stale sockets within one interval cycle") and #3 ("`cleanupStaleSockets()` runs periodically during Tower lifetime"). Add a new E2E test file or test block that:
+
+1. Starts a Tower instance with `SHELLPER_SOCKET_DIR` set to a temp dir and a reduced cleanup interval (add `SHELLPER_CLEANUP_INTERVAL_MS` env var to `tower-server.ts`, defaulting to 60000, so the test can set it to e.g. 2000ms)
+2. Creates a shellper session via the Tower API
+3. Externally kills the shellper process (`process.kill(pid, 'SIGKILL')`)
+4. Waits for the cleanup interval to fire (poll the temp socket dir for up to 2× the interval)
+5. Asserts the stale socket file has been removed
+
+```typescript
+it('periodic cleanup removes stale sockets during Tower runtime', async () => {
+  // Create a terminal via Tower API
+  const createRes = await fetch(`http://localhost:${port}/api/terminals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'shell', command: '/bin/sh', cwd: '/tmp' }),
+  });
+  const { id } = await createRes.json();
+
+  // Find the shellper socket and its PID in the temp socket dir
+  const socketFiles = readdirSync(testSocketDirs[0]).filter(f => f.startsWith('shellper-'));
+  expect(socketFiles.length).toBeGreaterThan(0);
+
+  // Get PID from terminal info
+  const infoRes = await fetch(`http://localhost:${port}/api/terminals/${id}`);
+  const termInfo = await infoRes.json();
+  const pid = termInfo.pid;
+
+  // Externally kill the shellper (simulating orphan)
+  process.kill(pid, 'SIGKILL');
+
+  // Wait for periodic cleanup to fire (interval is set to 2000ms via env var)
+  await new Promise(r => setTimeout(r, 5000));
+
+  // Verify socket was cleaned up
+  const remainingSockets = readdirSync(testSocketDirs[0]).filter(f => f.startsWith('shellper-'));
+  expect(remainingSockets.length).toBe(0);
+});
+```
+
+The `SHELLPER_CLEANUP_INTERVAL_MS` env var requires a small addition to Phase 1's `tower-server.ts` changes:
+```typescript
+const CLEANUP_INTERVAL_MS = parseInt(process.env.SHELLPER_CLEANUP_INTERVAL_MS || '60000', 10);
+// ...
+shellperCleanupInterval = setInterval(async () => { ... }, CLEANUP_INTERVAL_MS);
+```
+
+**4. E2E test: Tower graceful shutdown completes without hanging**
+
+Validates that `clearInterval` is called during graceful shutdown. A leaked `setInterval` would keep the Node.js event loop alive, causing the process to hang instead of exiting. The test:
+
+1. Starts a Tower instance
+2. Sends SIGTERM
+3. Asserts the process exits within a reasonable timeout (e.g., 10s)
+4. If the process hasn't exited within the timeout, the test fails — indicating a leaked interval
+
+This is implicitly validated by every existing E2E test's `stopServer()` call (which sends SIGTERM and waits for exit), but an explicit test makes the assertion clear and guards against regressions. The existing `stopServer()` helper in E2E tests already has a timeout — if the process doesn't exit, the test hangs and times out, which would surface the bug.
+
+**Note**: Since every E2E test already uses `stopServer()` which sends SIGTERM and waits for process exit, the shutdown clearing is implicitly tested across the entire E2E suite. An explicit standalone test is optional but adds defense-in-depth.
+
+**5. Socket isolation test**
 
 Verify that `SessionManager` instances with different `socketDir` paths don't interfere with each other.
 
 #### Files to modify
 - `packages/codev/src/terminal/__tests__/session-manager.test.ts` — Add defensive creation tests with PID liveness verification
+- `packages/codev/src/agent-farm/servers/tower-server.ts` — Add `SHELLPER_CLEANUP_INTERVAL_MS` env var for test-configurable interval
+- `packages/codev/src/agent-farm/__tests__/tower-terminals.e2e.test.ts` (or new dedicated file) — Add periodic cleanup timer E2E test
 
 #### Acceptance Criteria
 - [ ] Test coverage >90% on new/modified code
 - [ ] Defensive creation test verifies child process is dead via PID liveness check (`process.kill(pid, 0)` throws ESRCH)
+- [ ] E2E test verifies Tower periodic cleanup timer fires and removes stale sockets during runtime
+- [ ] E2E test verifies Tower graceful shutdown completes within timeout (no leaked intervals)
 - [ ] All existing tests pass
 - [ ] `npm test` passes cleanly
 
 #### Test Plan
 - **Unit Tests**: Defensive creation kill with PID verification, periodic cleanup repeated calls
+- **E2E Tests**: Tower periodic cleanup timer fires during runtime, Tower graceful shutdown completes without hanging
 - **Integration Tests**: Full Tower lifecycle with socket isolation
 - **Manual Testing**: Start Tower, kill a shellper externally, verify socket cleaned within 60s
 
@@ -451,6 +521,15 @@ The `SHELLPER_SOCKET_DIR` env var approach is simpler than making `SessionManage
 1. `bugfix-202` needs failure-safe workspace deactivation hooks, not just terminal DELETE fallback
 2. Socket-dir lifecycle inconsistent: text says "return both" but pattern uses single mutable variable; multi-start files like `tower-baseline` would overwrite
 → **Addressed**: (1) Added defensive workspace deactivation + terminal DELETE in `afterAll` for `bugfix-202` (consistent with `bugfix-199` pattern). (2) Changed socket-dir pattern from single `testSocketDir` variable to `testSocketDirs` array, ensuring deterministic cleanup across multi-start files.
+
+**Claude** (APPROVE): Mature, thoroughly verified plan with accurate code references, complete spec coverage, and sound per-file cleanup strategy.
+
+### Iteration 7 (3-way review)
+**Gemini** (APPROVE): Comprehensive plan effectively addressing resource leaks with robust periodic cleanup, defensive process handling, and rigorous test isolation.
+
+**Codex** (REQUEST_CHANGES):
+1. Phase 3 lacks concrete test tasks for Tower-level periodic cleanup timer execution and shutdown clearing — plan only tests `SessionManager.cleanupStaleSockets()` behavior, not the `setInterval`/`clearInterval` wiring in `tower-server.ts`
+→ **Addressed**: (1) Added E2E test deliverable that starts Tower with reduced cleanup interval (`SHELLPER_CLEANUP_INTERVAL_MS` env var), creates a session, externally kills it, and verifies the socket is cleaned within the interval. (2) Added `SHELLPER_CLEANUP_INTERVAL_MS` env var to Phase 1's `tower-server.ts` changes for test-configurable interval. (3) Added E2E test for graceful shutdown completion (no leaked intervals). (4) Noted that `clearInterval` is implicitly validated by every E2E test's `stopServer()` — a leaked interval keeps the event loop alive, causing process hang.
 
 **Claude** (APPROVE): Mature, thoroughly verified plan with accurate code references, complete spec coverage, and sound per-file cleanup strategy.
 
