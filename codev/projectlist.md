@@ -304,7 +304,40 @@ Projects currently in development (conceived through committed), sorted by prior
       specified_at: "2026-02-15"
     notes: "Shellper currently accepts one connection (Tower). Need multiple clients like tmux. Enables af attach in terminal."
 
+  - id: "0120"
+    title: "Codex SDK Integration"
+    summary: "Replace Codex CLI subprocess with @openai/codex-sdk for reliable streaming, structured output, and no JSONL parsing"
+    status: specified
+    priority: high
+    release: null
+    files:
+      spec: codev/specs/0120-codex-sdk-integration.md
+    dependencies: []
+    tags: [consult, codex, sdk, reliability]
+    timestamps:
+      conceived_at: "2026-02-15"
+      specified_at: "2026-02-15"
+    notes: "Codex JSONL parsing has caused repeated bugs (#297, #298). SDK provides structured events like Claude Agent SDK."
+
 # Low Priority
+
+  - id: "0062"
+    title: "Secure Remote Access"
+    summary: "SSH tunnel + reverse proxy: af tunnel outputs SSH command, one port for everything"
+    status: planned
+    priority: medium
+    release: null
+    files:
+      spec: codev/specs/0062-secure-remote-access.md
+      plan: codev/plans/0062-secure-remote-access.md
+      review: null
+    dependencies: []
+    tags: [security, remote-access, ssh, agent-farm]
+    timestamps:
+      conceived_at: "2025-12-27T00:00:00-08:00"
+      specified_at: "2025-12-27T00:00:00-08:00"
+      planned_at: "2025-12-27T00:00:00-08:00"
+    notes: "Imported from ../codev. Reverse proxy consolidates all ttyd instances behind one port. af tunnel outputs SSH command."
 
   - id: "0023"
     title: "Consult Tool (Stateful)"
@@ -1162,7 +1195,7 @@ Projects that have been abandoned or put on hold.
 
 ## Next Available Number
 
-**0119** - Reserve this number for your next project
+**0121** - Reserve this number for your next project
 
 ---
 
