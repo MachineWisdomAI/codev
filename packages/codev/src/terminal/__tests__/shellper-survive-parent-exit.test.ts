@@ -197,8 +197,20 @@ describe('Bugfix #324: shellper survives parent exit', () => {
     // NOW: destroy the stderr pipe (simulates Tower exit)
     child.stderr!.destroy();
 
-    // Give shellper time to process the broken pipe event
-    await new Promise((r) => setTimeout(r, 2000));
+    // Force shellper to write to the now-broken stderr pipe by connecting
+    // and immediately disconnecting from its socket. Shellper logs client
+    // connection/disconnection events via logStderr(), which writes to
+    // process.stderr — the broken pipe. Without the error handler fix,
+    // this would crash the shellper with an unhandled EPIPE error.
+    const net = await import('node:net');
+    await new Promise<void>((resolve) => {
+      const sock = net.connect(socketPath, () => {
+        sock.destroy();
+        // Give shellper time to process the disconnect and attempt stderr write
+        setTimeout(resolve, 1000);
+      });
+      sock.on('error', () => setTimeout(resolve, 1000));
+    });
 
     // THE KEY ASSERTION: shellper should survive despite the broken pipe
     // (thanks to the error handler on process.stderr)
