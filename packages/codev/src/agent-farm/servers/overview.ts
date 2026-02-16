@@ -383,6 +383,47 @@ export function extractProjectIdFromWorktreeName(dirName: string): string | null
 }
 
 /**
+ * Map a worktree directory name to its expected terminal role_id.
+ * Must match what buildAgentName() produces during spawn so we can
+ * cross-reference worktrees against active terminal sessions.
+ *
+ * All values are lowercased to match buildAgentName() convention.
+ */
+export function worktreeNameToRoleId(dirName: string): string | null {
+  const lower = dirName.toLowerCase();
+
+  // SPIR: spir-126-slug → builder-spir-126
+  const spirMatch = lower.match(/^spir-(\d+)/);
+  if (spirMatch) return `builder-spir-${Number(spirMatch[1])}`;
+
+  // TICK: tick-130-slug → builder-tick-130
+  const tickMatch = lower.match(/^tick-(\d+)/);
+  if (tickMatch) return `builder-tick-${Number(tickMatch[1])}`;
+
+  // Bugfix: bugfix-296-slug → builder-bugfix-296
+  const bugfixMatch = lower.match(/^bugfix-(\d+)/);
+  if (bugfixMatch) return `builder-bugfix-${Number(bugfixMatch[1])}`;
+
+  // Task: task-NAvW → builder-task-navw
+  const taskMatch = lower.match(/^task-([a-z0-9]+)/);
+  if (taskMatch) return `builder-task-${taskMatch[1]}`;
+
+  // Worktree: worktree-foIg → worktree-foig (no builder- prefix)
+  const worktreeMatch = lower.match(/^worktree-([a-z0-9]+)/);
+  if (worktreeMatch) return `worktree-${worktreeMatch[1]}`;
+
+  // Legacy numeric: 0110-slug → builder-spir-110 (assume spir)
+  const numericMatch = lower.match(/^(\d+)(?:-|$)/);
+  if (numericMatch) return `builder-spir-${Number(numericMatch[1])}`;
+
+  // Generic protocol: experiment-AbCd → builder-experiment-abcd
+  const genericMatch = lower.match(/^([a-z]+)-([a-z0-9]+)/);
+  if (genericMatch) return `builder-${genericMatch[1]}-${genericMatch[2]}`;
+
+  return null;
+}
+
+/**
  * Discover builders by scanning .builders/ directory and reading status.yaml.
  */
 export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
