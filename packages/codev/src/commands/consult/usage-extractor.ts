@@ -1,18 +1,20 @@
 /**
  * Usage extraction from structured model output
  *
- * Extracts token counts, cost, and review text from Claude SDK results,
- * Gemini JSON output, and Codex JSONL output. All parsing is wrapped in
- * try/catch — returns null on failure, never throws.
+ * Extracts token counts, cost, and review text from Claude SDK results
+ * and Gemini JSON output. All parsing is wrapped in try/catch — returns
+ * null on failure, never throws.
+ *
+ * Codex usage and review text are captured directly from SDK events in
+ * runCodexConsultation() — no JSONL parsing needed.
  */
 
-// Static pricing for subprocess models (Claude provides exact cost via SDK)
+// Static pricing for subprocess models (Claude and Codex provide cost via SDK)
 const SUBPROCESS_MODEL_PRICING: Record<string, {
   inputPer1M: number;
   cachedInputPer1M: number;
   outputPer1M: number;
 }> = {
-  codex:  { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 },
   gemini: { inputPer1M: 1.25, cachedInputPer1M: 0.315, outputPer1M: 10.00 },
 };
 
@@ -91,67 +93,6 @@ function extractGeminiUsage(output: string): UsageData | null {
   };
 }
 
-function extractCodexUsage(output: string): UsageData | null {
-  const lines = output.split('\n').filter(l => l.trim());
-  let totalInput = 0;
-  let totalCached = 0;
-  let totalOutput = 0;
-  let foundTurn = false;
-  // Track whether any turn is missing a required field — if so, that total is unknowable
-  let inputMissing = false;
-  let cachedMissing = false;
-  let outputMissing = false;
-
-  for (const line of lines) {
-    let event: Record<string, unknown>;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      // Skip non-JSON lines (e.g. progress output, debug messages)
-      continue;
-    }
-    if (event.type === 'turn.completed') {
-      foundTurn = true;
-      const usage = event.usage as Record<string, unknown> | undefined;
-      if (!usage) {
-        // Turn completed without usage data — all totals are unknowable
-        inputMissing = true;
-        cachedMissing = true;
-        outputMissing = true;
-        continue;
-      }
-      if (typeof usage.input_tokens === 'number') {
-        totalInput += usage.input_tokens;
-      } else {
-        inputMissing = true;
-      }
-      if (typeof usage.cached_input_tokens === 'number') {
-        totalCached += usage.cached_input_tokens;
-      } else {
-        cachedMissing = true;
-      }
-      if (typeof usage.output_tokens === 'number') {
-        totalOutput += usage.output_tokens;
-      } else {
-        outputMissing = true;
-      }
-    }
-  }
-
-  if (!foundTurn) return null;
-
-  const inputTokens = inputMissing ? null : totalInput;
-  const cachedInputTokens = cachedMissing ? null : totalCached;
-  const outputTokens = outputMissing ? null : totalOutput;
-
-  return {
-    inputTokens,
-    cachedInputTokens,
-    outputTokens,
-    costUsd: computeCost('codex', inputTokens, cachedInputTokens, outputTokens),
-  };
-}
-
 /**
  * Extract token counts and cost from structured model output.
  * Returns null if extraction fails entirely (logs warning to stderr).
@@ -164,9 +105,7 @@ export function extractUsage(model: string, output: string, sdkResult?: SDKResul
     if (model === 'gemini') {
       return extractGeminiUsage(output);
     }
-    if (model === 'codex') {
-      return extractCodexUsage(output);
-    }
+    // Codex usage is captured directly from SDK events in runCodexConsultation()
     return null;
   } catch (err) {
     console.error(`[warn] Failed to extract usage for ${model}: ${err instanceof Error ? err.message : String(err)}`);
@@ -188,41 +127,7 @@ export function extractReviewText(model: string, output: string): string | null 
       return null;
     }
 
-    if (model === 'codex') {
-      const lines = output.split('\n').filter(l => l.trim());
-      const textParts: string[] = [];
-
-      for (const line of lines) {
-        let event: Record<string, unknown>;
-        try {
-          event = JSON.parse(line);
-        } catch {
-          // Skip non-JSON lines (e.g. progress output, debug messages)
-          continue;
-        }
-        // Codex JSONL: {type: 'item.completed', item: {type: 'agent_message', text: '...'}}
-        const item = (event as Record<string, unknown>).item as Record<string, unknown> | undefined;
-        if (event.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
-          textParts.push(item.text);
-        } else if (event.type === 'message' && event.role === 'assistant') {
-          if (typeof event.content === 'string') {
-            textParts.push(event.content);
-          } else if (Array.isArray(event.content)) {
-            for (const block of event.content) {
-              if (typeof block === 'string') {
-                textParts.push(block);
-              } else if (block?.type === 'text' && typeof block.text === 'string') {
-                textParts.push(block.text);
-              }
-            }
-          }
-        }
-      }
-
-      return textParts.length > 0 ? textParts.join('') : null;
-    }
-
-    // Claude uses SDK — text is already captured by the SDK streaming loop
+    // Claude and Codex use SDKs — text is captured directly by their streaming loops
     return null;
   } catch (err) {
     console.error(`[warn] Failed to extract review text for ${model}: ${err instanceof Error ? err.message : String(err)}`);

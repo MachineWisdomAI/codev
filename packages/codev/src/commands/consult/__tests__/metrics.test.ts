@@ -179,44 +179,11 @@ describe('extractUsage for Gemini', () => {
   });
 });
 
-// Test 4: extractUsage() for Codex JSONL (multi-turn)
-describe('extractUsage for Codex', () => {
-  it('correctly parses multi-turn Codex JSONL', () => {
-    const output = [
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'Review text' }),
-      JSON.stringify({
-        type: 'turn.completed',
-        usage: { input_tokens: 24763, cached_input_tokens: 24448, output_tokens: 122 },
-      }),
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'More text' }),
-      JSON.stringify({
-        type: 'turn.completed',
-        usage: { input_tokens: 25000, cached_input_tokens: 24900, output_tokens: 80 },
-      }),
-    ].join('\n');
-
-    const usage = extractUsage('codex', output);
-    expect(usage).not.toBeNull();
-    expect(usage!.inputTokens).toBe(49763);
-    expect(usage!.cachedInputTokens).toBe(49348);
-    expect(usage!.outputTokens).toBe(202);
-    expect(usage!.costUsd).not.toBeNull();
-  });
-
-  it('returns null when no turn.completed events exist', () => {
-    const output = JSON.stringify({ type: 'message', role: 'assistant', content: 'text' });
-    const usage = extractUsage('codex', output);
+// Test 4: extractUsage() for Codex returns null (usage captured by SDK)
+describe('extractUsage for Codex (SDK-based)', () => {
+  it('returns null — Codex usage is captured directly from SDK events', () => {
+    const usage = extractUsage('codex', 'any output');
     expect(usage).toBeNull();
-  });
-
-  it('handles turn.completed without usage object', () => {
-    const output = JSON.stringify({ type: 'turn.completed' });
-    const usage = extractUsage('codex', output);
-    expect(usage).not.toBeNull();
-    expect(usage!.inputTokens).toBeNull();
-    expect(usage!.cachedInputTokens).toBeNull();
-    expect(usage!.outputTokens).toBeNull();
-    expect(usage!.costUsd).toBeNull();
   });
 });
 
@@ -469,35 +436,10 @@ describe('Gemini output unwrapping', () => {
   });
 });
 
-// Test 11: Codex output unwrapping (uses item.completed/agent_message format)
-describe('Codex output unwrapping', () => {
-  it('extracts assistant message text from JSONL events', () => {
-    const output = [
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'First part of review. ' } }),
-      JSON.stringify({ type: 'item.completed', item: { id: 'cmd1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'completed' } }),
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: 'Second part.' } }),
-      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 } }),
-    ].join('\n');
-
-    const text = extractReviewText('codex', output);
-    expect(text).not.toBeNull();
-    expect(text).toBe('First part of review. Second part.');
-  });
-
-  it('extracts text from multiple agent_message items', () => {
-    const output = [
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'Block one.' } }),
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: ' Block two.' } }),
-    ].join('\n');
-
-    const text = extractReviewText('codex', output);
-    expect(text).not.toBeNull();
-    expect(text).toBe('Block one. Block two.');
-  });
-
-  it('returns null when no assistant messages found', () => {
-    const output = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 } });
-    const text = extractReviewText('codex', output);
+// Test 11: Codex extractReviewText returns null (text captured by SDK)
+describe('Codex extractReviewText (SDK-based)', () => {
+  it('returns null — Codex review text is captured directly from SDK events', () => {
+    const text = extractReviewText('codex', 'any output');
     expect(text).toBeNull();
   });
 });
@@ -575,59 +517,5 @@ describe('JSON parse failure fallback', () => {
     expect(usage).toBeNull();
   });
 
-  it('Codex: extractReviewText returns null for entirely invalid JSONL', () => {
-    const rawOutput = 'This is raw text, not JSONL';
-    const text = extractReviewText('codex', rawOutput);
-    expect(text).toBeNull();
-  });
-
-  it('Codex: extractUsage returns null for entirely invalid JSONL', () => {
-    const rawOutput = 'Not valid JSONL';
-    const usage = extractUsage('codex', rawOutput);
-    expect(usage).toBeNull();
-  });
 });
 
-// Test 15: Codex mixed JSONL with non-JSON lines (regression for #297)
-describe('Codex mixed JSONL with non-JSON lines', () => {
-  it('extractReviewText skips non-JSON lines and extracts assistant text', () => {
-    const output = [
-      'Codex CLI v1.2.3',  // Non-JSON progress line
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'Review text here.' } }),
-      'Some debug output',  // Non-JSON debug line
-      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: ' More review.' } }),
-      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 } }),
-    ].join('\n');
-
-    const text = extractReviewText('codex', output);
-    expect(text).not.toBeNull();
-    expect(text).toBe('Review text here. More review.');
-  });
-
-  it('extractUsage skips non-JSON lines and extracts usage data', () => {
-    const output = [
-      'Loading model...',  // Non-JSON progress line
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'Review' }),
-      '--- progress ---',  // Non-JSON separator
-      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 500, cached_input_tokens: 400, output_tokens: 100 } }),
-    ].join('\n');
-
-    const usage = extractUsage('codex', output);
-    expect(usage).not.toBeNull();
-    expect(usage!.inputTokens).toBe(500);
-    expect(usage!.cachedInputTokens).toBe(400);
-    expect(usage!.outputTokens).toBe(100);
-  });
-
-  it('extractReviewText returns null when only non-JSON lines present', () => {
-    const output = 'line 1\nline 2\nline 3';
-    const text = extractReviewText('codex', output);
-    expect(text).toBeNull();
-  });
-
-  it('extractUsage returns null when only non-JSON lines present', () => {
-    const output = 'not json\nalso not json';
-    const usage = extractUsage('codex', output);
-    expect(usage).toBeNull();
-  });
-});
