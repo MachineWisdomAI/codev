@@ -18,8 +18,8 @@ function phaseLabel(builder: OverviewBuilder): string {
 export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
   const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
-  const isBlocked = builder.blocked !== null;
-  const pct = Math.round(builder.progress * 100);
+  const isBlocked = builder.blocked !== null && builder.blocked !== '';
+  const pct = Math.min(100, Math.max(0, Math.round((builder.progress ?? 0) * 100)));
 
   return (
     <div className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
