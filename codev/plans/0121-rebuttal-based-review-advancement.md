@@ -41,8 +41,9 @@ The change is surgical: modify the decision logic in `next.ts` (lines 486-567) a
 #### Deliverables
 - [ ] Rebuttal detection logic in `handleBuildVerify()` (after `allApprove` check, before max_iterations)
 - [ ] "Write rebuttal" task emission replacing "fix issues" task
-- [ ] `max_iterations` updated to 5 in `codev/protocols/spir/protocol.json`
-- [ ] `max_iterations` updated to 5 in `codev-skeleton/protocols/spir/protocol.json`
+- [ ] Size check (>50 bytes) added to `findRebuttalFile()` return logic
+- [ ] `max_iterations` updated to 5 in `codev/protocols/spir/protocol.json` (per-phase AND `defaults` section)
+- [ ] `max_iterations` updated to 5 in `codev-skeleton/protocols/spir/protocol.json` (per-phase AND `defaults` section)
 
 #### Implementation Details
 
@@ -50,11 +51,12 @@ The change is surgical: modify the decision logic in `next.ts` (lines 486-567) a
 
 After line 490 (where `allApprove()` returns false), insert rebuttal detection:
 
-1. Call `findRebuttalFile(workspaceRoot, state, state.iteration)` to check if the builder already wrote a rebuttal for the current iteration's reviews
-2. If rebuttal exists and file size >50 bytes:
+1. Modify `findRebuttalFile()` (line 126) to also check file size: return `null` if file exists but is ≤50 bytes. This centralizes the size validation so callers don't need to duplicate the check.
+2. Call `findRebuttalFile(workspaceRoot, state, state.iteration)` to check if the builder already wrote a rebuttal for the current iteration's reviews
+3. If rebuttal exists (and >50 bytes, now enforced by the function):
    - Record reviews in `state.history` (same pattern as lines 527-542)
    - Call `handleVerifyApproved()` to advance — no second consultation
-3. If rebuttal missing or too small:
+4. If rebuttal missing or too small:
    - Instead of the current "fix issues" task (lines 553-559), emit a "write rebuttal" task
    - Task description includes: review file paths with verdicts, target rebuttal file path, instructions for addressing REQUEST_CHANGES points
    - Do NOT increment `state.iteration` — the rebuttal is part of the current iteration
@@ -62,9 +64,13 @@ After line 490 (where `allApprove()` returns false), insert rebuttal detection:
 
 **Note on iteration handling**: The current flow increments iteration at line 524 before emitting "fix issues". The new flow should NOT increment iteration when emitting "write rebuttal" — the rebuttal is the response to iteration N's reviews, not the start of iteration N+1. Iteration only matters for the safety valve now.
 
+**Note on the "NEED BUILD" branch (lines 370-384)**: The `else` branch at line 377 emits "Fix issues from iteration N-1" when `iteration > 1`. Under the new rebuttal flow, iteration is NOT incremented for rebuttals, so this branch only fires if the safety valve increments iteration (which should be rare). Leave this branch as-is — it serves the safety valve path where porch force-increments iteration and asks the builder to rebuild.
+
+**Note on `porch done` flow**: No changes to `porch done` are needed. The rebuttal detection happens entirely in the NEED VERIFY path of `porch next`. Flow: builder writes rebuttal → runs `porch done` → sets `build_complete=true` → `porch next` re-enters NEED VERIFY → finds same iter1 reviews → `allApprove()` returns false → checks `findRebuttalFile()` → found → calls `handleVerifyApproved()` → advances.
+
 **Files: `codev/protocols/spir/protocol.json` and `codev-skeleton/protocols/spir/protocol.json`**
 
-Change all `"max_iterations": 1` to `"max_iterations": 5` across all phase definitions (specify, plan, implement, review).
+Change all `"max_iterations": 1` to `"max_iterations": 5` across all phase definitions (specify, plan, implement, review) AND in the `defaults` section.
 
 #### Acceptance Criteria
 - [ ] When reviews include REQUEST_CHANGES and no rebuttal exists: emits "write rebuttal" task
@@ -96,7 +102,7 @@ Revert the commit. The change is isolated to one function in `next.ts` and confi
 
 #### Implementation Details
 
-**File: `packages/codev/tests/unit/porch/next.test.ts`**
+**File: `packages/codev/src/commands/porch/__tests__/next.test.ts`**
 
 Update tests that currently expect "Fix issues from review" subjects to expect "Write rebuttal" subjects instead.
 
@@ -108,6 +114,8 @@ New test cases:
 5. **Safety valve**: Set iteration to 5 (max), reviews with REQUEST_CHANGES, no rebuttal → expect force-advance or gate behavior
 
 Use existing test patterns: `createTestDir()`, `setupProtocol()`, `makeState()`, `setupState()`, review file creation with `VERDICT:` lines.
+
+**Note**: The existing test "force-advances to gate at max iterations" (line ~454) uses the test protocol's `max_iterations: 1`. With the change to 5, this test's protocol fixture needs updating and the test state should set `iteration: 5` to trigger the safety valve path.
 
 #### Acceptance Criteria
 - [ ] All new tests pass
