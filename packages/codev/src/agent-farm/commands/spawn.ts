@@ -23,6 +23,7 @@ import { run } from '../utils/shell.js';
 import { upsertBuilder } from '../state.js';
 import { loadRolePrompt } from '../utils/roles.js';
 import { buildAgentName, stripLeadingZeros } from '../utils/agent-names.js';
+import { fetchGitHubIssue as fetchGitHubIssueNonFatal } from '../../lib/github.js';
 import {
   type TemplateContext,
   buildPromptFromTemplate,
@@ -202,15 +203,16 @@ async function resolveIssueProtocol(
 /**
  * Infer protocol from an existing worktree directory name.
  * Worktree naming: <protocol>-<id>-<slug> or bugfix-<id>-<slug>
+ * Handles legacy zero-padded IDs: worktree `spir-0076-feature` matches issueNumber=76.
  */
 function inferProtocolFromWorktree(config: Config, issueNumber: number): string | null {
   if (!existsSync(config.buildersDir)) return null;
   const strippedId = stripLeadingZeros(String(issueNumber));
   const dirs = readdirSync(config.buildersDir);
-  // Match patterns like: spir-315-feature-name, bugfix-315-slug, tick-315-name
+  // Match patterns like: spir-315-feature-name, bugfix-315-slug, spir-0076-feature
   const match = dirs.find(d => {
     const parts = d.split('-');
-    return parts.length >= 2 && parts[1] === strippedId;
+    return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
   });
   if (match) {
     return match.split('-')[0];
@@ -230,10 +232,15 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const projectId = String(issueNumber);
   const protocol = await resolveIssueProtocol(options, config);
 
+  // For TICK amendments, resolve spec by the amends number (the original spec)
+  const specLookupId = (protocol === 'tick' && options.amends)
+    ? String(options.amends)
+    : projectId;
+
   // Resolve spec file (supports legacy zero-padded IDs)
-  const specFile = await findSpecFile(config.codevDir, projectId);
+  const specFile = await findSpecFile(config.codevDir, specLookupId);
   if (!specFile) {
-    fatal(`Spec not found for issue #${issueNumber}. Expected: codev/specs/${projectId}-*.md`);
+    fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
   }
 
   const specName = basename(specFile, '.md');
@@ -275,6 +282,12 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
+  // Fetch GitHub issue context (non-fatal, for enriching the builder prompt)
+  const ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
+  if (ghIssue) {
+    logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
+  }
+
   const specRelPath = `codev/specs/${specName}.md`;
   const planRelPath = `codev/plans/${specName}.md`;
   const templateContext: TemplateContext = {
@@ -285,6 +298,13 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     spec: { path: specRelPath, name: specName },
   };
   if (hasPlan) templateContext.plan = { path: planRelPath, name: specName };
+  if (ghIssue) {
+    templateContext.issue = {
+      number: issueNumber,
+      title: ghIssue.title,
+      body: ghIssue.body || '(No description provided)',
+    };
+  }
 
   const initialPrompt = buildPromptFromTemplate(config, protocol, templateContext);
   const resumeNotice = options.resume ? `\n${buildResumeNotice(projectId)}\n` : '';

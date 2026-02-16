@@ -163,7 +163,7 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     });
 
   // Spawn command
-  program
+  const spawnCmd = program
     .command('spawn')
     .description('Spawn a new builder')
     .argument('[number]', 'Issue number (positional)')
@@ -178,8 +178,25 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('--soft', 'Use soft mode (AI follows protocol, you verify compliance)')
     .option('--strict', 'Use strict mode (porch orchestrates)')
     .option('--resume', 'Resume builder in existing worktree (skip worktree creation)')
-    .option('--no-role', 'Skip loading role prompt')
-    .action(async (numberArg: string | undefined, options: Record<string, unknown>) => {
+    .option('--no-role', 'Skip loading role prompt');
+
+  // Catch removed flags with helpful migration messages
+  spawnCmd.hook('preAction', (_thisCmd, actionCmd) => {
+    const rawArgs = actionCmd.args || [];
+    const allArgs = process.argv.slice(2);
+    for (const arg of allArgs) {
+      if (arg === '-p' || arg === '--project') {
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol spir`);
+        process.exit(1);
+      }
+      if (arg === '-i' || arg === '--issue') {
+        logger.error(`"${arg}" has been removed. Use a positional argument instead:\n  af spawn 315 --protocol bugfix`);
+        process.exit(1);
+      }
+    }
+  });
+
+  spawnCmd.action(async (numberArg: string | undefined, options: Record<string, unknown>) => {
       const { spawn } = await import('./commands/spawn.js');
       try {
         const files = options.files ? (options.files as string).split(',').map((f: string) => f.trim()) : undefined;

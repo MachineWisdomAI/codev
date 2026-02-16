@@ -12,6 +12,7 @@ import { readdir } from 'node:fs/promises';
 import type { SpawnOptions, Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { loadRolePrompt } from '../utils/roles.js';
+import { stripLeadingZeros } from '../utils/agent-names.js';
 
 // =============================================================================
 // Template Rendering
@@ -202,7 +203,9 @@ export function loadProtocolRole(config: Config, protocolName: string): { conten
 // =============================================================================
 
 /**
- * Find a spec file by project ID
+ * Find a spec file by project ID.
+ * Handles legacy zero-padded IDs: `af spawn 76` matches `0076-feature.md`.
+ * Strips leading zeros from both the input ID and spec file prefixes for comparison.
  */
 export async function findSpecFile(codevDir: string, projectId: string): Promise<string | null> {
   const specsDir = resolve(codevDir, 'specs');
@@ -212,17 +215,20 @@ export async function findSpecFile(codevDir: string, projectId: string): Promise
   }
 
   const files = await readdir(specsDir);
+  const strippedId = stripLeadingZeros(projectId);
 
-  // Try exact match first (e.g., "0001-feature.md")
+  // Try exact match first (e.g., projectId="0076" matches "0076-feature.md")
   for (const file of files) {
-    if (file.startsWith(projectId) && file.endsWith('.md')) {
+    if (file.startsWith(projectId + '-') && file.endsWith('.md')) {
       return resolve(specsDir, file);
     }
   }
 
-  // Try partial match (e.g., just "0001")
+  // Try zero-stripped match (e.g., projectId="76" matches "0076-feature.md")
   for (const file of files) {
-    if (file.startsWith(projectId + '-') && file.endsWith('.md')) {
+    if (!file.endsWith('.md')) continue;
+    const filePrefix = file.split('-')[0];
+    if (stripLeadingZeros(filePrefix) === strippedId) {
       return resolve(specsDir, file);
     }
   }

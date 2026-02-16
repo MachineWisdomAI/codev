@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { SpawnOptions, BuilderType } from '../types.js';
+import { stripLeadingZeros } from '../utils/agent-names.js';
 
 // Re-implement the validation logic for testing (avoids importing with side effects)
 function validateSpawnOptions(options: SpawnOptions): string | null {
@@ -586,6 +587,59 @@ describe('Spawn Command', () => {
         const options: SpawnOptions = { worktree: true };
         expect(resolveMode(options, null)).toBe('soft');
       });
+    });
+  });
+
+  describe('inferProtocolFromWorktree (unit logic)', () => {
+    // Re-implement inferProtocolFromWorktree for isolated testing
+    function inferProtocolFromWorktree(dirs: string[], issueNumber: number): string | null {
+      const strippedId = stripLeadingZeros(String(issueNumber));
+      const match = dirs.find(d => {
+        const parts = d.split('-');
+        return parts.length >= 2 && stripLeadingZeros(parts[1]) === strippedId;
+      });
+      if (match) return match.split('-')[0];
+      return null;
+    }
+
+    it('matches worktree with non-padded ID (e.g., spir-315-feature)', () => {
+      expect(inferProtocolFromWorktree(['spir-315-feature-name'], 315)).toBe('spir');
+    });
+
+    it('matches worktree with zero-padded ID (e.g., spir-0076-feature for issueNumber=76)', () => {
+      expect(inferProtocolFromWorktree(['spir-0076-feature-name'], 76)).toBe('spir');
+    });
+
+    it('matches bugfix worktree (e.g., bugfix-42-fix-login)', () => {
+      expect(inferProtocolFromWorktree(['bugfix-42-fix-login'], 42)).toBe('bugfix');
+    });
+
+    it('returns null when no worktree matches', () => {
+      expect(inferProtocolFromWorktree(['spir-100-other'], 42)).toBeNull();
+    });
+
+    it('returns null for empty directory listing', () => {
+      expect(inferProtocolFromWorktree([], 42)).toBeNull();
+    });
+  });
+
+  describe('TICK --amends spec resolution logic', () => {
+    it('TICK with --amends resolves spec by amends number, not issue number', () => {
+      // For: af spawn 320 --protocol tick --amends 315
+      // The spec lookup should use "315" not "320"
+      const options: SpawnOptions = { issueNumber: 320, protocol: 'tick', amends: 315 };
+      const specLookupId = (options.protocol === 'tick' && options.amends)
+        ? String(options.amends)
+        : String(options.issueNumber);
+      expect(specLookupId).toBe('315');
+    });
+
+    it('non-TICK protocols resolve spec by issue number', () => {
+      const options: SpawnOptions = { issueNumber: 315, protocol: 'spir' };
+      const specLookupId = (options.protocol === 'tick' && options.amends)
+        ? String(options.amends)
+        : String(options.issueNumber);
+      expect(specLookupId).toBe('315');
     });
   });
 });
