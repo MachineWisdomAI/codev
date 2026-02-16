@@ -126,7 +126,7 @@ The spawn flow:
 
 The `--protocol` flag replaces the old implicit detection. There is no ambiguity about which code path runs — the human chooses explicitly.
 
-Keep `-p` and `--issue` as hidden aliases for backwards compatibility.
+`-p` and `--issue` are removed entirely — no backward compat aliases. Old commands get a clear error message pointing to the new syntax.
 
 ### Dashboard layout changes
 

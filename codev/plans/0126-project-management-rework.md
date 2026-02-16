@@ -105,13 +105,13 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 #### Objectives
 - Accept issue number as positional argument: `af spawn 315`
 - Require `--protocol` flag explicitly (no auto-detection)
-- Keep `-p` and `--issue` as hidden aliases for backward compatibility
+- Remove `-p` and `--issue` flags (no backward compat aliases)
 - Unify spawn flow: positional arg + protocol flag drives the code path
 
 #### Deliverables
 - [ ] Positional argument support in spawn CLI
 - [ ] `--protocol` flag required for non-alias invocations
-- [ ] Hidden `-p` and `--issue` aliases
+- [ ] `-p` and `--issue` flags removed
 - [ ] Legacy zero-padded spec matching (`af spawn 76` → `0076-*.md`)
 - [ ] Unit tests for CLI argument resolution
 - [ ] Integration tests for spawn with positional arg
@@ -121,14 +121,14 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 **Modify**: `packages/codev/src/agent-farm/types.ts`
 - Update `SpawnOptions` interface:
   - Add `issueNumber?: number` (positional arg, replaces separate `project`/`issue`)
-  - Keep `project` and `issue` for backward compat (they map to `issueNumber` internally)
+  - Remove `project` and `issue` fields (replaced by `issueNumber`)
   - Make `protocol` the canonical protocol field (deprecate `useProtocol`)
 
 **Modify**: `packages/codev/src/agent-farm/cli.ts`
 - Change Commander command definition from `.command('spawn')` to `.command('spawn').argument('[number]', 'Issue number')`
 - Note: this changes the `.action()` signature from `(options) => ...` to `(number, options) => ...`
 - Add `--protocol` option (required when using positional arg)
-- Register `-p` and `--issue` as hidden aliases that map to `issueNumber`
+- Remove `-p` and `--issue` flags entirely
 - Add `--amends` option for TICK protocol
 
 **Modify**: `packages/codev/src/agent-farm/types.ts`
@@ -151,8 +151,8 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 - [ ] `af spawn 315 --protocol spir` finds spec and starts SPIR builder
 - [ ] `af spawn 315 --protocol bugfix` starts bugfix builder
 - [ ] `af spawn 320 --protocol tick --amends 315` starts TICK builder
-- [ ] `af spawn -p 0076` still works (hidden alias, matches `0076-*.md`)
-- [ ] `af spawn --issue 42` still works (hidden alias)
+- [ ] `af spawn -p` and `af spawn --issue` give clear "removed, use positional arg" error
+- [ ] `af spawn 76 --protocol spir` finds `0076-*.md` (legacy zero-padded matching)
 - [ ] `af spawn 315` without `--protocol` gives clear error message
 - [ ] `af spawn 315 --resume` works (reads protocol from existing worktree, no `--protocol` needed)
 - [ ] `af spawn 315 --soft` works (defaults to SPIR when spec file exists)
@@ -165,11 +165,11 @@ Revert to reading projectlist.md — the old `getProjectSummary()` code is in gi
 - **Integration Tests**: Full spawn flow with mocked Tower (positional arg + protocol, legacy flags, error cases)
 
 #### Rollback Strategy
-Hidden aliases ensure old commands keep working. If the new positional arg causes issues, the aliases provide full backward compat.
+Old `-p`/`--issue` flags are removed but give a clear error message pointing to the new syntax. Rollback: re-add the flags if needed (code is in git history).
 
 #### Risks
 - **Risk**: Breaking existing `af spawn -p` workflows
-  - **Mitigation**: Hidden aliases preserved; integration tests cover all legacy patterns
+  - **Mitigation**: Clear error messages for removed flags; integration tests cover new syntax
 
 ---
 
@@ -484,7 +484,7 @@ Phase 6 depends on all other phases.
 |------|------------|--------|------------|
 | `gh` CLI not in PATH or not authenticated | Medium | Medium | Doctor check + graceful degradation |
 | Dashboard regressions from Work view rewrite | Medium | Medium | Playwright tests + manual testing |
-| Spawn CLI backward compat breakage | Low | High | Hidden aliases + integration tests |
+| Spawn CLI breakage for users of old flags | Low | Medium | Clear error messages pointing to new syntax |
 | Cache staleness causing stale UI | Low | Low | 60s TTL + manual refresh button |
 
 ## Validation Checkpoints
