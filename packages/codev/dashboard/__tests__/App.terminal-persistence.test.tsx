@@ -41,8 +41,8 @@ vi.mock('../src/components/Terminal.js', () => ({
   ),
 }));
 
-vi.mock('../src/components/StatusPanel.js', () => ({
-  StatusPanel: () => <div data-testid="status-panel">Dashboard</div>,
+vi.mock('../src/components/WorkView.js', () => ({
+  WorkView: () => <div data-testid="work-view">Work</div>,
 }));
 
 vi.mock('../src/components/FileViewer.js', () => ({

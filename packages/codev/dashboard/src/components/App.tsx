@@ -117,7 +117,7 @@ export function App() {
             </div>
           );
         })}
-        {(activeTab?.type === 'work' || activeTab?.type === 'dashboard') && (
+        {activeTab?.type === 'work' && (
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
         )}
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}

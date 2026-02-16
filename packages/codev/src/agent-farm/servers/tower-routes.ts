@@ -959,7 +959,7 @@ async function handleWorkspaceRoutes(
     return;
   }
 
-  // GET /file?path=<relative-path> — Read workspace file by path (for StatusPanel workspace list)
+  // GET /file?path=<relative-path> — Read workspace file by path
   if (req.method === 'GET' && subPath === 'file' && url.searchParams.has('path')) {
     const relPath = url.searchParams.get('path')!;
     const fullPath = path.resolve(workspacePath, relPath);

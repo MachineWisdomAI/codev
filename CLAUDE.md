@@ -74,29 +74,24 @@ You are working in the Codev project itself, with multiple development protocols
 
 Key locations:
 - Protocol details: `codev/protocols/` (Choose appropriate protocol)
-- **Project tracking**: `codev/projectlist.md` (Master list of all projects)
+- **Project tracking**: GitHub Issues (source of truth for all projects)
 - Specifications go in: `codev/specs/`
 - Plans go in: `codev/plans/`
 - Reviews go in: `codev/reviews/`
 
 ### Project Tracking
 
-**Two complementary tracking systems:**
+**GitHub Issues are the source of truth for project tracking.**
 
-1. **`codev/projectlist.md`** - Master list of ALL projects (planning and history)
-   - Contains status, priority, dependencies, and notes for every project
-   - Reserve project numbers here BEFORE creating spec files
-   - Update when project lifecycle changes (conceived → specified → committed → integrated)
-
-2. **`codev/projects/<id>/status.yaml`** - Runtime state for ACTIVE porch projects
-   - Detailed phase tracking (specify:draft, plan:consult, implement:phase_1, etc.)
-   - Gate status (pending, passed, failed)
-   - Managed automatically by porch
+- Issues with the `spec` label have approved specifications
+- Issues with the `plan` label have approved plans
+- Active builders are tracked via `codev/projects/<id>/status.yaml` (managed by porch)
+- The dashboard Work view shows builders, PRs, and backlog derived from GitHub + filesystem state
 
 **When to use which:**
-- **Starting work**: Check `codev/projectlist.md` for priorities and incomplete work
+- **Starting work**: Check GitHub Issues for priorities and backlog
 - **During implementation**: Use `porch status <id>` for detailed phase status
-- **After completion**: Update `codev/projectlist.md` status field
+- **After completion**: Close the GitHub Issue when PR is merged
 
 **🚨 CRITICAL: Two human approval gates exist:**
 - **conceived → specified**: AI creates spec, but ONLY the human can approve it
@@ -137,7 +132,7 @@ validated: [gemini, codex, claude]
 - No spec/plan artifacts needed
 - Single builder can fix independently
 
-**BUGFIX uses GitHub Issues as source of truth**, not projectlist.md. See `codev/protocols/bugfix/protocol.md`.
+**BUGFIX uses GitHub Issues as source of truth.** See `codev/protocols/bugfix/protocol.md`.
 
 ### Use TICK for (amendments to existing specs):
 - **Amendments** to an existing SPIR spec that is already `integrated`
@@ -188,7 +183,7 @@ project-root/
 │   │   └── maintain/       # Codebase maintenance (code + docs)
 │   ├── maintain/            # MAINTAIN protocol runtime artifacts
 │   │   └── .trash/         # Soft-deleted files (gitignored, 30-day retention)
-│   ├── projectlist.md      # Master project tracking (status, priority, dependencies)
+│   ├── projects/           # Active project state (managed by porch)
 │   ├── specs/              # Feature specifications (WHAT to build)
 │   ├── plans/              # Implementation plans (HOW to build)
 │   ├── reviews/            # Reviews and lessons learned from each feature
@@ -381,8 +376,8 @@ Use **tokei** for measuring codebase size: `tokei -e "tests/lib" -e "node_module
 # Check if there's already a PR for this
 gh pr list --search "XXXX"
 
-# Check projectlist for status
-cat codev/projectlist.md | grep -A5 "XXXX"
+# Check GitHub Issues for status
+gh issue list --search "XXXX"
 
 # Check if implementation already exists
 git log --oneline --all | grep -i "feature-name"
