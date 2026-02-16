@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -16,7 +16,7 @@ import {
   loadFileTabsForWorkspace as loadFileTabsFromDb,
 } from '../utils/file-tabs.js';
 import type { FileTab } from '../utils/file-tabs.js';
-import { TerminalManager } from '../../terminal/pty-manager.js';
+import { TerminalManager, DEFAULT_DISK_LOG_MAX_BYTES } from '../../terminal/index.js';
 import type { SessionManager, ReconnectRestartOptions } from '../../terminal/session-manager.js';
 import type { PtySession } from '../../terminal/pty-session.js';
 import type { WorkspaceTerminals, TerminalEntry, DbTerminalSession } from './tower-types.js';
@@ -94,11 +94,11 @@ export function getTerminalManager(): TerminalManager {
     const workspaceRoot = process.env.HOME || '/tmp';
     terminalManager = new TerminalManager({
       workspaceRoot: workspaceRoot,
-      logDir: path.join(homedir(), '.agent-farm', 'logs'),
+      logDir: path.join(AGENT_FARM_DIR, 'logs'),
       maxSessions: 100,
       ringBufferLines: 10000,
       diskLogEnabled: true,
-      diskLogMaxBytes: 50 * 1024 * 1024,
+      diskLogMaxBytes: DEFAULT_DISK_LOG_MAX_BYTES,
       reconnectTimeoutMs: 300_000,
     });
   }

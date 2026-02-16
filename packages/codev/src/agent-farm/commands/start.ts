@@ -9,13 +9,8 @@ import type { StartOptions } from '../types.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
-import { TowerClient } from '../lib/tower-client.js';
+import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 import { towerStart } from './tower.js';
-
-/**
- * Default tower port
- */
-const DEFAULT_TOWER_PORT = 4100;
 
 /**
  * Start via tower API (Phase 3 - Spec 0090)
@@ -33,7 +28,7 @@ export async function start(options: StartOptions = {}): Promise<void> {
   logger.kv('Workspace', workspacePath);
 
   // Create tower client
-  const client = new TowerClient(DEFAULT_TOWER_PORT);
+  const client = getTowerClient();
 
   // Check if tower is running
   const towerRunning = await client.isRunning();

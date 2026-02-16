@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
+import { encodeWorkspacePath, decodeWorkspacePath } from '../lib/tower-client.js';
 import { fileURLToPath } from 'node:url';
 
 const execAsync = promisify(exec);
@@ -81,18 +82,6 @@ export interface RouteContext {
   broadcastNotification: (notification: { type: string; title: string; body: string; workspace?: string }) => void;
   addSseClient: (client: SSEClient) => void;
   removeSseClient: (id: string) => void;
-}
-
-// ============================================================================
-// Helper: read raw request body
-// ============================================================================
-
-async function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise<string>((resolve) => {
-    let data = '';
-    req.on('data', (chunk: Buffer) => data += chunk.toString());
-    req.on('end', () => resolve(data));
-  });
 }
 
 // ============================================================================
@@ -248,7 +237,7 @@ async function handleWorkspaceAction(
   const [, encodedPath, action] = match;
   let workspacePath: string;
   try {
-    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    workspacePath = decodeWorkspacePath(encodedPath);
     if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
       throw new Error('Invalid path');
     }
@@ -942,7 +931,7 @@ async function handleWorkspaceRoutes(
   // Decode Base64URL (RFC 4648)
   let workspacePath: string;
   try {
-    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    workspacePath = decodeWorkspacePath(encodedPath);
     // Support both POSIX (/) and Windows (C:\) paths
     if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
       throw new Error('Invalid workspace path');
@@ -1186,7 +1175,7 @@ async function handleWorkspaceState(
 ): Promise<void> {
   // Refresh cache via getTerminalsForWorkspace (handles SQLite sync
   // and shellper reconnection in one place)
-  const encodedPath = Buffer.from(workspacePath).toString('base64url');
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const proxyUrl = `/workspace/${encodedPath}/`;
   await getTerminalsForWorkspace(workspacePath, proxyUrl);
 
@@ -1369,8 +1358,10 @@ async function handleWorkspaceFileTabCreate(
   workspacePath: string,
 ): Promise<void> {
   try {
-    const body = await readBody(req);
-    const { path: filePath, line, terminalId } = JSON.parse(body || '{}');
+    const body = await parseJsonBody(req);
+    const filePath = body.path as string | undefined;
+    const line = body.line;
+    const terminalId = body.terminalId as string | undefined;
 
     if (!filePath || typeof filePath !== 'string') {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1559,8 +1550,7 @@ async function handleWorkspaceFileSave(
   }
 
   try {
-    const body = await readBody(req);
-    const { content } = JSON.parse(body || '{}');
+    const { content } = await parseJsonBody(req);
 
     if (typeof content !== 'string') {
       res.writeHead(400, { 'Content-Type': 'application/json' });

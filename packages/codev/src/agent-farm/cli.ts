@@ -11,36 +11,28 @@ import { towerStart, towerStop, towerLog } from './commands/tower.js';
 import { towerRegister, towerDeregister, towerCloudStatus } from './commands/tower-cloud.js';
 import { logger } from './utils/logger.js';
 import { setCliOverrides } from './utils/config.js';
+import { getTowerClient, DEFAULT_TOWER_PORT } from './lib/tower-client.js';
 import { version } from '../version.js';
 
 /**
  * Show tower daemon status and cloud connection info.
  */
 async function towerStatus(port?: number): Promise<void> {
-  const towerPort = port || 4100;
+  const towerPort = port || DEFAULT_TOWER_PORT;
+  const client = getTowerClient(towerPort);
 
   logger.header('Tower Status');
 
-  // Check if daemon is running and show instance details
-  try {
-    const response = await fetch(`http://127.0.0.1:${towerPort}/api/status`, {
-      signal: AbortSignal.timeout(3_000),
-    });
-    if (response.ok) {
-      logger.kv('Daemon', `running on port ${towerPort}`);
-      const data = (await response.json()) as {
-        instances?: Array<{ workspaceName: string; running: boolean; terminals: unknown[] }>;
-      };
-      if (data.instances) {
-        const running = data.instances.filter((i) => i.running);
-        const totalTerminals = data.instances.reduce((sum, i) => sum + (i.terminals?.length || 0), 0);
-        logger.kv('Workspaces', `${running.length} active / ${data.instances.length} total`);
-        logger.kv('Terminals', `${totalTerminals}`);
-      }
-    } else {
-      logger.kv('Daemon', 'not responding');
+  const status = await client.getStatus();
+  if (status) {
+    logger.kv('Daemon', `running on port ${towerPort}`);
+    if (status.instances) {
+      const running = status.instances.filter((i) => i.running);
+      const totalTerminals = status.instances.reduce((sum, i) => sum + (i.terminals?.length || 0), 0);
+      logger.kv('Workspaces', `${running.length} active / ${status.instances.length} total`);
+      logger.kv('Terminals', `${totalTerminals}`);
     }
-  } catch {
+  } else {
     logger.kv('Daemon', 'not running');
   }
 

@@ -4,6 +4,7 @@
  */
 
 import path from 'node:path';
+import { getTowerClient } from '../lib/tower-client.js';
 
 export type NotificationType = 'gate' | 'blocked' | 'error' | 'info';
 
@@ -13,9 +14,6 @@ interface NotificationPayload {
   projectId: string;
   details: string;
 }
-
-// Default tower port
-const TOWER_PORT = process.env.CODEV_TOWER_PORT || '4100';
 
 // Track sent notifications to avoid duplicates within short window
 const recentNotifications = new Map<string, number>();
@@ -80,22 +78,13 @@ export async function sendPushNotification(payload: NotificationPayload): Promis
   }
 
   try {
-    const response = await fetch(`http://localhost:${TOWER_PORT}/api/notify`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: payload.type,
-        title,
-        body,
-        workspace: payload.workspacePath,
-      }),
+    const client = getTowerClient();
+    await client.sendNotification({
+      type: payload.type,
+      title,
+      body,
+      workspace: payload.workspacePath,
     });
-
-    if (!response.ok) {
-      console.warn(`[notifications] Tower responded ${response.status} for ${payload.type} notification (project ${payload.projectId})`);
-    }
   } catch {
     // Tower may not be running - silently ignore
   }

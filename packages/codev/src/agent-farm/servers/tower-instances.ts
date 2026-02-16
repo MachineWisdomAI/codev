@@ -12,6 +12,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
+import { encodeWorkspacePath } from '../lib/tower-client.js';
 
 const execAsync = promisify(exec);
 import { getGlobalDb } from '../db/index.js';
@@ -175,7 +176,7 @@ export async function getInstances(): Promise<InstanceStatus[]> {
     }
 
     // Encode workspace path for proxy URL
-    const encodedPath = Buffer.from(workspacePath).toString('base64url');
+    const encodedPath = encodeWorkspacePath(workspacePath);
     const proxyUrl = `/workspace/${encodedPath}/`;
 
     // Get terminals from tower's registry

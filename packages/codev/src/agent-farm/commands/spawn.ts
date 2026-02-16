@@ -35,7 +35,6 @@ import {
   resolveMode,
 } from './spawn-roles.js';
 import {
-  DEFAULT_TOWER_PORT,
   checkDependencies,
   createWorktree,
   initPorchInWorktree,
@@ -50,10 +49,22 @@ import {
   startShellSession,
   buildWorktreeLaunchScript,
 } from './spawn-worktree.js';
+import { getTowerClient } from '../lib/tower-client.js';
 
 // =============================================================================
 // ID and Session Management
 // =============================================================================
+
+/**
+ * Log spawn success with terminal WebSocket URL
+ */
+function logSpawnSuccess(label: string, terminalId: string, mode?: string): void {
+  const client = getTowerClient();
+  logger.blank();
+  logger.success(`${label} spawned!`);
+  if (mode) logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
+  logger.kv('Terminal', client.getTerminalWsUrl(terminalId));
+}
 
 /**
  * Generate a short 4-character base64-encoded ID
@@ -322,10 +333,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     worktree: worktreePath, branch: branchName, type: 'spec', issueNumber, terminalId,
   });
 
-  logger.blank();
-  logger.success(`Builder ${builderId} spawned!`);
-  logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
+  logSpawnSuccess(`Builder ${builderId}`, terminalId, mode);
 }
 
 /**
@@ -396,9 +404,7 @@ async function spawnTask(options: SpawnOptions, config: Config): Promise<void> {
     worktree: worktreePath, branch: branchName, type: 'task', taskText, terminalId,
   });
 
-  logger.blank();
-  logger.success(`Builder ${builderId} spawned!`);
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
+  logSpawnSuccess(`Builder ${builderId}`, terminalId);
 }
 
 /**
@@ -455,9 +461,7 @@ async function spawnProtocol(options: SpawnOptions, config: Config): Promise<voi
     worktree: worktreePath, branch: branchName, type: 'protocol', protocolName, terminalId,
   });
 
-  logger.blank();
-  logger.success(`Builder ${builderId} spawned!`);
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
+  logSpawnSuccess(`Builder ${builderId}`, terminalId);
 }
 
 /**
@@ -481,9 +485,7 @@ async function spawnShell(options: SpawnOptions, config: Config): Promise<void> 
     worktree: '', branch: '', type: 'shell', terminalId,
   });
 
-  logger.blank();
-  logger.success(`Shell ${shellId} spawned!`);
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
+  logSpawnSuccess(`Shell ${shellId}`, terminalId);
 }
 
 /**
@@ -533,9 +535,7 @@ async function spawnWorktree(options: SpawnOptions, config: Config): Promise<voi
     terminalId: worktreeTerminalId,
   });
 
-  logger.blank();
-  logger.success(`Worktree ${builderId} spawned!`);
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${worktreeTerminalId}`);
+  logSpawnSuccess(`Worktree ${builderId}`, worktreeTerminalId);
 }
 
 /**
@@ -644,10 +644,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     worktree: worktreePath, branch: branchName, type: 'bugfix', issueNumber, terminalId,
   });
 
-  logger.blank();
-  logger.success(`Bugfix builder for issue #${issueNumber} spawned!`);
-  logger.kv('Mode', mode === 'strict' ? 'Strict (porch-driven)' : 'Soft (protocol-guided)');
-  logger.kv('Terminal', `ws://localhost:${DEFAULT_TOWER_PORT}/ws/terminal/${terminalId}`);
+  logSpawnSuccess(`Bugfix builder for issue #${issueNumber}`, terminalId, mode);
 }
 
 // =============================================================================
