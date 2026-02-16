@@ -10,9 +10,10 @@ import { spawn, execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
+import { Codex } from '@openai/codex-sdk';
 import { resolveCodevFile, readCodevFile, findWorkspaceRoot, hasLocalOverride } from '../../lib/skeleton.js';
 import { MetricsDB } from './metrics.js';
-import { extractUsage, extractReviewText, type SDKResultLike } from './usage-extractor.js';
+import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 
 // Model configuration
 interface ModelConfig {
@@ -23,13 +24,10 @@ interface ModelConfig {
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
   gemini: { cli: 'gemini', args: ['--yolo'], envVar: 'GEMINI_SYSTEM_MD' },
-  // Codex uses experimental_instructions_file config flag (not env var)
-  // See: https://github.com/openai/codex/discussions/3896
-  codex: { cli: 'codex', args: ['exec', '-m', 'gpt-5.2-codex', '--full-auto'], envVar: null },
 };
 
-// Models that use the Agent SDK instead of CLI subprocess
-const SDK_MODELS = ['claude'];
+// Models that use an Agent SDK instead of CLI subprocess
+const SDK_MODELS = ['claude', 'codex'];
 
 // Claude Agent SDK turn limit. Claude explores the codebase with Read/Glob/Grep
 // tools before producing its verdict, so it needs a generous turn budget.
@@ -316,6 +314,104 @@ function commandExists(cmd: string): boolean {
   }
 }
 
+// Codex pricing for cost computation (matches values from old SUBPROCESS_MODEL_PRICING)
+const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8.00 };
+
+/**
+ * Run Codex consultation via @openai/codex-sdk.
+ * Mirrors runClaudeConsultation() — streams events, captures usage, records metrics.
+ */
+async function runCodexConsultation(
+  queryText: string,
+  role: string,
+  workspaceRoot: string,
+  outputPath?: string,
+  metricsCtx?: MetricsContext,
+): Promise<void> {
+  const chunks: string[] = [];
+  const startTime = Date.now();
+  let usageData: UsageData | null = null;
+  let errorMessage: string | null = null;
+  let exitCode = 0;
+
+  // Write role to temp file — SDK requires file path for instructions
+  const tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
+  fs.writeFileSync(tempFile, role);
+
+  try {
+    const codex = new Codex({
+      config: {
+        experimental_instructions_file: tempFile,
+      },
+    });
+
+    const thread = codex.startThread({
+      model: 'gpt-5.2-codex',
+      sandboxMode: 'read-only',
+      modelReasoningEffort: 'medium',
+      workingDirectory: workspaceRoot,
+    });
+
+    const { events } = await thread.runStreamed(queryText);
+
+    for await (const event of events) {
+      if (event.type === 'item.completed') {
+        const item = event.item;
+        if (item.type === 'agent_message') {
+          process.stdout.write(item.text);
+          chunks.push(item.text);
+        }
+      }
+      if (event.type === 'turn.completed') {
+        const input = event.usage.input_tokens;
+        const cached = event.usage.cached_input_tokens;
+        const output = event.usage.output_tokens;
+        const uncached = input - cached;
+        const cost = (uncached / 1_000_000) * CODEX_PRICING.inputPer1M
+                   + (cached / 1_000_000) * CODEX_PRICING.cachedInputPer1M
+                   + (output / 1_000_000) * CODEX_PRICING.outputPer1M;
+        usageData = { inputTokens: input, cachedInputTokens: cached, outputTokens: output, costUsd: cost };
+      }
+      if (event.type === 'turn.failed') {
+        errorMessage = event.error.message ?? 'Codex turn failed';
+        exitCode = 1;
+        throw new Error(errorMessage);
+      }
+    }
+
+    // Write output file
+    if (outputPath) {
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+      fs.writeFileSync(outputPath, chunks.join(''));
+      console.error(`\nOutput written to: ${outputPath}`);
+    }
+  } catch (err) {
+    if (!errorMessage) {
+      errorMessage = (err instanceof Error ? err.message : String(err)).substring(0, 500);
+      exitCode = 1;
+    }
+    throw err;
+  } finally {
+    // Clean up temp file
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+
+    // Record metrics (always, even on error)
+    if (metricsCtx) {
+      const duration = (Date.now() - startTime) / 1000;
+      recordMetrics(metricsCtx, {
+        durationSeconds: duration,
+        inputTokens: usageData?.inputTokens ?? null,
+        cachedInputTokens: usageData?.cachedInputTokens ?? null,
+        outputTokens: usageData?.outputTokens ?? null,
+        costUsd: usageData?.costUsd ?? null,
+        exitCode,
+        errorMessage,
+      });
+    }
+  }
+}
+
 /**
  * Run Claude consultation via Agent SDK.
  * Uses the SDK's query() function instead of CLI subprocess.
@@ -445,7 +541,7 @@ async function runConsultation(
     }
   }
 
-  // Claude uses the Agent SDK — handle separately from CLI-based models
+  // SDK-based models — handle separately from CLI subprocess models
   if (model === 'claude') {
     if (dryRun) {
       console.log(chalk.yellow(`[claude] Would invoke Agent SDK:`));
@@ -460,6 +556,25 @@ async function runConsultation(
 
     const startTime = Date.now();
     await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
+    const duration = (Date.now() - startTime) / 1000;
+    logQuery(workspaceRoot, model, query, duration);
+    console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
+    return;
+  }
+
+  if (model === 'codex') {
+    if (dryRun) {
+      console.log(chalk.yellow(`[codex] Would invoke Codex SDK:`));
+      console.log(`  Model: gpt-5.2-codex`);
+      console.log(`  Sandbox: read-only`);
+      console.log(`  Reasoning effort: medium`);
+      const promptPreview = query.substring(0, 200) + (query.length > 200 ? '...' : '');
+      console.log(`  Prompt: ${promptPreview}`);
+      return;
+    }
+
+    const startTime = Date.now();
+    await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
     const duration = (Date.now() - startTime) / 1000;
     logQuery(workspaceRoot, model, query, duration);
     console.error(`\n[${model} completed in ${duration.toFixed(1)}s]`);
@@ -490,21 +605,6 @@ async function runConsultation(
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
     cmd = [config.cli, ...config.args, '--output-format', 'json', query];
-  } else if (model === 'codex') {
-    // Codex uses experimental_instructions_file config flag (not env var)
-    // This is the official approach per https://github.com/openai/codex/discussions/3896
-    tempFile = path.join(tmpdir(), `codev-role-${Date.now()}.md`);
-    fs.writeFileSync(tempFile, role);
-    cmd = [
-      config.cli,
-      'exec',
-      '-c', `experimental_instructions_file=${tempFile}`,
-      '-c', 'model_reasoning_effort=medium', // Balance speed vs review quality
-      '-c', 'sandbox=read-only', // Consult is read-only — no test execution
-      '--full-auto',
-      '--json',
-      query,
-    ];
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
@@ -541,40 +641,10 @@ async function runConsultation(
     });
 
     const chunks: Buffer[] = [];
-    let codexLineBuf = '';
 
     if (proc.stdout) {
       proc.stdout.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
-
-        if (model === 'codex') {
-          // Stream assistant message text in real-time from JSONL
-          codexLineBuf += chunk.toString('utf-8');
-          const lines = codexLineBuf.split('\n');
-          codexLineBuf = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const event = JSON.parse(line);
-              // Codex JSONL: {type: 'item.completed', item: {type: 'agent_message', text: '...'}}
-              if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
-                process.stdout.write(event.item.text);
-              } else if (event.type === 'message' && event.role === 'assistant') {
-                if (typeof event.content === 'string') {
-                  process.stdout.write(event.content);
-                } else if (Array.isArray(event.content)) {
-                  for (const block of event.content) {
-                    if (typeof block === 'string') process.stdout.write(block);
-                    else if (block?.type === 'text' && typeof block.text === 'string') process.stdout.write(block.text);
-                  }
-                }
-              }
-            } catch {
-              // Not valid JSON line, skip
-            }
-          }
-        }
         // Gemini: buffer only (JSON is one blob, text emitted on close)
       });
     }
@@ -594,12 +664,8 @@ async function runConsultation(
       const outputContent = reviewText ?? rawOutput; // Fallback to raw on parse failure
 
       // Write extracted text to stdout for Gemini (was fully buffered)
-      // For Codex: if real-time streaming worked, text was already emitted.
-      // But if extraction failed (reviewText is null), nothing was streamed — write raw fallback.
       if (model === 'gemini') {
         process.stdout.write(outputContent);
-      } else if (model === 'codex' && !reviewText) {
-        process.stdout.write(rawOutput);
       }
 
       // Write to output file

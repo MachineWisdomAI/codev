@@ -469,13 +469,13 @@ describe('Gemini output unwrapping', () => {
   });
 });
 
-// Test 11: Codex output unwrapping
+// Test 11: Codex output unwrapping (uses item.completed/agent_message format)
 describe('Codex output unwrapping', () => {
   it('extracts assistant message text from JSONL events', () => {
     const output = [
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'First part of review. ' }),
-      JSON.stringify({ type: 'message', role: 'user', content: 'ignored' }),
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'Second part.' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'First part of review. ' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'cmd1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'completed' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: 'Second part.' } }),
       JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 } }),
     ].join('\n');
 
@@ -484,12 +484,11 @@ describe('Codex output unwrapping', () => {
     expect(text).toBe('First part of review. Second part.');
   });
 
-  it('handles content as array of text blocks', () => {
-    const output = JSON.stringify({
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'text', text: 'Block one.' }, { type: 'text', text: ' Block two.' }],
-    });
+  it('extracts text from multiple agent_message items', () => {
+    const output = [
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'Block one.' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: ' Block two.' } }),
+    ].join('\n');
 
     const text = extractReviewText('codex', output);
     expect(text).not.toBeNull();
@@ -497,7 +496,7 @@ describe('Codex output unwrapping', () => {
   });
 
   it('returns null when no assistant messages found', () => {
-    const output = JSON.stringify({ type: 'turn.completed', usage: {} });
+    const output = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 } });
     const text = extractReviewText('codex', output);
     expect(text).toBeNull();
   });
@@ -594,9 +593,9 @@ describe('Codex mixed JSONL with non-JSON lines', () => {
   it('extractReviewText skips non-JSON lines and extracts assistant text', () => {
     const output = [
       'Codex CLI v1.2.3',  // Non-JSON progress line
-      JSON.stringify({ type: 'message', role: 'assistant', content: 'Review text here.' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg1', type: 'agent_message', text: 'Review text here.' } }),
       'Some debug output',  // Non-JSON debug line
-      JSON.stringify({ type: 'message', role: 'assistant', content: ' More review.' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'msg2', type: 'agent_message', text: ' More review.' } }),
       JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 } }),
     ].join('\n');
 
