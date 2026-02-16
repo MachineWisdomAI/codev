@@ -15,10 +15,8 @@ import {
   statSync,
 } from 'node:fs';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-
-const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm');
+import { AGENT_FARM_DIR } from './tower-client.js';
 const CLOUD_CONFIG_FILENAME = 'cloud-config.json';
 const MACHINE_ID_FILENAME = 'machine-id';
 

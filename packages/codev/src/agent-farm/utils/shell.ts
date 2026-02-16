@@ -112,23 +112,26 @@ export async function commandExists(command: string): Promise<boolean> {
 }
 
 /**
+ * Check if a single port is available (not in use).
+ * Uses native Node socket binding instead of lsof for cross-platform support.
+ */
+export async function isPortAvailable(port: number): Promise<boolean> {
+  const net = await import('node:net');
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+/**
  * Find an available port starting from the given port
  * Uses native Node socket binding instead of lsof for cross-platform support
  */
 export async function findAvailablePort(startPort: number): Promise<number> {
-  const net = await import('node:net');
-
-  const isPortAvailable = (port: number): Promise<boolean> => {
-    return new Promise((resolve) => {
-      const server = net.createServer();
-      server.once('error', () => resolve(false));
-      server.once('listening', () => {
-        server.close(() => resolve(true));
-      });
-      server.listen(port, '127.0.0.1');
-    });
-  };
-
   let port = startPort;
   while (port < startPort + 100) {
     if (await isPortAvailable(port)) {

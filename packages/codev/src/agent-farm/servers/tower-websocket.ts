@@ -13,6 +13,7 @@ import { encodeData, encodeControl, decodeFrame } from '../../terminal/ws-protoc
 import type { PtySession } from '../../terminal/pty-session.js';
 import { getTerminalManager } from './tower-terminals.js';
 import { normalizeWorkspacePath } from './tower-utils.js';
+import { decodeWorkspacePath } from '../lib/tower-client.js';
 import { addSubscriber, removeSubscriber } from './tower-messages.js';
 
 // ============================================================================
@@ -181,7 +182,7 @@ export function setupUpgradeHandler(
     // Wrap in try/catch to handle malformed Base64 input gracefully
     let workspacePath: string;
     try {
-      workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+      workspacePath = decodeWorkspacePath(encodedPath);
       // Support both POSIX (/) and Windows (C:\) paths
       if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
         throw new Error('Invalid workspace path');

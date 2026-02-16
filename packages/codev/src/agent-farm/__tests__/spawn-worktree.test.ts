@@ -7,11 +7,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  slugify, DEFAULT_TOWER_PORT, buildWorktreeLaunchScript,
+  slugify, buildWorktreeLaunchScript,
   checkDependencies, createWorktree, checkBugfixCollisions,
   findExistingBugfixWorktree,
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
+import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
 // Mock dependencies
 vi.mock('node:fs', async (importOriginal) => {

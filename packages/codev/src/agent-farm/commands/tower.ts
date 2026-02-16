@@ -4,13 +4,13 @@
 
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
-import net from 'node:net';
 import http from 'node:http';
 import { logger, fatal } from '../utils/logger.js';
 import { spawn } from 'node:child_process';
 import { getConfig } from '../utils/config.js';
 import { execSync } from 'node:child_process';
 import { DEFAULT_TOWER_PORT, AGENT_FARM_DIR } from '../lib/tower-client.js';
+import { isPortAvailable } from '../utils/shell.js';
 
 // Log file location
 const LOG_FILE = resolve(AGENT_FARM_DIR, 'tower.log');
@@ -42,23 +42,10 @@ function logToFile(message: string): void {
 }
 
 /**
- * Check if a port is already in use
+ * Check if a port is already in use (inverse of isPortAvailable from shell utils)
  */
 async function isPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        resolve(true);
-      } else {
-        resolve(false);
-      }
-    });
-    server.once('listening', () => {
-      server.close(() => resolve(false));
-    });
-    server.listen(port, '127.0.0.1');
-  });
+  return !(await isPortAvailable(port));
 }
 
 /**

@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { getGlobalDb } from '../db/index.js';
 import {
   saveFileTab as saveFileTabToDb,
@@ -94,7 +94,7 @@ export function getTerminalManager(): TerminalManager {
     const workspaceRoot = process.env.HOME || '/tmp';
     terminalManager = new TerminalManager({
       workspaceRoot: workspaceRoot,
-      logDir: path.join(homedir(), '.agent-farm', 'logs'),
+      logDir: path.join(AGENT_FARM_DIR, 'logs'),
       maxSessions: 100,
       ringBufferLines: 10000,
       diskLogEnabled: true,

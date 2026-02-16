@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir, tmpdir } from 'node:os';
+import { encodeWorkspacePath, decodeWorkspacePath } from '../lib/tower-client.js';
 import { fileURLToPath } from 'node:url';
 
 const execAsync = promisify(exec);
@@ -248,7 +249,7 @@ async function handleWorkspaceAction(
   const [, encodedPath, action] = match;
   let workspacePath: string;
   try {
-    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    workspacePath = decodeWorkspacePath(encodedPath);
     if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
       throw new Error('Invalid path');
     }
@@ -942,7 +943,7 @@ async function handleWorkspaceRoutes(
   // Decode Base64URL (RFC 4648)
   let workspacePath: string;
   try {
-    workspacePath = Buffer.from(encodedPath, 'base64url').toString('utf-8');
+    workspacePath = decodeWorkspacePath(encodedPath);
     // Support both POSIX (/) and Windows (C:\) paths
     if (!workspacePath || (!workspacePath.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(workspacePath))) {
       throw new Error('Invalid workspace path');
@@ -1186,7 +1187,7 @@ async function handleWorkspaceState(
 ): Promise<void> {
   // Refresh cache via getTerminalsForWorkspace (handles SQLite sync
   // and shellper reconnection in one place)
-  const encodedPath = Buffer.from(workspacePath).toString('base64url');
+  const encodedPath = encodeWorkspacePath(workspacePath);
   const proxyUrl = `/workspace/${encodedPath}/`;
   await getTerminalsForWorkspace(workspacePath, proxyUrl);
 

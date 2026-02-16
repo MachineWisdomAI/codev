@@ -29,9 +29,14 @@ vi.mock('../state.js', () => ({
 
 vi.mock('../lib/tower-client.js', () => ({
   TowerClient: vi.fn().mockImplementation(function (this: any) {
-    this.isRunning = mockIsRunning;
-    this.getHealth = mockGetHealth;
-    this.getWorkspaceStatus = mockGetWorkspaceStatus;
+    this.isRunning = (...a: any[]) => mockIsRunning(...a);
+    this.getHealth = (...a: any[]) => mockGetHealth(...a);
+    this.getWorkspaceStatus = (...a: any[]) => mockGetWorkspaceStatus(...a);
+  }),
+  getTowerClient: () => ({
+    isRunning: (...a: any[]) => mockIsRunning(...a),
+    getHealth: (...a: any[]) => mockGetHealth(...a),
+    getWorkspaceStatus: (...a: any[]) => mockGetWorkspaceStatus(...a),
   }),
 }));
 

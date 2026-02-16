@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, copyFileSync, unlinkSync, readdirSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
+import { AGENT_FARM_DIR } from '../lib/tower-client.js';
 import { LOCAL_SCHEMA, GLOBAL_SCHEMA } from './schema.js';
 import { migrateLocalFromJson } from './migrate.js';
 import { getConfig } from '../utils/index.js';
@@ -116,7 +117,7 @@ export function getGlobalDbPath(): string {
   if (process.env.NODE_ENV === 'test') {
     dbName = process.env.AF_TEST_DB || 'test.db';
   }
-  return resolve(homedir(), '.agent-farm', dbName);
+  return resolve(AGENT_FARM_DIR, dbName);
 }
 
 /**
