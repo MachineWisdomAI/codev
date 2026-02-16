@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   slugify, DEFAULT_TOWER_PORT, buildWorktreeLaunchScript,
   checkDependencies, createWorktree, checkBugfixCollisions,
+  findExistingBugfixWorktree,
   validateResumeWorktree, initPorchInWorktree, type GitHubIssue,
 } from '../commands/spawn-worktree.js';
 
@@ -21,6 +22,7 @@ vi.mock('node:fs', async (importOriginal) => {
     writeFileSync: vi.fn(),
     chmodSync: vi.fn(),
     symlinkSync: vi.fn(),
+    readdirSync: vi.fn(() => []),
   };
 });
 
@@ -85,6 +87,53 @@ describe('spawn-worktree', () => {
 
     it('trims leading/trailing hyphens', () => {
       expect(slugify('--hello--')).toBe('hello');
+    });
+  });
+
+  // =========================================================================
+  // findExistingBugfixWorktree (Bugfix #316)
+  // =========================================================================
+
+  describe('findExistingBugfixWorktree', () => {
+    it('returns matching directory when issue number matches', async () => {
+      const { readdirSync } = await import('node:fs');
+      vi.mocked(readdirSync).mockReturnValueOnce([
+        { name: 'bugfix-315-gate-notification-indicator-mi', isDirectory: () => true },
+        { name: 'bugfix-316-af-spawn-issue-resume-fails', isDirectory: () => true },
+        { name: 'spir-42-some-feature', isDirectory: () => true },
+      ] as any);
+      expect(findExistingBugfixWorktree('/builders', 316)).toBe('bugfix-316-af-spawn-issue-resume-fails');
+    });
+
+    it('returns null when no matching directory exists', async () => {
+      const { readdirSync } = await import('node:fs');
+      vi.mocked(readdirSync).mockReturnValueOnce([
+        { name: 'bugfix-315-some-other-issue', isDirectory: () => true },
+        { name: 'spir-42-some-feature', isDirectory: () => true },
+      ] as any);
+      expect(findExistingBugfixWorktree('/builders', 316)).toBeNull();
+    });
+
+    it('returns null when builders directory does not exist', async () => {
+      const { readdirSync } = await import('node:fs');
+      vi.mocked(readdirSync).mockImplementationOnce(() => { throw new Error('ENOENT'); });
+      expect(findExistingBugfixWorktree('/nonexistent', 316)).toBeNull();
+    });
+
+    it('ignores files that are not directories', async () => {
+      const { readdirSync } = await import('node:fs');
+      vi.mocked(readdirSync).mockReturnValueOnce([
+        { name: 'bugfix-316-some-file.txt', isDirectory: () => false },
+      ] as any);
+      expect(findExistingBugfixWorktree('/builders', 316)).toBeNull();
+    });
+
+    it('does not match issue 31 when looking for issue 316', async () => {
+      const { readdirSync } = await import('node:fs');
+      vi.mocked(readdirSync).mockReturnValueOnce([
+        { name: 'bugfix-31-some-issue', isDirectory: () => true },
+      ] as any);
+      expect(findExistingBugfixWorktree('/builders', 316)).toBeNull();
     });
   });
 

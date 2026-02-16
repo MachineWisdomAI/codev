@@ -41,6 +41,7 @@ import {
   fetchGitHubIssue,
   executePreSpawnHooks,
   slugify,
+  findExistingBugfixWorktree,
   validateResumeWorktree,
   createPtySession,
   startBuilderSession,
@@ -439,9 +440,22 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
   logger.info('Fetching issue from GitHub...');
   const issue = await fetchGitHubIssue(issueNumber);
 
-  const slug = slugify(issue.title);
   const builderId = buildAgentName('bugfix', String(issueNumber));
-  const worktreeName = `bugfix-${issueNumber}-${slug}`;
+
+  // When resuming, find the existing worktree by issue number pattern
+  // instead of recomputing from the current title (which may have changed).
+  let worktreeName: string;
+  if (options.resume) {
+    const existing = findExistingBugfixWorktree(config.buildersDir, issueNumber);
+    if (existing) {
+      worktreeName = existing;
+    } else {
+      worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+    }
+  } else {
+    worktreeName = `bugfix-${issueNumber}-${slugify(issue.title)}`;
+  }
+
   const branchName = `builder/${worktreeName}`;
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
@@ -488,6 +502,7 @@ async function spawnBugfix(options: SpawnOptions, config: Config): Promise<void>
     await createWorktree(config, branchName, worktreePath);
 
     // Pre-initialize porch so the builder doesn't need to figure out project ID
+    const slug = slugify(issue.title);
     await initPorchInWorktree(worktreePath, protocol, builderId, slug);
   }
 
