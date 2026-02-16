@@ -274,53 +274,6 @@ export function loadProtocol(config: Config, protocolName: string): ProtocolDefi
 }
 
 /**
- * Resolve which protocol to use based on precedence:
- * 1. Explicit --protocol flag when used as override (with other input modes)
- * 2. Explicit --use-protocol flag (backwards compatibility)
- * 3. Spec file **Protocol**: header (for --project mode)
- * 4. Hardcoded defaults (spir for specs, bugfix for issues)
- */
-export async function resolveProtocol(options: SpawnOptions, config: Config): Promise<string> {
-  const inputModes = [
-    options.project, options.task, options.shell, options.worktree, options.issue,
-  ].filter(Boolean);
-  const protocolAsOverride = options.protocol && inputModes.length > 0;
-
-  if (protocolAsOverride) {
-    validateProtocol(config, options.protocol!);
-    return options.protocol!.toLowerCase();
-  }
-
-  if (options.useProtocol) {
-    validateProtocol(config, options.useProtocol);
-    return options.useProtocol.toLowerCase();
-  }
-
-  if (options.project) {
-    const specFile = await findSpecFile(config.codevDir, options.project);
-    if (specFile) {
-      const specContent = readFileSync(specFile, 'utf-8');
-      const match = specContent.match(/\*\*Protocol\*\*:\s*(\w+)/i);
-      if (match) {
-        const protocolFromSpec = match[1].toLowerCase();
-        try {
-          validateProtocol(config, protocolFromSpec);
-          return protocolFromSpec;
-        } catch {
-          logger.warn(`Warning: Protocol "${match[1]}" from spec not found, using default`);
-        }
-      }
-    }
-  }
-
-  if (options.project) return 'spir';
-  if (options.issue) return 'bugfix';
-  if (options.protocol) return options.protocol.toLowerCase();
-  if (options.task) return 'spir';
-  return 'spir';
-}
-
-/**
  * Resolve the builder mode (strict vs soft)
  * Precedence: explicit flags > protocol defaults > input type defaults
  */
@@ -338,6 +291,7 @@ export function resolveMode(
     return protocol.defaults.mode;
   }
 
-  if (options.project) return 'strict';
+  // Issue-based spawns with non-bugfix protocol default to strict
+  if (options.issueNumber && options.protocol !== 'bugfix') return 'strict';
   return 'soft';
 }
