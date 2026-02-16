@@ -557,7 +557,10 @@ async function runConsultation(
             if (!line.trim()) continue;
             try {
               const event = JSON.parse(line);
-              if (event.type === 'message' && event.role === 'assistant') {
+              // Codex JSONL: {type: 'item.completed', item: {type: 'agent_message', text: '...'}}
+              if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
+                process.stdout.write(event.item.text);
+              } else if (event.type === 'message' && event.role === 'assistant') {
                 if (typeof event.content === 'string') {
                   process.stdout.write(event.content);
                 } else if (Array.isArray(event.content)) {

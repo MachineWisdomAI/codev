@@ -701,7 +701,7 @@ function getConsultArtifactType(phaseId: string): string {
     case 'specify': return 'spec';
     case 'plan': return 'plan';
     case 'implement': return 'impl';
-    case 'review': return 'review';
+    case 'review': return 'impl';
     default: return 'spec';
   }
 }

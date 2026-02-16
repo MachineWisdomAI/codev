@@ -200,7 +200,11 @@ export function extractReviewText(model: string, output: string): string | null 
           // Skip non-JSON lines (e.g. progress output, debug messages)
           continue;
         }
-        if (event.type === 'message' && event.role === 'assistant') {
+        // Codex JSONL: {type: 'item.completed', item: {type: 'agent_message', text: '...'}}
+        const item = (event as Record<string, unknown>).item as Record<string, unknown> | undefined;
+        if (event.type === 'item.completed' && item?.type === 'agent_message' && typeof item.text === 'string') {
+          textParts.push(item.text);
+        } else if (event.type === 'message' && event.role === 'assistant') {
           if (typeof event.content === 'string') {
             textParts.push(event.content);
           } else if (Array.isArray(event.content)) {
