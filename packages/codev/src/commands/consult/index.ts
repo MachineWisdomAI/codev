@@ -321,7 +321,7 @@ const CODEX_PRICING = { inputPer1M: 2.00, cachedInputPer1M: 1.00, outputPer1M: 8
  * Run Codex consultation via @openai/codex-sdk.
  * Mirrors runClaudeConsultation() — streams events, captures usage, records metrics.
  */
-async function runCodexConsultation(
+export async function runCodexConsultation(
   queryText: string,
   role: string,
   workspaceRoot: string,
