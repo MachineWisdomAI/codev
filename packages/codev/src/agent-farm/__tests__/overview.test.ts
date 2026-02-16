@@ -16,6 +16,8 @@ import {
   deriveBacklog,
   extractProjectIdFromWorktreeName,
   worktreeNameToRoleId,
+  calculateProgress,
+  detectBlocked,
 } from '../servers/overview.js';
 
 // ============================================================================
@@ -141,6 +143,240 @@ describe('overview', () => {
       const result = parseStatusYaml(yaml);
       expect(result.id).toBe('42');
     });
+
+    it('parses plan_phases section', () => {
+      const yaml = [
+        "id: '0124'",
+        'protocol: spir',
+        'phase: implement',
+        'plan_phases:',
+        '  - id: phase_1',
+        '    title: Remove obsolete files',
+        '    status: complete',
+        '  - id: phase_2',
+        '    title: Consolidate tests',
+        '    status: in_progress',
+        '  - id: phase_3',
+        '    title: Final verification',
+        '    status: pending',
+        'current_plan_phase: phase_2',
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.planPhases).toHaveLength(3);
+      expect(result.planPhases[0]).toEqual({ id: 'phase_1', title: 'Remove obsolete files', status: 'complete' });
+      expect(result.planPhases[1]).toEqual({ id: 'phase_2', title: 'Consolidate tests', status: 'in_progress' });
+      expect(result.planPhases[2]).toEqual({ id: 'phase_3', title: 'Final verification', status: 'pending' });
+    });
+
+    it('parses gate requested_at fields', () => {
+      const yaml = [
+        "id: '0124'",
+        'gates:',
+        '  spec-approval:',
+        '    status: approved',
+        "    requested_at: '2026-02-16T03:47:00.754Z'",
+        '  plan-approval:',
+        '    status: pending',
+        "    requested_at: '2026-02-16T04:24:06.254Z'",
+        '  pr-ready:',
+        '    status: pending',
+        'iteration: 1',
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateRequestedAt['spec-approval']).toBe('2026-02-16T03:47:00.754Z');
+      expect(result.gateRequestedAt['plan-approval']).toBe('2026-02-16T04:24:06.254Z');
+      expect(result.gateRequestedAt['pr-ready']).toBeUndefined();
+    });
+
+    it('returns empty planPhases when section is absent', () => {
+      const yaml = "id: '0100'\nprotocol: spir\nphase: specify";
+      const result = parseStatusYaml(yaml);
+      expect(result.planPhases).toEqual([]);
+    });
+
+    it('returns empty gateRequestedAt when no requested_at present', () => {
+      const yaml = [
+        'gates:',
+        '  spec-approval:',
+        '    status: pending',
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateRequestedAt).toEqual({});
+    });
+  });
+
+  // ==========================================================================
+  // calculateProgress
+  // ==========================================================================
+
+  describe('calculateProgress', () => {
+    function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {
+      return {
+        id: '0100',
+        title: 'test',
+        protocol: 'spir',
+        phase: 'specify',
+        currentPlanPhase: '',
+        gates: {},
+        gateRequestedAt: {},
+        planPhases: [],
+        ...overrides,
+      };
+    }
+
+    it('returns 10 for specify phase (in progress)', () => {
+      expect(calculateProgress(makeParsed({ phase: 'specify' }))).toBe(10);
+    });
+
+    it('returns 20 for specify phase (gate requested)', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'specify',
+        gates: { 'spec-approval': 'pending' },
+        gateRequestedAt: { 'spec-approval': '2026-01-01T00:00:00Z' },
+      }))).toBe(20);
+    });
+
+    it('returns 35 for plan phase (in progress)', () => {
+      expect(calculateProgress(makeParsed({ phase: 'plan' }))).toBe(35);
+    });
+
+    it('returns 45 for plan phase (gate requested)', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'plan',
+        gates: { 'plan-approval': 'pending' },
+        gateRequestedAt: { 'plan-approval': '2026-01-01T00:00:00Z' },
+      }))).toBe(45);
+    });
+
+    it('returns 70 for implement phase with no plan phases', () => {
+      expect(calculateProgress(makeParsed({ phase: 'implement' }))).toBe(70);
+    });
+
+    it('returns 50 for implement phase with 0 of 5 complete', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'pending' },
+          { id: 'p2', title: 'B', status: 'pending' },
+          { id: 'p3', title: 'C', status: 'pending' },
+          { id: 'p4', title: 'D', status: 'pending' },
+          { id: 'p5', title: 'E', status: 'pending' },
+        ],
+      }))).toBe(50);
+    });
+
+    it('returns 66 for implement phase with 2 of 5 complete', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'complete' },
+          { id: 'p2', title: 'B', status: 'complete' },
+          { id: 'p3', title: 'C', status: 'in_progress' },
+          { id: 'p4', title: 'D', status: 'pending' },
+          { id: 'p5', title: 'E', status: 'pending' },
+        ],
+      }))).toBe(66);
+    });
+
+    it('returns 90 for implement phase with all complete', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'implement',
+        planPhases: [
+          { id: 'p1', title: 'A', status: 'complete' },
+          { id: 'p2', title: 'B', status: 'complete' },
+        ],
+      }))).toBe(90);
+    });
+
+    it('returns 92 for review phase (in progress)', () => {
+      expect(calculateProgress(makeParsed({ phase: 'review' }))).toBe(92);
+    });
+
+    it('returns 95 for review phase (gate requested)', () => {
+      expect(calculateProgress(makeParsed({
+        phase: 'review',
+        gates: { 'pr-ready': 'pending' },
+        gateRequestedAt: { 'pr-ready': '2026-01-01T00:00:00Z' },
+      }))).toBe(95);
+    });
+
+    it('returns 100 for complete phase', () => {
+      expect(calculateProgress(makeParsed({ phase: 'complete' }))).toBe(100);
+    });
+
+    it('returns 0 for non-SPIR protocols', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'implement' }))).toBe(0);
+    });
+
+    it('returns 0 for unknown phase', () => {
+      expect(calculateProgress(makeParsed({ phase: 'unknown' }))).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // detectBlocked
+  // ==========================================================================
+
+  describe('detectBlocked', () => {
+    function makeParsed(overrides: Partial<ReturnType<typeof parseStatusYaml>> = {}) {
+      return {
+        id: '0100',
+        title: 'test',
+        protocol: 'spir',
+        phase: 'specify',
+        currentPlanPhase: '',
+        gates: {},
+        gateRequestedAt: {},
+        planPhases: [],
+        ...overrides,
+      };
+    }
+
+    it('returns null when no gates are pending', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'spec-approval': 'approved', 'plan-approval': 'approved' },
+      }))).toBeNull();
+    });
+
+    it('returns null when gate is pending but not requested', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'spec-approval': 'pending' },
+      }))).toBeNull();
+    });
+
+    it('returns "spec review" when spec-approval is pending and requested', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'spec-approval': 'pending' },
+        gateRequestedAt: { 'spec-approval': '2026-01-01T00:00:00Z' },
+      }))).toBe('spec review');
+    });
+
+    it('returns "plan review" when plan-approval is pending and requested', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'spec-approval': 'approved', 'plan-approval': 'pending' },
+        gateRequestedAt: { 'plan-approval': '2026-01-01T00:00:00Z' },
+      }))).toBe('plan review');
+    });
+
+    it('returns "PR review" when pr-ready is pending and requested', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'pr-ready': 'pending' },
+        gateRequestedAt: { 'pr-ready': '2026-01-01T00:00:00Z' },
+      }))).toBe('PR review');
+    });
+
+    it('returns first blocked gate when multiple are pending', () => {
+      expect(detectBlocked(makeParsed({
+        gates: { 'spec-approval': 'pending', 'plan-approval': 'pending' },
+        gateRequestedAt: {
+          'spec-approval': '2026-01-01T00:00:00Z',
+          'plan-approval': '2026-01-02T00:00:00Z',
+        },
+      }))).toBe('spec review');
+    });
   });
 
   // ==========================================================================
@@ -265,6 +501,9 @@ describe('overview', () => {
       expect(builders[0].phase).toBe('tower_endpoint');
       expect(builders[0].mode).toBe('strict');
       expect(builders[0].gates['pr-ready']).toBe('pending');
+      expect(builders[0].protocol).toBe('spir');
+      expect(builders[0].progress).toBe(70);
+      expect(builders[0].blocked).toBeNull();
     });
 
     it('discovers soft mode builder for task/worktree types', () => {
@@ -276,6 +515,38 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('soft');
       expect(builders[0].issueNumber).toBeNull();
       expect(builders[0].phase).toBe('');
+      expect(builders[0].protocol).toBe('');
+      expect(builders[0].planPhases).toEqual([]);
+      expect(builders[0].progress).toBe(0);
+      expect(builders[0].blocked).toBeNull();
+    });
+
+    it('populates progress and blocked from status.yaml', () => {
+      createBuilderWorktree(tmpDir, 'spir-50-feature', [
+        "id: '0050'",
+        'title: test-feature',
+        'protocol: spir',
+        'phase: plan',
+        'plan_phases:',
+        '  - id: phase_1',
+        '    title: Setup',
+        '    status: pending',
+        'gates:',
+        '  spec-approval:',
+        '    status: approved',
+        '  plan-approval:',
+        '    status: pending',
+        "    requested_at: '2026-02-16T04:00:00Z'",
+      ].join('\n'), '0050-test-feature');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].protocol).toBe('spir');
+      expect(builders[0].planPhases).toEqual([
+        { id: 'phase_1', title: 'Setup', status: 'pending' },
+      ]);
+      expect(builders[0].progress).toBe(45);
+      expect(builders[0].blocked).toBe('plan review');
     });
 
     it('discovers multiple builders with correct matching', () => {
