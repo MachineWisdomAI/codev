@@ -36,6 +36,7 @@ export interface PROverview {
   title: string;
   reviewStatus: string;
   linkedIssue: number | null;
+  createdAt: string;
 }
 
 export interface BacklogItem {
@@ -346,6 +347,7 @@ export class OverviewCache {
         title: pr.title,
         reviewStatus: pr.reviewDecision || 'REVIEW_REQUIRED',
         linkedIssue: parseLinkedIssue(pr.body || '', pr.title),
+        createdAt: pr.createdAt,
       }));
     }
 
