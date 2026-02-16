@@ -548,6 +548,11 @@ export class SessionManager extends EventEmitter {
    * socketDir in their command line args). Other Tower instances' shellpers
    * are left untouched.
    *
+   * Safety: Before killing, probes the shellper's socket. If the socket is
+   * responsive, the shellper is serving a live session that this Tower lost
+   * track of (e.g., SQLite was corrupt/empty during reconciliation). In that
+   * case, the shellper is NOT killed — reality (live socket) trumps SQLite.
+   *
    * Returns the number of orphans killed.
    */
   async killOrphanedShellpers(): Promise<number> {
@@ -558,10 +563,21 @@ export class SessionManager extends EventEmitter {
 
     let killed = 0;
     try {
-      const pids = await this.findShellperPids();
-      for (const pid of pids) {
+      const entries = await this.findShellperProcesses();
+      for (const { pid, socketPath } of entries) {
         if (pid === process.pid) continue;  // Don't kill ourselves
         if (activePids.has(pid)) continue;  // Known active session
+
+        // Safety: before killing, probe the socket to check if the shellper
+        // is serving a live session that this Tower instance lost track of
+        // (e.g., SQLite was corrupt/empty during reconciliation).
+        if (socketPath) {
+          const isAlive = await this.probeSocket(socketPath);
+          if (isAlive) {
+            this.log(`Orphan pid=${pid} has responsive socket ${socketPath} — skipping kill`);
+            continue;
+          }
+        }
 
         this.log(`Killing orphaned shellper process: pid=${pid}`);
         try {
@@ -576,7 +592,7 @@ export class SessionManager extends EventEmitter {
         }
       }
     } catch {
-      // pgrep not available or failed — not fatal
+      // ps not available or failed — not fatal
     }
 
     if (killed > 0) {
@@ -586,29 +602,38 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Find PIDs of shellper-main.js processes belonging to THIS Tower instance.
+   * Find shellper-main.js processes belonging to THIS Tower instance.
    *
-   * Uses `ps -eo pid,args` and filters for lines containing both
-   * "shellper-main.js" and this instance's socketDir. This prevents
-   * killing shellpers owned by other Tower instances.
+   * Uses `ps -ww -eo pid,args` and filters for lines containing both
+   * "shellper-main.js" and this instance's socketDir. Returns PID and
+   * socketPath (extracted from the JSON config argument) for each match.
+   *
+   * The socketPath is used by killOrphanedShellpers() to probe the socket
+   * before killing — if the socket is responsive, the process is spared.
    */
-  private findShellperPids(): Promise<number[]> {
+  private findShellperProcesses(): Promise<Array<{ pid: number; socketPath?: string }>> {
     return new Promise((resolve) => {
-      execFile('ps', ['-eo', 'pid,args'], (err, stdout) => {
+      // -ww prevents arg truncation on macOS/Linux
+      execFile('ps', ['-ww', '-eo', 'pid,args'], (err, stdout) => {
         if (err || !stdout.trim()) {
           resolve([]);
           return;
         }
-        const pids: number[] = [];
+        const results: Array<{ pid: number; socketPath?: string }> = [];
         // Use socketDir + '/' to prevent prefix overlaps (e.g. /run matching /run2)
         const scopeMarker = this.config.socketDir.endsWith('/') ? this.config.socketDir : this.config.socketDir + '/';
         for (const line of stdout.trim().split('\n')) {
           if (line.includes('shellper-main.js') && line.includes(scopeMarker)) {
             const pid = parseInt(line.trim(), 10);
-            if (!isNaN(pid) && pid > 0) pids.push(pid);
+            if (!isNaN(pid) && pid > 0) {
+              // Extract socketPath from the JSON config argument visible in ps output.
+              // shellper-main.js receives JSON as argv[2]: {"socketPath":"/path/to/sock",...}
+              const socketMatch = line.match(/"socketPath"\s*:\s*"([^"]+)"/);
+              results.push({ pid, socketPath: socketMatch?.[1] });
+            }
           }
         }
-        resolve(pids);
+        resolve(results);
       });
     });
   }
