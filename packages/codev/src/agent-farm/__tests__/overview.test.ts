@@ -326,8 +326,50 @@ describe('overview', () => {
       expect(calculateProgress(makeParsed({ protocol: 'spider', phase: 'implement' }))).toBe(70);
     });
 
-    it('returns 0 for non-SPIR protocols', () => {
-      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'implement' }))).toBe(0);
+    // Bugfix protocol: 4 stages (investigate=25, fix=50, pr=75, complete=100)
+    it('returns 25 for bugfix investigate phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'investigate' }))).toBe(25);
+    });
+
+    it('returns 50 for bugfix fix phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'fix' }))).toBe(50);
+    });
+
+    it('returns 75 for bugfix pr phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'pr' }))).toBe(75);
+    });
+
+    it('returns 100 for bugfix complete phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'bugfix', phase: 'complete' }))).toBe(100);
+    });
+
+    // Tick protocol: 6 stages (identify=17, spec-amend=33, plan-amend=50, implement=67, review=83, complete=100)
+    it('returns 17 for tick identify phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'identify' }))).toBe(17);
+    });
+
+    it('returns 33 for tick spec-amend phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'spec-amend' }))).toBe(33);
+    });
+
+    it('returns 50 for tick plan-amend phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'plan-amend' }))).toBe(50);
+    });
+
+    it('returns 67 for tick implement phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'implement' }))).toBe(67);
+    });
+
+    it('returns 83 for tick review phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'review' }))).toBe(83);
+    });
+
+    it('returns 100 for tick complete phase', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'tick', phase: 'complete' }))).toBe(100);
+    });
+
+    it('returns 0 for unsupported protocol', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'experiment', phase: 'implement' }))).toBe(0);
     });
 
     it('returns 0 for unknown phase', () => {

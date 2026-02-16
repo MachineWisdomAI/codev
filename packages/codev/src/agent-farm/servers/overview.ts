@@ -204,12 +204,27 @@ function pushPlanPhase(result: ParsedStatus, partial: Partial<PlanPhase>): void 
 
 /**
  * Calculate progress percentage (0-100) based on protocol phase.
- * Only SPIR/spider phases are mapped; other protocols return 0.
+ *
+ * SPIR/spider: nuanced sub-progress with gate awareness and plan phase tracking.
+ * Bugfix: 4 stages (investigate=25, fix=50, pr=75, complete=100).
+ * Tick: 6 stages (identify=17, spec-amend=33, plan-amend=50, implement=67, review=83, complete=100).
  */
 export function calculateProgress(parsed: ParsedStatus): number {
   const protocol = parsed.protocol;
-  if (protocol !== 'spir' && protocol !== 'spider') return 0;
 
+  if (protocol === 'spir' || protocol === 'spider') {
+    return calculateSpirProgress(parsed);
+  }
+  if (protocol === 'bugfix') {
+    return calculateEvenProgress(parsed.phase, ['investigate', 'fix', 'pr']);
+  }
+  if (protocol === 'tick') {
+    return calculateEvenProgress(parsed.phase, ['identify', 'spec-amend', 'plan-amend', 'implement', 'review']);
+  }
+  return 0;
+}
+
+function calculateSpirProgress(parsed: ParsedStatus): number {
   const gateRequested = (gate: string) =>
     parsed.gates[gate] === 'pending' && !!parsed.gateRequestedAt[gate];
 
@@ -231,6 +246,17 @@ export function calculateProgress(parsed: ParsedStatus): number {
     default:
       return 0;
   }
+}
+
+/**
+ * Even-split progress for protocols with fixed phase lists.
+ * Each phase gets an equal share of 100%, with 'complete' always = 100.
+ */
+function calculateEvenProgress(phase: string, phases: string[]): number {
+  if (phase === 'complete') return 100;
+  const idx = phases.indexOf(phase);
+  if (idx === -1) return 0;
+  return Math.round(((idx + 1) / (phases.length + 1)) * 100);
 }
 
 /**
