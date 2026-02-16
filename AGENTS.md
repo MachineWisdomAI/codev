@@ -269,12 +269,13 @@ For detailed commands, configuration, and architecture, see:
 ### Key Commands
 
 ```bash
-af dash start              # Start the architect dashboard
-af spawn -p 0003           # Spawn builder (strict mode, default)
-af spawn --soft -p 0003    # Spawn builder (soft mode)
-af spawn --issue 42        # Spawn builder for a bugfix
-af status                  # Check all builders
-af cleanup --project 0003  # Clean up after merge
+af dash start                        # Start the architect dashboard
+af spawn 42 --protocol spir          # Spawn builder for SPIR project
+af spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
+af spawn 42 --protocol bugfix        # Spawn builder for a bugfix
+af spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+af status                            # Check all builders
+af cleanup --project 0042            # Clean up after merge
 ```
 
 ### Configuration

@@ -269,7 +269,7 @@ For detailed commands, configuration, and architecture, see:
 ### 🚨 NEVER DESTROY BUILDER WORKTREES 🚨
 
 **When a worktree already exists for a project:**
-1. Use `af spawn -p XXXX --resume`
+1. Use `af spawn XXXX --resume`
 2. If `--resume` fails → **ASK THE USER**
 3. Only destroy if the user explicitly says to
 
@@ -287,12 +287,13 @@ For detailed commands, configuration, and architecture, see:
 ### Key Commands
 
 ```bash
-af dash start              # Start the architect dashboard
-af spawn -p 0003           # Spawn builder (strict mode, default)
-af spawn --soft -p 0003    # Spawn builder (soft mode)
-af spawn --issue 42        # Spawn builder for a bugfix
-af status                  # Check all builders
-af cleanup --project 0003  # Clean up after merge
+af dash start                        # Start the architect dashboard
+af spawn 42 --protocol spir          # Spawn builder for SPIR project
+af spawn 42 --protocol spir --soft   # Spawn builder (soft mode)
+af spawn 42 --protocol bugfix        # Spawn builder for a bugfix
+af spawn 42 --protocol tick --amends 30  # TICK amendment to spec 30
+af status                            # Check all builders
+af cleanup --project 0042            # Clean up after merge
 af open file.ts            # Open file in annotation viewer (NOT system open)
 ```
 

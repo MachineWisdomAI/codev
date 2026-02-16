@@ -382,7 +382,7 @@ Git worktrees provide isolated working directories for each builder, enabling pa
 
 #### Worktree Creation
 
-When spawning a builder (`af spawn -p 0003`):
+When spawning a builder (`af spawn 3 --protocol spir`):
 
 1. **Generate IDs**: Create builder ID and branch name
    ```
@@ -424,8 +424,8 @@ Builders can run in two modes:
 
 | Mode | Flag | Behavior |
 |------|------|----------|
-| **Strict** (default) | `af spawn -p XXXX` | Porch orchestrates - runs autonomously to completion |
-| **Soft** | `af spawn --soft -p XXXX` | AI follows protocol - architect verifies compliance |
+| **Strict** (default) | `af spawn XXXX --protocol spir` | Porch orchestrates - runs autonomously to completion |
+| **Soft** | `af spawn XXXX --protocol spir --soft` | AI follows protocol - architect verifies compliance |
 
 **Strict mode** (default for `--project`): Porch orchestrates the builder with automated gates, 3-way consultations, and enforced phase transitions. More likely to complete autonomously.
 
@@ -1262,7 +1262,7 @@ codev/                                  # Project root (git repository)
 
 **Workflow**:
 1. **Identify** - Architect identifies issue #N
-2. **Spawn** - `af spawn --issue N` creates worktree and notifies issue
+2. **Spawn** - `af spawn N --protocol bugfix` creates worktree and notifies issue
 3. **Fix** - Builder investigates, fixes, writes regression test
 4. **Review** - Builder runs CMAP, creates PR
 5. **Merge** - Architect reviews, builder merges
@@ -1337,11 +1337,10 @@ af start                      # Start architect dashboard
 af stop                       # Stop all agent-farm processes
 
 # Managing builders
-af spawn -p 0003              # Spawn builder (strict mode - porch orchestrates, default)
-af spawn --soft -p 0003       # Soft mode - AI follows protocol, you verify compliance
-af spawn -p 0003 -t "name"    # Strict mode with title (if no spec exists yet)
-af spawn --issue 42           # Spawn builder for GitHub issue (BUGFIX protocol)
-af spawn -i 42                # Short form for --issue
+af spawn 3 --protocol spir              # Spawn builder (strict mode, default)
+af spawn 3 --protocol spir --soft       # Soft mode - AI follows protocol, you verify compliance
+af spawn 42 --protocol bugfix           # Spawn builder for GitHub issue (BUGFIX protocol)
+af spawn 42 --protocol tick --amends 30 # TICK amendment to spec 30
 af status                     # Check all agent status
 af cleanup --project 0003     # Clean up builder (checks for uncommitted work)
 af cleanup -p 0003 --force    # Force cleanup (lose uncommitted work)
@@ -1380,7 +1379,7 @@ af db stats                   # Show database statistics
 
 # Command overrides
 af start --architect-cmd "claude --model opus"
-af spawn -p 0003 --builder-cmd "claude --model sonnet"
+af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
 #### Configuration (`codev/config.json`)
@@ -2271,7 +2270,7 @@ See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
 
 **v1.6.0 (Gothic)**:
 - BUGFIX protocol for GitHub Issue-based bugfixes (Spec 0065)
-- CLI: `af spawn --issue N`, `af cleanup --issue N`
+- CLI: `af spawn N --protocol bugfix`, `af cleanup --issue N`
 - Tower subcommands with improved logging
 - Tutorial system scaffolded (Spec 0006 preparation)
 
