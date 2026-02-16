@@ -58,20 +58,6 @@ export async function status(): Promise<void> {
         }
       }
 
-      if (workspaceStatus.gateStatus?.hasGate) {
-        const gate = workspaceStatus.gateStatus;
-        let waitInfo = '';
-        if (gate.requestedAt) {
-          const elapsed = Date.now() - new Date(gate.requestedAt).getTime();
-          const mins = Math.floor(elapsed / 60_000);
-          waitInfo = mins > 0 ? ` (waiting ${mins}m)` : ' (waiting <1m)';
-        }
-        logger.blank();
-        logger.warn(
-          `  Builder ${gate.builderId}  ${chalk.yellow('blocked')}  ${gate.gateName}${waitInfo}  → porch approve ${gate.builderId} ${gate.gateName}`
-        );
-      }
-
       return;
     }
 

@@ -203,36 +203,6 @@
       overflow: hidden;
     }
 
-    .instance.gate-pending {
-      border-color: #f59e0b;
-      animation: gate-pulse 2s infinite;
-    }
-
-    @keyframes gate-pulse {
-      0%, 100% { border-color: #f59e0b; }
-      50% { border-color: #d97706; }
-    }
-
-    .gate-indicator {
-      padding: 8px 20px;
-      background: rgba(245, 158, 11, 0.15);
-      border-bottom: 1px solid var(--border);
-      font-size: 14px;
-      color: #f59e0b;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .gate-indicator .gate-name {
-      font-weight: 600;
-    }
-
-    .gate-indicator .gate-builder {
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-
     .instance-header {
       display: flex;
       justify-content: space-between;
@@ -1217,7 +1187,6 @@
     function renderInstance(instance) {
       const statusClass = instance.running ? 'running' : 'stopped';
       const statusText = instance.running ? 'Running' : 'Stopped';
-      const hasGate = instance.gateStatus?.hasGate;
 
       // Render terminals list - always show Overview first, then individual terminals
       const terminals = instance.terminals || [];
@@ -1270,16 +1239,8 @@
         ? formatDate(instance.lastUsed)
         : 'Never';
 
-      const gateIndicatorHtml = hasGate ? `
-        <div class="gate-indicator">
-          <span>⏳</span>
-          <span class="gate-name">${escapeHtml(instance.gateStatus.gateName || 'approval')}</span>
-          ${instance.gateStatus.builderId ? `<span class="gate-builder">(${escapeHtml(instance.gateStatus.builderId)})</span>` : ''}
-        </div>
-      ` : '';
-
       return `
-        <div class="instance ${hasGate ? 'gate-pending' : ''}" data-project="${escapeHtml(instance.workspacePath)}">
+        <div class="instance" data-project="${escapeHtml(instance.workspacePath)}">
           <div class="instance-header">
             <div class="instance-title">
               <span class="instance-name">${escapeHtml(instance.workspaceName)}</span>
@@ -1297,7 +1258,6 @@
               `}
             </div>
           </div>
-          ${gateIndicatorHtml}
           <div class="instance-path-row">
             <span class="instance-path" title="${escapeHtml(instance.workspacePath)}">
               ${escapeHtml(instance.workspacePath)}

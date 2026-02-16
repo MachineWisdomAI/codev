@@ -156,7 +156,7 @@ describe('tower-routes', () => {
       builders: new Map(),
       fileTabs: new Map(),
     });
-    mockGetTerminalsForWorkspace.mockResolvedValue({ gateStatus: undefined });
+    mockGetTerminalsForWorkspace.mockResolvedValue({ terminals: [] });
   });
 
   // =========================================================================

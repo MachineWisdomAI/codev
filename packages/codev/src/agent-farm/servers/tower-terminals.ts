@@ -10,8 +10,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
-import { getGateStatusForWorkspace } from '../utils/gate-status.js';
-import type { GateStatus } from '../utils/gate-status.js';
 import {
   saveFileTab as saveFileTabToDb,
   deleteFileTab as deleteFileTabFromDb,
@@ -562,7 +560,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
 export async function getTerminalsForWorkspace(
   workspacePath: string,
   proxyUrl: string
-): Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }> {
+): Promise<{ terminals: TerminalEntry[] }> {
   const manager = getTerminalManager();
   const terminals: TerminalEntry[] = [];
 
@@ -749,8 +747,5 @@ export async function getTerminalsForWorkspace(
   // Atomically replace the cache entry
   workspaceTerminals.set(normalizedPath, freshEntry);
 
-  // Read gate status from porch YAML files
-  const gateStatus = getGateStatusForWorkspace(workspacePath);
-
-  return { terminals, gateStatus };
+  return { terminals };
 }
