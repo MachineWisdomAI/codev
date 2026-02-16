@@ -75,7 +75,8 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   // Check existing registration
   if (existing && !options.reauth) {
     const proceed = await confirm(
-      `This tower is already registered as '${existing.tower_name}'. Re-register? (y/N) `,
+      `This tower is already registered as '${existing.tower_name}'. Re-register?`,
+      false,
     );
     if (!proceed) {
       logger.info('Registration cancelled.');
@@ -117,7 +118,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
   if (!token) {
     // Fallback: manual token paste
     logger.warn('Browser callback timed out.');
-    token = await prompt('Paste registration token from browser: ');
+    token = await prompt('Paste registration token from browser');
 
     if (!token) {
       fatal('No token provided. Registration cancelled.');
@@ -131,7 +132,7 @@ export async function towerRegister(options: TowerRegisterOptions = {}): Promise
     logger.kv('Tower name', towerName);
   } else {
     const defaultName = hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    towerName = await prompt(`Tower name (default: ${defaultName}): `);
+    towerName = await prompt('Tower name', defaultName);
     if (!towerName) towerName = defaultName;
   }
 
