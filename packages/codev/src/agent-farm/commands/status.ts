@@ -7,13 +7,8 @@
 import { loadState } from '../state.js';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../utils/config.js';
-import { TowerClient } from '../lib/tower-client.js';
+import { getTowerClient } from '../lib/tower-client.js';
 import chalk from 'chalk';
-
-/**
- * Default tower port
- */
-const DEFAULT_TOWER_PORT = 4100;
 
 /**
  * Display status of all agent farm processes
@@ -25,7 +20,7 @@ export async function status(): Promise<void> {
   logger.header('Agent Farm Status');
 
   // Try tower API first (Phase 3 - Spec 0090)
-  const client = new TowerClient(DEFAULT_TOWER_PORT);
+  const client = getTowerClient();
   const towerRunning = await client.isRunning();
 
   if (towerRunning) {

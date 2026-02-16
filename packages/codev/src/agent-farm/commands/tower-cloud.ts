@@ -7,7 +7,6 @@
 
 import http from 'node:http';
 import { hostname } from 'node:os';
-import { createInterface } from 'node:readline';
 import { logger, fatal } from '../utils/logger.js';
 import { openBrowser } from '../utils/shell.js';
 import {
@@ -19,31 +18,11 @@ import {
   type CloudConfig,
 } from '../lib/cloud-config.js';
 import { redeemToken } from '../lib/token-exchange.js';
+import { getTowerClient, type TowerTunnelStatus } from '../lib/tower-client.js';
+import { prompt, confirm } from '../../lib/cli-prompts.js';
 
 const CODEVOS_URL = process.env.CODEVOS_URL || 'https://cloud.codevos.ai';
-const DEFAULT_TOWER_PORT = 4100;
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
-
-/**
- * Prompt the user for input via stdin.
- */
-function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
-
-/**
- * Prompt for yes/no confirmation. Returns true if user answers y/yes.
- */
-async function confirm(question: string): Promise<boolean> {
-  const answer = await prompt(question);
-  return answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
-}
 
 /**
  * Get a persistent machine ID (UUID).
@@ -58,40 +37,16 @@ function getMachineId(): string {
  * Signal the running tower daemon to connect/disconnect the tunnel.
  */
 async function signalTower(endpoint: 'connect' | 'disconnect', port?: number): Promise<void> {
-  const towerPort = port || DEFAULT_TOWER_PORT;
-  try {
-    await fetch(`http://127.0.0.1:${towerPort}/api/tunnel/${endpoint}`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(5_000),
-    });
-  } catch {
-    // Tower may not be running — that's fine
-  }
+  const client = getTowerClient(port);
+  await client.signalTunnel(endpoint);
 }
 
 /**
  * Get tunnel status from the running tower daemon.
  */
-export async function getTunnelStatus(port?: number): Promise<{
-  registered: boolean;
-  state: string;
-  uptime: number | null;
-  towerId: string | null;
-  towerName: string | null;
-  serverUrl: string | null;
-  accessUrl: string | null;
-} | null> {
-  const towerPort = port || DEFAULT_TOWER_PORT;
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:${towerPort}/api/tunnel/status`,
-      { signal: AbortSignal.timeout(3_000) },
-    );
-    if (!response.ok) return null;
-    return (await response.json()) as Awaited<ReturnType<typeof getTunnelStatus>>;
-  } catch {
-    return null;
-  }
+export async function getTunnelStatus(port?: number): Promise<TowerTunnelStatus | null> {
+  const client = getTowerClient(port);
+  return client.getTunnelStatus();
 }
 
 export interface TowerRegisterOptions {

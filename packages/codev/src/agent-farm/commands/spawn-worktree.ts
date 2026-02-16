@@ -14,9 +14,7 @@ import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
 import { run, commandExists } from '../utils/shell.js';
 import { fetchGitHubIssueOrThrow, type GitHubIssue } from '../../lib/github.js';
-
-// Tower port — the single HTTP server since Spec 0090
-export const DEFAULT_TOWER_PORT = 4100;
+import { getTowerClient, DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
 // =============================================================================
 // Dependency Checks
@@ -255,7 +253,7 @@ export function validateResumeWorktree(worktreePath: string): void {
 
 /**
  * Create a terminal session via the Tower REST API.
- * The Tower server must be running (port 4100).
+ * The Tower server must be running.
  */
 export async function createPtySession(
   config: Config,
@@ -265,25 +263,20 @@ export async function createPtySession(
   registration?: { workspacePath: string; type: 'builder' | 'shell'; roleId: string },
 ): Promise<{ terminalId: string }> {
   const { cols, rows } = defaultSessionOptions();
-  const body: Record<string, unknown> = { command, args, cwd, cols, rows, persistent: true };
-  if (registration) {
-    body.workspacePath = registration.workspacePath;
-    body.type = registration.type;
-    body.roleId = registration.roleId;
-  }
-  const response = await fetch(`http://localhost:${DEFAULT_TOWER_PORT}/api/terminals`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+  const client = getTowerClient();
+  const terminal = await client.createTerminal({
+    command, args, cwd, cols, rows,
+    persistent: true,
+    workspacePath: registration?.workspacePath,
+    type: registration?.type,
+    roleId: registration?.roleId,
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to create PTY session: ${response.status} ${text}`);
+  if (!terminal) {
+    throw new Error('Failed to create PTY session: tower returned null');
   }
 
-  const result = await response.json() as { id: string };
-  return { terminalId: result.id };
+  return { terminalId: terminal.id };
 }
 
 /**

@@ -11,8 +11,8 @@ import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
 // Tower configuration
-const DEFAULT_TOWER_PORT = 4100;
-const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm');
+export const DEFAULT_TOWER_PORT = 4100;
+export const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm');
 const LOCAL_KEY_PATH = resolve(AGENT_FARM_DIR, 'local-key');
 
 // Request timeout
@@ -55,6 +55,26 @@ export interface TowerHealth {
   totalWorkspaces: number;
   memoryUsage: number;
   timestamp: string;
+}
+
+/**
+ * Tunnel status from tower
+ */
+export interface TowerTunnelStatus {
+  registered: boolean;
+  state: string;
+  uptime: number | null;
+  towerId: string | null;
+  towerName: string | null;
+  serverUrl: string | null;
+  accessUrl: string | null;
+}
+
+/**
+ * Tower daemon status (instances overview)
+ */
+export interface TowerStatus {
+  instances?: Array<{ workspaceName: string; running: boolean; terminals: unknown[] }>;
 }
 
 /**
@@ -252,6 +272,10 @@ export class TowerClient {
     cwd?: string;
     label?: string;
     env?: Record<string, string>;
+    persistent?: boolean;
+    workspacePath?: string;
+    type?: 'architect' | 'builder' | 'shell';
+    roleId?: string;
   }): Promise<TowerTerminal | null> {
     const result = await this.request<TowerTerminal>('/api/terminals', {
       method: 'POST',
@@ -358,6 +382,45 @@ export class TowerClient {
     }
 
     return { ok: true, resolvedTo: result.data!.resolvedTo };
+  }
+
+  /**
+   * Signal the tunnel to connect or disconnect
+   */
+  async signalTunnel(action: 'connect' | 'disconnect'): Promise<void> {
+    await this.request(`/api/tunnel/${action}`, { method: 'POST' }).catch(() => {});
+  }
+
+  /**
+   * Get tunnel status from the running tower daemon
+   */
+  async getTunnelStatus(): Promise<TowerTunnelStatus | null> {
+    const result = await this.request<TowerTunnelStatus>('/api/tunnel/status');
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Get tower daemon status (instances overview)
+   */
+  async getStatus(): Promise<TowerStatus | null> {
+    const result = await this.request<TowerStatus>('/api/status');
+    return result.ok ? result.data! : null;
+  }
+
+  /**
+   * Send a push notification to the tower dashboard
+   */
+  async sendNotification(payload: {
+    type: string;
+    title: string;
+    body: string;
+    workspace: string;
+  }): Promise<boolean> {
+    const result = await this.request('/api/notify', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return result.ok;
   }
 
   /**

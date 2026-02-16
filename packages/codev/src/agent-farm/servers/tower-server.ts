@@ -46,12 +46,10 @@ import {
 } from './tower-websocket.js';
 import { handleRequest } from './tower-routes.js';
 import type { RouteContext } from './tower-routes.js';
+import { DEFAULT_TOWER_PORT } from '../lib/tower-client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Default port for tower dashboard
-const DEFAULT_PORT = 4100;
 
 // Rate limiting: cleanup interval for token bucket
 const rateLimitCleanupInterval = startRateLimitCleanup();
@@ -64,14 +62,14 @@ let shellperCleanupInterval: NodeJS.Timeout | null = null;
 const program = new Command()
   .name('tower-server')
   .description('Tower dashboard for Agent Farm - centralized view of all instances')
-  .argument('[port]', 'Port to listen on', String(DEFAULT_PORT))
+  .argument('[port]', 'Port to listen on', String(DEFAULT_TOWER_PORT))
   .option('-p, --port <port>', 'Port to listen on (overrides positional argument)')
   .option('-l, --log-file <path>', 'Log file path for server output')
   .parse(process.argv);
 
 const opts = program.opts();
 const args = program.args;
-const portArg = opts.port || args[0] || String(DEFAULT_PORT);
+const portArg = opts.port || args[0] || String(DEFAULT_TOWER_PORT);
 const port = parseInt(portArg, 10);
 const logFilePath = opts.logFile;
 
