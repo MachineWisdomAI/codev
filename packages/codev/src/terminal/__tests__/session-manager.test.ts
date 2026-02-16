@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -365,6 +365,154 @@ describe('SessionManager', () => {
       // Should NOT delete the socket because the shellper is alive (connection succeeds)
       expect(cleaned).toBe(0);
       expect(fs.existsSync(socketPath)).toBe(true);
+    });
+  });
+
+  describe('killOrphanedShellpers (Bugfix #341)', () => {
+    it('kills shellper PIDs not in active sessions', async () => {
+      const logs: string[] = [];
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+        logger: (msg) => logs.push(msg),
+      });
+
+      // Mock findShellperPids to return known PIDs
+      vi.spyOn(manager as any, 'findShellperPids').mockResolvedValue([1001, 1002, 1003]);
+
+      // Mock process.kill to track what gets killed
+      const killed: Array<{ pid: number; signal: string }> = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number, signal?: string | number) => {
+        killed.push({ pid, signal: String(signal || 'SIGTERM') });
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const count = await manager.killOrphanedShellpers();
+        // All 3 should be killed (none are in active sessions)
+        expect(count).toBe(3);
+        // Should attempt process group kill (-pid) first
+        expect(killed.some(k => k.pid === -1001)).toBe(true);
+        expect(killed.some(k => k.pid === -1002)).toBe(true);
+        expect(killed.some(k => k.pid === -1003)).toBe(true);
+        expect(logs.some(m => m.includes('Killed 3 orphaned shellper process(es)'))).toBe(true);
+      } finally {
+        process.kill = originalKill;
+      }
+    });
+
+    it('skips PIDs in active sessions', async () => {
+      const socketPath = path.join(socketDir, 'shellper-active.sock');
+      let mockPty: MockPty | null = null;
+      const shellper = new ShellperProcess(
+        () => {
+          mockPty = new MockPty();
+          return mockPty;
+        },
+        socketPath,
+        100,
+      );
+      await shellper.start('/bin/bash', [], '/tmp', {}, 80, 24);
+      cleanupFns.push(() => shellper.shutdown());
+
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Reconnect to register the session (this adds PID to active sessions)
+      const client = await manager.reconnectSession(
+        'active-session',
+        socketPath,
+        process.pid,
+        Date.now(),
+      );
+
+      if (client) {
+        cleanupFns.push(() => client.disconnect());
+
+        // Get the session's PID from the active sessions
+        const sessionInfo = manager.getSessionInfo('active-session');
+        const activePid = sessionInfo!.pid;
+
+        // Mock findShellperPids to include both active and orphaned PIDs
+        vi.spyOn(manager as any, 'findShellperPids').mockResolvedValue([activePid, 9999]);
+
+        const killed: number[] = [];
+        const originalKill = process.kill;
+        process.kill = ((pid: number, signal?: string | number) => {
+          killed.push(pid);
+          return true;
+        }) as typeof process.kill;
+
+        try {
+          const count = await manager.killOrphanedShellpers();
+          // Only the orphan should be killed, not the active session
+          expect(count).toBe(1);
+          expect(killed).not.toContain(-activePid);
+          expect(killed.some(p => p === -9999 || p === 9999)).toBe(true);
+        } finally {
+          process.kill = originalKill;
+        }
+      }
+    });
+
+    it('returns 0 when no orphans found', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Mock findShellperPids to return empty list
+      vi.spyOn(manager as any, 'findShellperPids').mockResolvedValue([]);
+
+      const count = await manager.killOrphanedShellpers();
+      expect(count).toBe(0);
+    });
+
+    it('handles pgrep failure gracefully', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Mock findShellperPids to throw (pgrep not found)
+      vi.spyOn(manager as any, 'findShellperPids').mockRejectedValue(new Error('pgrep not found'));
+
+      const count = await manager.killOrphanedShellpers();
+      expect(count).toBe(0);
+    });
+
+    it('does not kill own process', async () => {
+      const manager = new SessionManager({
+        socketDir,
+        shellperScript: '/nonexistent/shellper.js',
+        nodeExecutable: process.execPath,
+      });
+
+      // Mock findShellperPids to return our own PID
+      vi.spyOn(manager as any, 'findShellperPids').mockResolvedValue([process.pid]);
+
+      const killed: number[] = [];
+      const originalKill = process.kill;
+      process.kill = ((pid: number) => {
+        killed.push(pid);
+        return true;
+      }) as typeof process.kill;
+
+      try {
+        const count = await manager.killOrphanedShellpers();
+        expect(count).toBe(0);
+        expect(killed).not.toContain(-process.pid);
+        expect(killed).not.toContain(process.pid);
+      } finally {
+        process.kill = originalKill;
+      }
     });
   });
 

@@ -537,6 +537,69 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Bugfix #341: Kill orphaned shellper-main.js processes.
+   *
+   * Finds all shellper-main.js processes on the system and kills any whose
+   * PIDs are NOT in the active sessions map. This catches shellpers that
+   * lost their socket file but are still running (reparented to init/launchd).
+   *
+   * Uses `pgrep -f shellper-main.js` (macOS/Linux) to enumerate processes.
+   * Returns the number of orphans killed.
+   */
+  async killOrphanedShellpers(): Promise<number> {
+    const activePids = new Set<number>();
+    for (const session of this.sessions.values()) {
+      activePids.add(session.pid);
+    }
+
+    let killed = 0;
+    try {
+      const pids = await this.findShellperPids();
+      for (const pid of pids) {
+        if (pid === process.pid) continue;  // Don't kill ourselves
+        if (activePids.has(pid)) continue;  // Known active session
+
+        this.log(`Killing orphaned shellper process: pid=${pid}`);
+        try {
+          // Kill the process group (shellper + its PTY child) to prevent
+          // orphaned PTY processes. Shellper is spawned with detached:true,
+          // so it's a process group leader.
+          process.kill(-pid, 'SIGTERM');
+          killed++;
+        } catch {
+          // Process already dead or permission error — try individual PID
+          try { process.kill(pid, 'SIGTERM'); killed++; } catch { /* already dead */ }
+        }
+      }
+    } catch {
+      // pgrep not available or failed — not fatal
+    }
+
+    if (killed > 0) {
+      this.log(`Killed ${killed} orphaned shellper process(es)`);
+    }
+    return killed;
+  }
+
+  /**
+   * Find PIDs of all shellper-main.js processes using pgrep.
+   */
+  private findShellperPids(): Promise<number[]> {
+    return new Promise((resolve) => {
+      execFile('pgrep', ['-f', 'shellper-main\\.js'], (err, stdout) => {
+        if (err || !stdout.trim()) {
+          resolve([]);
+          return;
+        }
+        const pids = stdout.trim().split('\n')
+          .map(line => parseInt(line.trim(), 10))
+          .filter(pid => !isNaN(pid) && pid > 0);
+        resolve(pids);
+      });
+    });
+  }
+
+  /**
    * Disconnect from all sessions without killing shellper processes.
    * Per spec: "When Tower intentionally stops, Tower closes its socket
    * connections to shellpers. Shellpers continue running."
