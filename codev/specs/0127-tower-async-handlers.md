@@ -18,7 +18,7 @@ Convert all `execSync` calls in Tower request handlers to async equivalents. `fs
 ### Target calls
 
 1. **`execSync('git status --porcelain')`** — `tower-routes.ts`
-   - Handler: `GET /api/git/status`
+   - Handler: `handleWorkspaceGitStatus()` (workspace-scoped `GET /api/git/status`)
    - Timeout: 5s
    - Impact: Blocks event loop during git command. Dashboard polls and terminal WebSocket frames queue up.
 
@@ -44,6 +44,12 @@ All three `execSync` calls replaced with `child_process.exec` (promisified) or `
 - [ ] Auto-adopt doesn't freeze the dashboard for 30s
 - [ ] No behavioral changes — same API responses, same error handling
 - [ ] Existing tests pass
+
+## Implementation Notes
+
+- `handleWorkspaceGitStatus()` is currently sync (`void` return) — must become `async`. The caller already supports async returns.
+- `handleCreateWorkspace()` and `launchInstance()` are already `async`.
+- All three commands are static strings or use pre-validated input (`workspaceName` is validated against `/^[a-zA-Z0-9_-]+$/`). No command injection risk.
 
 ## Constraints
 
