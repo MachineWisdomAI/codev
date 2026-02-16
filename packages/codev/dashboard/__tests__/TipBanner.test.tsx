@@ -3,27 +3,37 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { TipBanner } from '../src/components/TipBanner.js';
 import { tips } from '../src/lib/tips.js';
 
+// localStorage mock for jsdom
+const storageMap = new Map<string, string>();
+const localStorageMock = {
+  getItem: (key: string) => storageMap.get(key) ?? null,
+  setItem: (key: string, value: string) => storageMap.set(key, value),
+  removeItem: (key: string) => storageMap.delete(key),
+  clear: () => storageMap.clear(),
+  get length() { return storageMap.size; },
+  key: (index: number) => [...storageMap.keys()][index] ?? null,
+};
+Object.defineProperty(window, 'localStorage', { value: localStorageMock, writable: true });
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  localStorage.clear();
+  storageMap.clear();
 });
 
 describe('TipBanner', () => {
   describe('daily rotation', () => {
-    it('shows a deterministic tip based on day of year', () => {
-      // Mock Date to a known day: 2026-03-01 = day 60
+    it('shows the correct tip for a given day', () => {
       vi.useFakeTimers();
-      vi.setSystemTime(new Date(2026, 2, 1)); // March 1, 2026
+      vi.setSystemTime(new Date(2026, 2, 1)); // March 1, 2026 = day 60
       const expectedIndex = 60 % tips.length;
+      const expectedText = tips[expectedIndex].replace(/`/g, '');
 
       render(<TipBanner />);
 
-      // The rendered text should contain the tip at the expected index
-      // Tips may contain backtick-delimited code, so we check partial text
-      const tipText = tips[expectedIndex].replace(/`/g, '');
-      // Check that the banner is rendered
-      expect(screen.getByText('Tip:')).toBeTruthy();
+      const banner = screen.getByText('Tip:').closest('.tip-banner');
+      // Strip all text and verify expected tip content appears
+      expect(banner?.textContent).toContain(expectedText);
 
       vi.useRealTimers();
     });
@@ -51,38 +61,38 @@ describe('TipBanner', () => {
   describe('code span rendering', () => {
     it('renders backtick-delimited text as code elements', () => {
       vi.useFakeTimers();
-      // Find a tip that has backtick code spans
-      const tipWithCode = tips.findIndex(t => t.includes('`'));
-      // Set time so that dayOfYear % tips.length equals tipWithCode
-      // dayOfYear for Jan (tipWithCode+1) = tipWithCode+1 (since Jan 1 = day 1)
-      // We need dayOfYear % tips.length === tipWithCode
-      // dayOfYear = tipWithCode means Jan <tipWithCode>th (0-based from epoch Dec 31)
-      vi.setSystemTime(new Date(2026, 0, tipWithCode)); // approx
+      // tips[0] contains backtick code spans — navigate to it
+      // dayOfYear(date) % tips.length === 0 when dayOfYear = tips.length
+      vi.setSystemTime(new Date(2026, 0, tips.length));
 
       render(<TipBanner />);
       const banner = screen.getByText('Tip:').closest('.tip-banner');
       const codeElements = banner?.querySelectorAll('code');
-      // At least one code element should exist somewhere in the banner
-      // (the daily tip may or may not have code, so we just check the component renders)
-      expect(banner).toBeTruthy();
+
+      // tips[0] has backtick code — verify code elements are rendered
+      expect(codeElements!.length).toBeGreaterThan(0);
+      // Verify the code content matches the backtick-delimited text
+      const firstCodeText = codeElements![0].textContent;
+      expect(firstCodeText).toBeTruthy();
 
       vi.useRealTimers();
     });
 
-    it('renders code elements for tips with backtick spans', () => {
-      // Directly test renderTipText by rendering a known tip
+    it('renders the correct code text from backtick-delimited spans', () => {
       vi.useFakeTimers();
-      // Use day that maps to first tip (index 0): dayOfYear % tips.length === 0
-      // dayOfYear for Dec 31 of prev year + tips.length = tips.length
-      vi.setSystemTime(new Date(2026, 0, tips.length)); // day = tips.length, index = 0
+      // tips[0] is: Use `af spawn --task "description"` for quick one-off tasks...
+      // It has two code spans: "af spawn --task \"description\""
+      vi.setSystemTime(new Date(2026, 0, tips.length)); // day = tips.length → index 0
 
       render(<TipBanner />);
       const banner = screen.getByText('Tip:').closest('.tip-banner');
-      // First tip contains backtick code — verify code element exists
-      if (tips[0].includes('`')) {
-        const codeElements = banner?.querySelectorAll('code');
-        expect(codeElements!.length).toBeGreaterThan(0);
-      }
+      const codeElements = banner?.querySelectorAll('code');
+
+      expect(codeElements!.length).toBeGreaterThan(0);
+      // Verify the code text matches what's between backticks in tips[0]
+      const backtickContent = tips[0].match(/`([^`]+)`/);
+      expect(backtickContent).toBeTruthy();
+      expect(codeElements![0].textContent).toBe(backtickContent![1]);
 
       vi.useRealTimers();
     });
