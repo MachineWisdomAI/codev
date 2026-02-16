@@ -6,6 +6,7 @@ import { BuilderCard } from './BuilderCard.js';
 import { PRList } from './PRList.js';
 import { BacklogList } from './BacklogList.js';
 import { FileTree } from './FileTree.js';
+import { TipBanner } from './TipBanner.js';
 
 interface WorkViewProps {
   state: DashboardState | null;
@@ -62,6 +63,8 @@ export function WorkView({ state, onRefresh, onSelectTab }: WorkViewProps) {
         {overviewError && (
           <div className="work-error">Failed to load overview: {overviewError}</div>
         )}
+
+        <TipBanner />
 
         {/* Active Builders */}
         <section className="work-section">
