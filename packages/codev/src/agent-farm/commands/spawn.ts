@@ -180,10 +180,10 @@ async function resolveIssueProtocol(
     return options.protocol.toLowerCase();
   }
 
-  // --soft without --protocol: default to SPIR (spec says "SPIR is the default
-  // for --soft when a spec file exists")
-  if (options.soft) {
-    return 'spir';
+  // --soft without --protocol: SPIR if spec file exists, bugfix otherwise
+  if (options.soft && options.issueNumber) {
+    const specFile = await findSpecFile(config.codevDir, String(options.issueNumber));
+    return specFile ? 'spir' : 'bugfix';
   }
 
   // --resume without --protocol: infer from existing worktree
