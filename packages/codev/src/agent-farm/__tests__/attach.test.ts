@@ -429,6 +429,89 @@ describe('attach command', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
       expect(mockShellperDisconnect).toHaveBeenCalled();
     });
+
+    it('should forward DATA frames from client to stdout', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      const testData = Buffer.from('hello terminal');
+      lastShellperInstance!.emit('data', testData);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(stdoutSpy).toHaveBeenCalledWith(testData);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+      stdoutSpy.mockRestore();
+    });
+
+    it('should forward stdin data to client.write', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Emit data on process.stdin (it's an EventEmitter)
+      const inputData = Buffer.from('ls\n');
+      process.stdin.emit('data', inputData);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperWrite).toHaveBeenCalledWith(inputData);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    it('should detach on Ctrl-\\ key', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Send detach key (Ctrl-\, 0x1c)
+      process.stdin.emit('data', Buffer.from([0x1c]));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(mockShellperDisconnect).toHaveBeenCalled();
+      // Should NOT forward the detach key to the client
+      expect(mockShellperWrite).not.toHaveBeenCalled();
+    });
+
+    it('should send resize on terminal size change', async () => {
+      const { attachTerminal } = await import('../commands/attach.js');
+
+      // Set up stdout columns/rows
+      const origCols = process.stdout.columns;
+      const origRows = process.stdout.rows;
+      Object.defineProperty(process.stdout, 'columns', { value: 120, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: 40, configurable: true });
+
+      const connectPromise = attachTerminal('/tmp/test.sock');
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Initial resize should have been sent
+      expect(mockShellperResize).toHaveBeenCalledWith(120, 40);
+
+      // Simulate terminal resize
+      mockShellperResize.mockClear();
+      Object.defineProperty(process.stdout, 'columns', { value: 80, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: 24, configurable: true });
+      process.stdout.emit('resize');
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(mockShellperResize).toHaveBeenCalledWith(80, 24);
+
+      lastShellperInstance!.emit('exit', { code: 0, signal: null });
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Restore
+      Object.defineProperty(process.stdout, 'columns', { value: origCols, configurable: true });
+      Object.defineProperty(process.stdout, 'rows', { value: origRows, configurable: true });
+    });
   });
 
   describe('terminal mode (default, no --browser)', () => {
