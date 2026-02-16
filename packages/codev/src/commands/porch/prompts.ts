@@ -31,7 +31,7 @@ const PROTOCOL_PATHS = [
  * 2. Spec file first heading — fallback for legacy/offline specs
  * 3. Project title from status.yaml — last resort
  */
-async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
+export async function getProjectSummary(workspaceRoot: string, projectId: string, projectTitle?: string): Promise<string | null> {
   // 1. Try GitHub issue
   const issueNumber = parseInt(projectId, 10);
   if (!isNaN(issueNumber)) {
@@ -341,7 +341,7 @@ You are executing the ${phaseName} phase of the ${state.protocol.toUpperCase()} 
     prompt += `- **Plan Phase**: ${planPhase.id} - ${planPhase.title}\n`;
   }
 
-  // Add goal from projectlist.md summary
+  // Add goal from GitHub issue / spec summary
   if (summary) {
     prompt += `\n## Goal\n\n${summary}\n`;
   }
