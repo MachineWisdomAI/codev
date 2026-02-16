@@ -193,7 +193,69 @@ Extract `isPortAvailable()` as a standalone export from `shell.ts`. Replace `isP
 
 ---
 
-## Finding 6: Scattered Timeout Constants (Low Priority)
+## Finding 6: `~/.agent-farm` Path Constructed Independently in 5 Files
+
+The global config directory `~/.agent-farm` is derived independently in 5 source files:
+
+| File | Declaration |
+|------|------------|
+| `lib/cloud-config.ts:21` | `const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm')` |
+| `lib/tower-client.ts:15` | `const AGENT_FARM_DIR = resolve(homedir(), '.agent-farm')` |
+| `commands/tower.ts:16` | `const LOG_DIR = resolve(homedir(), '.agent-farm')` |
+| `db/index.ts:119` | `resolve(homedir(), '.agent-farm', dbName)` (inline) |
+| `servers/tower-terminals.ts:99` | `path.join(homedir(), '.agent-farm', 'logs')` (inline) |
+
+Same class of problem as the port: an implicit shared value not centralized. If the config directory ever moved (e.g., to `~/.config/agent-farm`), 5 files would need updating.
+
+### Proposed refactoring
+
+Export `AGENT_FARM_DIR` from a single location (likely `utils/config.ts` which already manages config paths). All other files import it.
+
+**Estimated net LOC impact**: -8
+
+---
+
+## Finding 7: `encodeWorkspacePath()` Exists in tower-client but Server Code Inlines It
+
+`tower-client.ts:100-108` exports `encodeWorkspacePath()` and `decodeWorkspacePath()`. Client-side commands properly import them (`commands/shell.ts`, `commands/architect.ts`, `commands/open.ts`).
+
+But the server-side code inlines the same `Buffer.from(...).toString('base64url')` logic:
+
+| File | Inline occurrences |
+|------|-------------------|
+| `servers/tower-routes.ts` | lines 242, 902, 1136 (encode + decode) |
+| `servers/tower-instances.ts` | line 176 (encode) |
+| `servers/tower-websocket.ts` | line 177 (decode) |
+
+5 inline base64url operations across 3 server files, when the utility already exists 1 import away.
+
+### Proposed refactoring
+
+Import `encodeWorkspacePath`/`decodeWorkspacePath` from `tower-client.ts` in the server modules. If the circular dependency is a concern (servers importing from lib), move the encode/decode functions to a shared `utils/` module.
+
+**Estimated net LOC impact**: -8
+
+---
+
+## Finding 8: `logger` Module Bypassed by db/ — 22 Hand-Formatted Console Lines
+
+`agent-farm/utils/logger.ts` provides `logger.info()`, `logger.warn()`, `logger.error()` with consistent `[info]`/`[warn]`/`[error]` prefix formatting. But the `db/` module bypasses it entirely:
+
+- `db/index.ts` — 14 lines of `console.log('[info] ...')` and `console.warn('[warn] ...')`
+- `db/errors.ts` — 6 lines of `console.error('[error] ...')`
+- `db/migrate.ts` — 2 lines of `console.error('[error] ...')`
+
+These hand-format the exact same prefixes that `logger` provides, just without chalk coloring. The db/ module may avoid `logger` because it runs in the server process where chalk formatting might be unwanted (log file output). But `logger.debug()` already checks `process.env.DEBUG`, so a similar `NO_COLOR`-aware approach would work.
+
+### Proposed refactoring
+
+Import `logger` in db/ modules. The logger already outputs to console — the only difference is chalk coloring, which `chalk` auto-disables when `NO_COLOR` is set or stdout isn't a TTY (which is the case for the tower server process writing to a log file).
+
+**Estimated net LOC impact**: -10 (22 console lines become shorter logger calls)
+
+---
+
+## Finding 9: Scattered Timeout Constants (Low Priority)
 
 The value `300_000` (5 minutes) appears as a reconnect/reset timeout in 4 independent files:
 - `servers/tower-terminals.ts:104` — `reconnectTimeoutMs: 300_000`
@@ -209,7 +271,7 @@ Other timeout values (5s, 10s, 30s, 60s, 120s) are context-specific and fine whe
 
 ---
 
-## Finding 7: Minor Dead Code
+## Finding 10: Minor Dead Code
 
 | Function | Issue | File |
 |----------|-------|------|
@@ -231,11 +293,14 @@ Other timeout values (5s, 10s, 30s, 60s, 120s) are context-specific and fine whe
 | 3 | **Extend TowerClient.createTerminal(), delete createPtySession()** | Duplication | -25 |
 | 4 | **Delete duplicate prompt/confirm in tower-cloud.ts** | Duplication | -15 |
 | 5 | **Extract isPortAvailable() from shell.ts** | Duplication | -12 |
-| 6 | Consolidate reconnect timeout default | Magic constant | -5 |
-| 7 | Remove unused params | Dead code | -4 |
-| | **Total** | | **~-141 net LOC** |
+| 6 | **Centralize `~/.agent-farm` path** | Architecture | -8 |
+| 7 | **Import encodeWorkspacePath in server modules** | Architecture | -8 |
+| 8 | **Use logger in db/ instead of hand-formatted console** | Architecture | -10 |
+| 9 | Consolidate reconnect timeout default | Magic constant | -5 |
+| 10 | Remove unused params | Dead code | -4 |
+| | **Total** | | **~-167 net LOC** |
 
-Findings 1-3 are the substantial wins and address architectural issues (incomplete abstraction layer). Findings 4-5 are quick mechanical cleanups. Findings 6-7 are low-priority polish.
+Findings 1-3 and 6-8 are architectural — they address incomplete abstraction layers where a centralized module exists but isn't used consistently. The repeated magic constant is the clue that an abstraction is being bypassed. Findings 4-5 are quick mechanical cleanups. Findings 9-10 are low-priority polish.
 
 ## Acceptance Criteria
 
@@ -246,5 +311,8 @@ Findings 1-3 are the substantial wins and address architectural issues (incomple
 - [ ] spawn.ts success logging extracted to helper using `client.getTerminalWsUrl()`
 - [ ] `prompt()`/`confirm()` in tower-cloud.ts replaced with imports from `cli-prompts.ts`
 - [ ] `isPortInUse()` in tower.ts replaced with shared `isPortAvailable()` from `shell.ts`
+- [ ] `AGENT_FARM_DIR` exported from one location, imported by cloud-config.ts, tower-client.ts, tower.ts, db/index.ts, tower-terminals.ts
+- [ ] Server modules import `encodeWorkspacePath`/`decodeWorkspacePath` instead of inline base64url
+- [ ] db/ modules use `logger` instead of raw `console.log('[info]...')`
 - [ ] No file outside tower-client.ts defines `DEFAULT_TOWER_PORT`
 - [ ] All existing tests pass without modification
