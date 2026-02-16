@@ -21,7 +21,7 @@ gates:
   pr-ready:
     status: pending
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: phase_1
@@ -88,4 +88,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev-public/.builders/spir-120-codex-sdk-integration/codev/projects/0120-codex-sdk-integration/0120-phase_2-iter2-claude.txt
 started_at: '2026-02-15T22:28:30.155Z'
-updated_at: '2026-02-16T02:00:24.816Z'
+updated_at: '2026-02-16T02:02:42.178Z'
