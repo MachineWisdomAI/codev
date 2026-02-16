@@ -192,19 +192,6 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       expect(state).toHaveProperty('architect');
     });
 
-    // Spec 0100: /api/state includes gateStatus field
-    it('/api/state includes gateStatus field', async () => {
-      await activateWorkspace(towerPort, testWorkspacePath);
-      const encodedPath = encodeWorkspacePath(testWorkspacePath);
-      const response = await fetch(`http://localhost:${towerPort}/workspace/${encodedPath}/api/state`);
-      expect(response.ok).toBe(true);
-      const state = await response.json();
-      expect(state).toHaveProperty('gateStatus');
-      expect(state.gateStatus).toHaveProperty('hasGate');
-      // No pending gates in test workspace, so hasGate should be false
-      expect(state.gateStatus.hasGate).toBe(false);
-    });
-
     it('dashboard serves React or legacy UI', async () => {
       // Activate workspace first
       await activateWorkspace(towerPort, testWorkspacePath);

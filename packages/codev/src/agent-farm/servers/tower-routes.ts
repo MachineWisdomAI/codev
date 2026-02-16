@@ -266,7 +266,6 @@ async function handleWorkspaceAction(
         name: instance.workspaceName,
         active: instance.running,
         terminals: instance.terminals,
-        gateStatus: instance.gateStatus,
       })
     );
     return;
@@ -1135,7 +1134,7 @@ async function handleWorkspaceState(
   // and shellper reconnection in one place)
   const encodedPath = Buffer.from(workspacePath).toString('base64url');
   const proxyUrl = `/workspace/${encodedPath}/`;
-  const { gateStatus } = await getTerminalsForWorkspace(workspacePath, proxyUrl);
+  await getTerminalsForWorkspace(workspacePath, proxyUrl);
 
   // Now read from the refreshed cache
   const entry = getWorkspaceTerminalsEntry(workspacePath);
@@ -1146,14 +1145,12 @@ async function handleWorkspaceState(
     utils: Array<{ id: string; name: string; port: number; pid: number; terminalId?: string; persistent?: boolean }>;
     annotations: Array<{ id: string; file: string; port: number; pid: number }>;
     workspaceName?: string;
-    gateStatus?: { hasGate: boolean; gateName?: string; builderId?: string; requestedAt?: string };
   } = {
     architect: null,
     builders: [],
     utils: [],
     annotations: [],
     workspaceName: path.basename(workspacePath),
-    gateStatus,
   };
 
   // Add architect if exists

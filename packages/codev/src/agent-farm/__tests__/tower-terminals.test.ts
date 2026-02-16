@@ -36,13 +36,11 @@ import {
 
 const {
   mockDbPrepare, mockDbRun, mockDbAll,
-  mockGetGateStatusForProject,
   mockSaveFileTabToDb, mockDeleteFileTabFromDb, mockLoadFileTabsFromDb,
 } = vi.hoisted(() => ({
   mockDbPrepare: vi.fn(),
   mockDbRun: vi.fn(),
   mockDbAll: vi.fn(),
-  mockGetGateStatusForProject: vi.fn(),
   mockSaveFileTabToDb: vi.fn(),
   mockDeleteFileTabFromDb: vi.fn(),
   mockLoadFileTabsFromDb: vi.fn(() => new Map()),
@@ -55,10 +53,6 @@ vi.mock('../db/index.js', () => ({
       return { run: mockDbRun, all: mockDbAll };
     },
   }),
-}));
-
-vi.mock('../utils/gate-status.js', () => ({
-  getGateStatusForProject: (...args: unknown[]) => mockGetGateStatusForProject(...args),
 }));
 
 vi.mock('../utils/file-tabs.js', () => ({

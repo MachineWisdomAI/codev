@@ -10,8 +10,6 @@ import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import type { TunnelClient } from '../lib/tunnel-client.js';
 import type { FileTab } from '../utils/file-tabs.js';
-import type { GateStatus } from '../utils/gate-status.js';
-
 /**
  * Shared context passed to all tower modules.
  * The orchestrator (tower-server.ts) owns lifecycle — it creates
@@ -68,7 +66,6 @@ export interface InstanceStatus {
   proxyUrl: string;
   architectUrl: string;
   terminals: TerminalEntry[];
-  gateStatus?: GateStatus;
   lastUsed?: string;
 }
 

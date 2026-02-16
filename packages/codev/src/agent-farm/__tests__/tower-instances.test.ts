@@ -31,7 +31,6 @@ const {
   mockDbPrepare,
   mockDbRun,
   mockDbAll,
-  mockGetGateStatusForProject,
   mockIsTempDirectory,
 } = vi.hoisted(() => {
   const mockDbRun = vi.fn();
@@ -41,17 +40,12 @@ const {
     mockDbPrepare,
     mockDbRun,
     mockDbAll,
-    mockGetGateStatusForProject: vi.fn().mockReturnValue(null),
     mockIsTempDirectory: vi.fn().mockReturnValue(false),
   };
 });
 
 vi.mock('../db/index.js', () => ({
   getGlobalDb: () => ({ prepare: mockDbPrepare }),
-}));
-
-vi.mock('../utils/gate-status.js', () => ({
-  getGateStatusForProject: (...args: unknown[]) => mockGetGateStatusForProject(...args),
 }));
 
 vi.mock('../servers/tower-utils.js', async () => {
@@ -86,7 +80,7 @@ function makeDeps(overrides: Partial<InstanceDeps> = {}): InstanceDeps {
     saveTerminalSession: vi.fn(),
     deleteTerminalSession: vi.fn(),
     deleteWorkspaceTerminalSessions: vi.fn(),
-    getTerminalsForWorkspace: vi.fn().mockResolvedValue({ terminals: [], gateStatus: null }),
+    getTerminalsForWorkspace: vi.fn().mockResolvedValue({ terminals: [] }),
     ...overrides,
   };
 }
@@ -270,8 +264,8 @@ describe('tower-instances', () => {
         });
 
         const getTerminalsForWorkspace = vi.fn()
-          .mockResolvedValueOnce({ terminals: [], gateStatus: null })  // tmpDir: inactive
-          .mockResolvedValueOnce({ terminals: [{ id: 't1' }], gateStatus: null });  // tmpDir2: active
+          .mockResolvedValueOnce({ terminals: [] })  // tmpDir: inactive
+          .mockResolvedValueOnce({ terminals: [{ id: 't1' }] });  // tmpDir2: active
 
         const deps = makeDeps({ workspaceTerminals, getTerminalsForWorkspace });
         initInstances(deps);

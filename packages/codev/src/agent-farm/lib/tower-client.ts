@@ -43,12 +43,6 @@ export interface TowerWorkspaceStatus {
     url: string;
     active: boolean;
   }>;
-  gateStatus?: {
-    hasGate: boolean;
-    gateName?: string;
-    builderId?: string;
-    requestedAt?: string;
-  };
 }
 
 /**

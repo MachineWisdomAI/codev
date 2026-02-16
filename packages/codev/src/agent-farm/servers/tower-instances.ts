@@ -12,7 +12,6 @@ import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { getGlobalDb } from '../db/index.js';
-import type { GateStatus } from '../utils/gate-status.js';
 import type { TerminalManager } from '../../terminal/pty-manager.js';
 import type { SessionManager } from '../../terminal/session-manager.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
@@ -46,10 +45,10 @@ export interface InstanceDeps {
   deleteTerminalSession: (id: string) => void;
   /** Delete all terminal session rows for a workspace */
   deleteWorkspaceTerminalSessions: (workspacePath: string) => void;
-  /** Get terminal list + gate status for a workspace (stays in tower-server.ts until Phase 4) */
+  /** Get terminal list for a workspace */
   getTerminalsForWorkspace: (
     workspacePath: string, proxyUrl: string,
-  ) => Promise<{ terminals: TerminalEntry[]; gateStatus: GateStatus }>;
+  ) => Promise<{ terminals: TerminalEntry[] }>;
 }
 
 // ============================================================================
@@ -176,9 +175,9 @@ export async function getInstances(): Promise<InstanceStatus[]> {
     const encodedPath = Buffer.from(workspacePath).toString('base64url');
     const proxyUrl = `/workspace/${encodedPath}/`;
 
-    // Get terminals and gate status from tower's registry
+    // Get terminals from tower's registry
     // Phase 4 (Spec 0090): Tower manages terminals directly - no separate dashboard server
-    const { terminals, gateStatus } = await _deps.getTerminalsForWorkspace(workspacePath, proxyUrl);
+    const { terminals } = await _deps.getTerminalsForWorkspace(workspacePath, proxyUrl);
 
     // Workspace is active if it has any terminals (Phase 4: no port check needed)
     const isActive = terminals.length > 0;
@@ -190,7 +189,6 @@ export async function getInstances(): Promise<InstanceStatus[]> {
       proxyUrl,
       architectUrl: `${proxyUrl}?tab=architect`,
       terminals,
-      gateStatus,
       lastUsed: lastLaunchedMap.get(workspacePath),
     });
   }
