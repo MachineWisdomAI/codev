@@ -206,6 +206,21 @@ describe('overview', () => {
       const result = parseStatusYaml(yaml);
       expect(result.gateRequestedAt).toEqual({});
     });
+
+    it('ignores requested_at: null and requested_at: ~', () => {
+      const yaml = [
+        'gates:',
+        '  spec-approval:',
+        '    status: pending',
+        '    requested_at: null',
+        '  plan-approval:',
+        '    status: pending',
+        '    requested_at: ~',
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.gateRequestedAt).toEqual({});
+    });
   });
 
   // ==========================================================================
@@ -305,6 +320,10 @@ describe('overview', () => {
 
     it('returns 100 for complete phase', () => {
       expect(calculateProgress(makeParsed({ phase: 'complete' }))).toBe(100);
+    });
+
+    it('works for spider protocol (legacy alias for spir)', () => {
+      expect(calculateProgress(makeParsed({ protocol: 'spider', phase: 'implement' }))).toBe(70);
     });
 
     it('returns 0 for non-SPIR protocols', () => {

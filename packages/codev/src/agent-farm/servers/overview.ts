@@ -152,7 +152,10 @@ export function parseStatusYaml(content: string): ParsedStatus {
 
       const requestedMatch = line.match(/^\s{4}requested_at:\s*'?(.+?)'?\s*$/);
       if (requestedMatch && currentGate) {
-        result.gateRequestedAt[currentGate] = requestedMatch[1];
+        const val = requestedMatch[1];
+        if (val !== 'null' && val !== '~') {
+          result.gateRequestedAt[currentGate] = val;
+        }
       }
     }
 
