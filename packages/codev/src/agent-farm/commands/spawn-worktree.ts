@@ -8,7 +8,7 @@
  */
 
 import { resolve } from 'node:path';
-import { existsSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, symlinkSync, readdirSync } from 'node:fs';
 import type { Config, ProtocolDefinition } from '../types.js';
 import { logger, fatal } from '../utils/logger.js';
 import { defaultSessionOptions } from '../../terminal/index.js';
@@ -118,6 +118,22 @@ export function slugify(title: string): string {
     .replace(/-+/g, '-')          // Collapse multiple hyphens
     .replace(/^-|-$/g, '')        // Trim leading/trailing hyphens
     .slice(0, 30);                // Max 30 chars
+}
+
+/**
+ * Find an existing bugfix worktree directory for a given issue number.
+ * Scans the builders directory for directories matching `bugfix-{issueNumber}-*`.
+ * Returns the directory name if found, or null if no match exists.
+ */
+export function findExistingBugfixWorktree(buildersDir: string, issueNumber: number): string | null {
+  const prefix = `bugfix-${issueNumber}-`;
+  try {
+    const entries = readdirSync(buildersDir, { withFileTypes: true });
+    const match = entries.find(e => e.isDirectory() && e.name.startsWith(prefix));
+    return match ? match.name : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
