@@ -49,9 +49,10 @@ Implement a "Tip of the Day" banner in the dashboard Work view. This is a fronte
 **`TipBanner.tsx`** — Functional component:
 - Props: none (self-contained, reads localStorage directly)
 - State: `tipIndex` (number), `dismissed` (boolean)
-- On mount: compute daily index via `dayOfYear(new Date()) % tips.length` using local time
+- `getDayOfYear()` helper: compute as `Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000)` using local time
+- On mount: compute daily index via `getDayOfYear(new Date()) % tips.length`
 - Arrow buttons: increment/decrement `tipIndex` with modular wraparound
-- Dismiss: set `dismissed = true`, write `tip-dismissed-YYYY-MM-DD` to localStorage
+- Dismiss: set `dismissed = true`, write `tip-dismissed-YYYY-MM-DD` to localStorage (wrapped in try/catch for private browsing safety)
 - On mount: check localStorage for today's dismiss key; if found, render nothing
 - Code span rendering: split tip string on backtick pairs, wrap odd segments in `<code>`
 - Export named: `export function TipBanner()`
@@ -105,6 +106,7 @@ Delete the three new/modified files; no other files are touched in this phase.
 4. **Dismiss behavior** — Click dismiss, verify banner disappears; verify localStorage key written
 5. **Dismiss persistence** — Pre-set localStorage key for today, render component, verify banner is not shown
 6. **Next-day reappearance** — Pre-set localStorage key for yesterday, render, verify banner is shown
+7. **Ephemeral reset on reload** — Navigate to a different tip, re-render component, verify it resets to daily tip
 
 #### Acceptance Criteria
 - [ ] TipBanner appears in Work view between error area and builders section
