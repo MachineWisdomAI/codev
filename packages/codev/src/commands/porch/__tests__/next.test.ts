@@ -218,10 +218,10 @@ describe('porch next', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Build complete + request changes → FIX tasks
+  // Build complete + request changes → write rebuttal task
   // --------------------------------------------------------------------------
 
-  it('emits FIX tasks when reviewers request changes', async () => {
+  it('emits write rebuttal task when reviewers request changes', async () => {
     const state = makeState({ build_complete: true });
     setupState(testDir, state);
 
@@ -239,10 +239,11 @@ describe('porch next', () => {
     const result = await next(testDir, '0001');
 
     expect(result.status).toBe('tasks');
-    expect(result.iteration).toBe(2);
+    expect(result.iteration).toBe(1); // iteration NOT incremented
     expect(result.tasks).toBeDefined();
-    expect(result.tasks![0].subject).toContain('Fix');
-    expect(result.tasks![0].subject).toContain('iteration 2');
+    expect(result.tasks![0].subject).toContain('Write rebuttal');
+    expect(result.tasks![0].description).toContain('rebuttals.md');
+    expect(result.tasks![0].description).toContain('REQUEST_CHANGES');
   });
 
   // --------------------------------------------------------------------------
@@ -448,31 +449,131 @@ describe('porch next', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Max iterations — emits gate pending
+  // Rebuttal advancement — advances when rebuttal file exists
   // --------------------------------------------------------------------------
 
-  it('force-advances to gate at max iterations even without unanimity', async () => {
-    const state = makeState({
-      build_complete: true,
-      iteration: 1,
-    });
+  it('advances when rebuttal file exists after REQUEST_CHANGES', async () => {
+    const state = makeState({ build_complete: true });
     setupState(testDir, state);
 
-    // Create review files — 2/3 approve but not unanimous
     const projectDir = getProjectDir(testDir, '0001', 'test-feature');
     fs.mkdirSync(projectDir, { recursive: true });
+
+    // Create review files — one requests changes
     const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
     const rcContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: REQUEST_CHANGES\n---`;
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
     fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
 
+    // Create rebuttal file
+    fs.writeFileSync(
+      path.join(projectDir, '0001-specify-iter1-rebuttals.md'),
+      '## Rebuttal\n\nThe requested changes are not applicable because...'
+    );
+
     const result = await next(testDir, '0001');
 
-    // At max iterations, force-advances to gate regardless of verdict
+    // Rebuttal exists — should advance to gate (via handleVerifyApproved)
     expect(result.status).toBe('gate_pending');
     expect(result.gate).toBe('spec-approval');
-    expect(result.tasks![0].description).toContain('Max iterations');
+  });
+
+  // --------------------------------------------------------------------------
+  // Rebuttal for per_plan_phase advances to next plan phase
+  // --------------------------------------------------------------------------
+
+  it('advances plan phase via rebuttal in implement phase', async () => {
+    const state = makeState({
+      phase: 'implement',
+      build_complete: true,
+      gates: {
+        'spec-approval': { status: 'approved', approved_at: new Date().toISOString() },
+        'plan-approval': { status: 'approved', approved_at: new Date().toISOString() },
+        'pr-ready': { status: 'pending' },
+      },
+      plan_phases: [
+        { id: 'phase_1', title: 'Core types', status: 'in_progress' },
+        { id: 'phase_2', title: 'State management', status: 'pending' },
+      ],
+      current_plan_phase: 'phase_1',
+    });
+    setupState(testDir, state);
+
+    const projectDir = getProjectDir(testDir, '0001', 'test-feature');
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    // Reviews with REQUEST_CHANGES for phase_1
+    const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
+    const rcContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: REQUEST_CHANGES\n---`;
+    fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-gemini.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-codex.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-phase_1-iter1-claude.txt'), approveContent);
+
+    // Create rebuttal file for phase_1
+    fs.writeFileSync(
+      path.join(projectDir, '0001-phase_1-iter1-rebuttals.md'),
+      '## Rebuttal\n\nCodex concerns are false positives.'
+    );
+
+    const result = await next(testDir, '0001');
+
+    // Should advance to phase_2 (via handleVerifyApproved)
+    expect(result.phase).toBe('implement');
+    expect(result.plan_phase).toBe('phase_2');
+    expect(result.iteration).toBe(1);
+    expect(result.status).toBe('tasks');
+  });
+
+  // --------------------------------------------------------------------------
+  // Write rebuttal task includes correct review verdicts
+  // --------------------------------------------------------------------------
+
+  it('write rebuttal task lists all review verdicts', async () => {
+    const state = makeState({ build_complete: true });
+    setupState(testDir, state);
+
+    const projectDir = getProjectDir(testDir, '0001', 'test-feature');
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    // All three request changes
+    const rcContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: REQUEST_CHANGES\n---`;
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), rcContent);
+
+    const result = await next(testDir, '0001');
+
+    expect(result.status).toBe('tasks');
+    expect(result.tasks![0].description).toContain('0001-specify-iter1-gemini.txt');
+    expect(result.tasks![0].description).toContain('0001-specify-iter1-codex.txt');
+    expect(result.tasks![0].description).toContain('0001-specify-iter1-claude.txt');
+  });
+
+  // --------------------------------------------------------------------------
+  // Write rebuttal is idempotent
+  // --------------------------------------------------------------------------
+
+  it('emits same write rebuttal task on repeated calls', async () => {
+    const state = makeState({ build_complete: true });
+    setupState(testDir, state);
+
+    const projectDir = getProjectDir(testDir, '0001', 'test-feature');
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const approveContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: APPROVE\n---`;
+    const rcContent = `Review text that is long enough to pass the minimum length threshold for parsing.\n\n---\nVERDICT: REQUEST_CHANGES\n---`;
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-gemini.txt'), approveContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-codex.txt'), rcContent);
+    fs.writeFileSync(path.join(projectDir, '0001-specify-iter1-claude.txt'), approveContent);
+
+    const result1 = await next(testDir, '0001');
+    const result2 = await next(testDir, '0001');
+
+    expect(result1.status).toBe('tasks');
+    expect(result2.status).toBe('tasks');
+    expect(result1.tasks![0].subject).toBe(result2.tasks![0].subject);
+    expect(result1.iteration).toBe(result2.iteration);
   });
 
   // --------------------------------------------------------------------------
