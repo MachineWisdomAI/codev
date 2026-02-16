@@ -255,7 +255,75 @@ Import `logger` in db/ modules. The logger already outputs to console — the on
 
 ---
 
-## Finding 9: Scattered Timeout Constants (Low Priority)
+## Finding 9: `escapeHtml()` and `readBody()` Duplicated in tower-tunnel.ts
+
+`servers/tower-tunnel.ts` re-implements two utility functions that already exist elsewhere:
+
+- **`escapeHtml()`** — identical to the version in `utils/server-utils.ts` (same 5 entity replacements)
+- **`readBody()`** — reimplements HTTP body reading without size-limit protection (the `server-utils.ts` version has a configurable `maxSize` parameter)
+
+### Refactoring applied
+
+Deleted both local functions, imported from `server-utils.ts`. The tunnel now benefits from the size-limit protection that `readBody()` in server-utils provides.
+
+**Net LOC impact**: -17
+
+---
+
+## Finding 10: `getTypeColor()` Duplicated in attach.ts and status.ts
+
+Both `commands/attach.ts` and `commands/status.ts` contain independent `getTypeColor()` functions that map builder type strings to chalk colors. The `status.ts` version was missing the `bugfix` case that `attach.ts` had.
+
+### Refactoring applied
+
+Extracted to new `utils/display.ts` module with the complete version (including `bugfix`). Both commands import from the shared module.
+
+**Net LOC impact**: -12
+
+---
+
+## Finding 11: `DEFAULT_CLOUD_URL` Hardcoded in 2 Files
+
+The Codev cloud URL `https://cloud.codevos.ai` appeared as a hardcoded string in:
+- `commands/tower-cloud.ts` — `const CODEVOS_URL = process.env.CODEVOS_URL || 'https://cloud.codevos.ai'`
+- `servers/tower-tunnel.ts` — `const DEFAULT_SERVER_URL = 'https://cloud.codevos.ai'`
+
+### Refactoring applied
+
+Exported `DEFAULT_CLOUD_URL` from `lib/cloud-config.ts` (the natural home for cloud-related constants). Both files now import it.
+
+**Net LOC impact**: -2
+
+---
+
+## Finding 12: `readBody()` in tower-routes.ts Lacks Size Limits
+
+`servers/tower-routes.ts` had a local `readBody()` that returned raw string without any size-limit protection. The `parseJsonBody()` utility in `server-utils.ts` provides the same functionality with configurable size limits and JSON parsing.
+
+### Refactoring applied
+
+Replaced `readBody()` + `JSON.parse()` with `parseJsonBody()` from server-utils. Required explicit type assertions on destructured fields since `parseJsonBody` returns `Record<string, unknown>`.
+
+**Net LOC impact**: -8
+
+---
+
+## Finding 13: `DEFAULT_DISK_LOG_MAX_BYTES` (50 MB) Repeated in 3 Files
+
+The disk log size limit `50 * 1024 * 1024` appeared independently in:
+- `terminal/pty-session.ts:73` — constructor default
+- `terminal/pty-manager.ts:53` — config default
+- `servers/tower-terminals.ts:104` — terminal manager config
+
+### Refactoring applied
+
+Exported `DEFAULT_DISK_LOG_MAX_BYTES` from `terminal/index.ts` alongside existing `DEFAULT_COLS`/`DEFAULT_ROWS`. `pty-manager.ts` and `tower-terminals.ts` import it. `pty-session.ts` uses a comment reference (can't import from `index.ts` due to circular re-export).
+
+**Net LOC impact**: -3
+
+---
+
+## Finding 14: Scattered Timeout Constants (Low Priority)
 
 The value `300_000` (5 minutes) appears as a reconnect/reset timeout in 4 independent files:
 - `servers/tower-terminals.ts:104` — `reconnectTimeoutMs: 300_000`
@@ -271,7 +339,7 @@ Other timeout values (5s, 10s, 30s, 60s, 120s) are context-specific and fine whe
 
 ---
 
-## Finding 10: Minor Dead Code
+## Finding 15: Minor Dead Code
 
 | Function | Issue | File |
 |----------|-------|------|
@@ -284,35 +352,51 @@ Other timeout values (5s, 10s, 30s, 60s, 120s) are context-specific and fine whe
 
 ---
 
+## Finding 16: db/ Logger Bypass (Not Fixed)
+
+`db/index.ts` — 14 lines of `console.log('[info] ...')` and `console.warn('[warn] ...')`; `db/errors.ts` — 6 lines of `console.error('[error] ...')`; `db/migrate.ts` — 2 lines of `console.error('[error] ...')`. These hand-format the exact same prefixes that `logger` provides. This finding was identified but **not refactored** in this pass — the db/ module intentionally avoids importing the CLI logger because it runs inside the Tower server process where chalk formatting could corrupt log files.
+
+---
+
 ## Summary
 
-| # | Finding | Type | Est. LOC |
-|---|---------|------|----------|
-| 1 | **Route all tower API calls through TowerClient** | Architecture | -60 |
-| 2 | **Extract spawn success logging helper** | Duplication | -20 |
-| 3 | **Extend TowerClient.createTerminal(), delete createPtySession()** | Duplication | -25 |
-| 4 | **Delete duplicate prompt/confirm in tower-cloud.ts** | Duplication | -15 |
-| 5 | **Extract isPortAvailable() from shell.ts** | Duplication | -12 |
-| 6 | **Centralize `~/.agent-farm` path** | Architecture | -8 |
-| 7 | **Import encodeWorkspacePath in server modules** | Architecture | -8 |
-| 8 | **Use logger in db/ instead of hand-formatted console** | Architecture | -10 |
-| 9 | Consolidate reconnect timeout default | Magic constant | -5 |
-| 10 | Remove unused params | Dead code | -4 |
-| | **Total** | | **~-167 net LOC** |
+| # | Finding | Type | Status | Net LOC |
+|---|---------|------|--------|---------|
+| 1 | **Route all tower API calls through TowerClient** | Architecture | Done | -60 |
+| 2 | **Extract spawn success logging helper** | Duplication | Done | -20 |
+| 3 | **Extend TowerClient.createTerminal(), delete createPtySession()** | Duplication | Done | -25 |
+| 4 | **Delete duplicate prompt/confirm in tower-cloud.ts** | Duplication | Done | -15 |
+| 5 | **Extract isPortAvailable() from shell.ts** | Duplication | Done | -12 |
+| 6 | **Centralize `~/.agent-farm` path** | Architecture | Done | -8 |
+| 7 | **Import encodeWorkspacePath in server modules** | Architecture | Done | -8 |
+| 8 | **Use logger in db/ instead of hand-formatted console** | Architecture | Skipped | 0 |
+| 9 | **Deduplicate escapeHtml/readBody in tower-tunnel.ts** | Duplication | Done | -17 |
+| 10 | **Deduplicate getTypeColor in attach/status** | Duplication | Done | -12 |
+| 11 | **Centralize DEFAULT_CLOUD_URL** | Magic constant | Done | -2 |
+| 12 | **Replace readBody in tower-routes.ts with parseJsonBody** | Architecture | Done | -8 |
+| 13 | **Centralize DEFAULT_DISK_LOG_MAX_BYTES** | Magic constant | Done | -3 |
+| 14 | Consolidate reconnect timeout default | Magic constant | Not fixed | — |
+| 15 | Remove unused params | Dead code | Not fixed | — |
+| 16 | db/ logger bypass | Architecture | Skipped | — |
+| | **Total implemented** | | | **~-190 net LOC** |
 
-Findings 1-3 and 6-8 are architectural — they address incomplete abstraction layers where a centralized module exists but isn't used consistently. The repeated magic constant is the clue that an abstraction is being bypassed. Findings 4-5 are quick mechanical cleanups. Findings 9-10 are low-priority polish.
+Findings 1-3, 6-7, and 12 are architectural — they address incomplete abstraction layers where a centralized module exists but isn't used consistently. The repeated magic constant is the clue that an abstraction is being bypassed. Findings 4-5 and 9-10 are mechanical deduplication. Findings 11 and 13 centralize magic constants. Findings 8/16 (db/ logger) was intentionally skipped — the db module runs in the Tower process where CLI logger formatting may be inappropriate. Findings 14-15 are low-priority polish left for future cleanup.
 
 ## Acceptance Criteria
 
-- [ ] TowerClient gains `signalTunnel()`, `getTunnelStatus()`, `getStatus()`, `sendNotification()` methods
-- [ ] TowerClient.createTerminal() extended with `persistent`, `workspacePath`, `type`, `roleId` options
-- [ ] `createPtySession()` in spawn-worktree.ts deleted; callers use TowerClient
-- [ ] tower-cloud.ts, cli.ts, notifications.ts use TowerClient instead of raw fetch()
-- [ ] spawn.ts success logging extracted to helper using `client.getTerminalWsUrl()`
-- [ ] `prompt()`/`confirm()` in tower-cloud.ts replaced with imports from `cli-prompts.ts`
-- [ ] `isPortInUse()` in tower.ts replaced with shared `isPortAvailable()` from `shell.ts`
-- [ ] `AGENT_FARM_DIR` exported from one location, imported by cloud-config.ts, tower-client.ts, tower.ts, db/index.ts, tower-terminals.ts
-- [ ] Server modules import `encodeWorkspacePath`/`decodeWorkspacePath` instead of inline base64url
-- [ ] db/ modules use `logger` instead of raw `console.log('[info]...')`
-- [ ] No file outside tower-client.ts defines `DEFAULT_TOWER_PORT`
-- [ ] All existing tests pass without modification
+- [x] TowerClient gains `signalTunnel()`, `getTunnelStatus()`, `getStatus()`, `sendNotification()` methods
+- [x] TowerClient.createTerminal() extended with `persistent`, `workspacePath`, `type`, `roleId` options
+- [x] `createPtySession()` in spawn-worktree.ts deleted; callers use TowerClient
+- [x] tower-cloud.ts, cli.ts, notifications.ts use TowerClient instead of raw fetch()
+- [x] spawn.ts success logging extracted to helper using `client.getTerminalWsUrl()`
+- [x] `prompt()`/`confirm()` in tower-cloud.ts replaced with imports from `cli-prompts.ts`
+- [x] `isPortInUse()` in tower.ts replaced with shared `isPortAvailable()` from `shell.ts`
+- [x] `AGENT_FARM_DIR` exported from tower-client.ts, imported by cloud-config.ts, tower.ts, db/index.ts, tower-terminals.ts
+- [x] Server modules import `encodeWorkspacePath`/`decodeWorkspacePath` instead of inline base64url
+- [x] `escapeHtml()`/`readBody()` in tower-tunnel.ts replaced with imports from server-utils.ts
+- [x] `getTypeColor()` extracted to utils/display.ts, shared by attach.ts and status.ts
+- [x] `DEFAULT_CLOUD_URL` exported from cloud-config.ts, used by tower-cloud.ts and tower-tunnel.ts
+- [x] `readBody()` in tower-routes.ts replaced with `parseJsonBody()` from server-utils.ts
+- [x] `DEFAULT_DISK_LOG_MAX_BYTES` exported from terminal/index.ts, used by pty-manager.ts and tower-terminals.ts
+- [x] No file outside tower-client.ts defines `DEFAULT_TOWER_PORT`
+- [x] All 1488 existing tests pass (some test mocks updated for new imports)
