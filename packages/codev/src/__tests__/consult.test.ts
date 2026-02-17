@@ -119,11 +119,11 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'unknown-model', subcommand: 'general', args: ['test'] })
+        consult({ model: 'unknown-model', prompt: 'test' })
       ).rejects.toThrow(/Unknown model/);
     });
 
-    it('should throw error for invalid subcommand', async () => {
+    it('should throw error when no mode specified', async () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -135,11 +135,11 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'gemini', subcommand: 'invalid', args: [] })
-      ).rejects.toThrow(/Unknown subcommand/);
+        consult({ model: 'gemini' })
+      ).rejects.toThrow(/No mode specified/);
     });
 
-    it('should throw error when spec number is missing', async () => {
+    it('should throw error on mode conflict (--prompt + --type)', async () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -151,11 +151,11 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'gemini', subcommand: 'spec', args: [] })
-      ).rejects.toThrow(/Spec number required/);
+        consult({ model: 'gemini', prompt: 'test', type: 'spec' })
+      ).rejects.toThrow(/Mode conflict/);
     });
 
-    it('should throw error when PR number is invalid', async () => {
+    it('should throw error when both --prompt and --prompt-file provided', async () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -167,13 +167,12 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'gemini', subcommand: 'pr', args: ['not-a-number'] })
-      ).rejects.toThrow(/Invalid PR number/);
+        consult({ model: 'gemini', prompt: 'test', promptFile: '/some/file.md' })
+      ).rejects.toThrow(/Cannot use both/);
     });
 
-    it('should throw error when spec not found', async () => {
+    it('should throw error when --protocol provided without --type', async () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
-      fs.mkdirSync(path.join(testBaseDir, 'codev', 'specs'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
         '# Consultant Role'
@@ -184,34 +183,11 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'gemini', subcommand: 'spec', args: ['9999'] })
-      ).rejects.toThrow(/Spec 9999 not found/);
+        consult({ model: 'gemini', protocol: 'spir' })
+      ).rejects.toThrow(/--protocol requires --type/);
     });
 
-    it('should find spec file by number', async () => {
-      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
-      fs.mkdirSync(path.join(testBaseDir, 'codev', 'specs'), { recursive: true });
-      fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
-        '# Consultant Role'
-      );
-      fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'specs', '0042-test-feature.md'),
-        '# Test Spec'
-      );
-
-      process.chdir(testBaseDir);
-
-      const { consult } = await import('../commands/consult/index.js');
-
-      // Should not throw - spec exists
-      // With dry run to avoid actually executing
-      await expect(
-        consult({ model: 'gemini', subcommand: 'spec', args: ['42'], dryRun: true })
-      ).resolves.not.toThrow();
-    });
-
-    it('should work with dry-run option', async () => {
+    it('should throw error when --prompt-file does not exist', async () => {
       fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
@@ -222,10 +198,9 @@ describe('consult command', () => {
 
       const { consult } = await import('../commands/consult/index.js');
 
-      // Should not execute, just show what would be done
       await expect(
-        consult({ model: 'gemini', subcommand: 'general', args: ['test query'], dryRun: true })
-      ).resolves.not.toThrow();
+        consult({ model: 'gemini', promptFile: '/nonexistent/file.md' })
+      ).rejects.toThrow(/Prompt file not found/);
     });
   });
 
@@ -252,7 +227,7 @@ describe('consult command', () => {
       const { consult } = await import('../commands/consult/index.js');
 
       await expect(
-        consult({ model: 'gemini', subcommand: 'general', args: ['test'] })
+        consult({ model: 'gemini', prompt: 'test' })
       ).rejects.toThrow(/not found/);
     });
   });
@@ -369,51 +344,35 @@ describe('consult command', () => {
       const { resolveCodevFile } = await import('../lib/skeleton.js');
 
       // Should fall back to embedded skeleton's consult-types/
-      const promptPath = resolveCodevFile('consult-types/spec-review.md', testBaseDir);
+      // Note: spec-review.md moved to protocol-specific dirs in Spec 325;
+      // integration-review.md remains in shared consult-types/
+      const promptPath = resolveCodevFile('consult-types/integration-review.md', testBaseDir);
       expect(promptPath).not.toBeNull();
       expect(promptPath).toContain('skeleton');
     });
 
-    it('should show deprecation warning when using deprecated roles/review-types/ location', async () => {
-      // Set up codev with ONLY the old roles/review-types directory (no consult-types/)
-      // Use a valid review type name (spec-review) but place it in the deprecated location
-      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles', 'review-types'), { recursive: true });
+    it('should resolve protocol-specific prompt templates', async () => {
+      // Set up codev with protocol-specific consult-types directory
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'protocols', 'spir', 'consult-types'), { recursive: true });
+      fs.mkdirSync(path.join(testBaseDir, 'codev', 'roles'), { recursive: true });
       fs.writeFileSync(
         path.join(testBaseDir, 'codev', 'roles', 'consultant.md'),
         '# Consultant Role'
       );
       fs.writeFileSync(
-        path.join(testBaseDir, 'codev', 'roles', 'review-types', 'spec-review.md'),
-        '# Spec Review from deprecated location'
+        path.join(testBaseDir, 'codev', 'protocols', 'spir', 'consult-types', 'spec-review.md'),
+        '# SPIR Spec Review Prompt'
       );
 
       process.chdir(testBaseDir);
 
       vi.resetModules();
+      const { readCodevFile } = await import('../lib/skeleton.js');
 
-      // Capture console.error to verify deprecation warning
-      const errorOutput: string[] = [];
-      vi.spyOn(console, 'error').mockImplementation((...args) => {
-        errorOutput.push(args.join(' '));
-      });
-
-      const { consult } = await import('../commands/consult/index.js');
-
-      // Use dry-run to avoid actually running the CLI
-      // Use 'spec-review' which is a valid type but placed in deprecated location
-      await consult({
-        model: 'gemini',
-        subcommand: 'general',
-        args: ['test query'],
-        dryRun: true,
-        reviewType: 'spec-review',
-      });
-
-      // Should have deprecation warning about roles/review-types/
-      const hasDeprecationWarning = errorOutput.some(line =>
-        line.includes('deprecated') || line.includes('Deprecated')
-      );
-      expect(hasDeprecationWarning).toBe(true);
+      // Should find in protocol-specific directory
+      const prompt = readCodevFile('protocols/spir/consult-types/spec-review.md', testBaseDir);
+      expect(prompt).not.toBeNull();
+      expect(prompt).toContain('SPIR Spec Review Prompt');
     });
   });
 
@@ -477,7 +436,7 @@ describe('consult command', () => {
       );
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-      await consult({ model: 'claude', subcommand: 'general', args: ['test query'] });
+      await consult({ model: 'claude', prompt: 'test query' });
 
       expect(mockQueryFn).toHaveBeenCalledTimes(1);
       const callArgs = mockQueryFn.mock.calls[0][0];
@@ -508,7 +467,7 @@ describe('consult command', () => {
         return true;
       });
 
-      await consult({ model: 'claude', subcommand: 'general', args: ['test query'] });
+      await consult({ model: 'claude', prompt: 'test query' });
 
       expect(writes).toContain('Review: ');
       expect(writes).toContain('All good.');
@@ -532,8 +491,7 @@ describe('consult command', () => {
       const outputFile = path.join(testBaseDir, 'output', 'review.md');
       await consult({
         model: 'claude',
-        subcommand: 'general',
-        args: ['test query'],
+        prompt: 'test query',
         output: outputFile,
       });
 
@@ -555,7 +513,7 @@ describe('consult command', () => {
       );
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
-      await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
+      await consult({ model: 'claude', prompt: 'test' });
 
       // Verify CLAUDECODE not in the env options
       const callArgs = mockQueryFn.mock.calls[0][0];
@@ -587,30 +545,8 @@ describe('consult command', () => {
       vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
       await expect(
-        consult({ model: 'claude', subcommand: 'general', args: ['test'] })
+        consult({ model: 'claude', prompt: 'test' })
       ).rejects.toThrow(/Claude SDK error/);
-    });
-
-    it('should show SDK parameters in dry-run mode', async () => {
-      vi.resetModules();
-      const { consult } = await import('../commands/consult/index.js');
-
-      const logOutput: string[] = [];
-      vi.spyOn(console, 'log').mockImplementation((...args) => {
-        logOutput.push(args.join(' '));
-      });
-
-      await consult({
-        model: 'claude',
-        subcommand: 'general',
-        args: ['test query'],
-        dryRun: true,
-      });
-
-      expect(mockQueryFn).not.toHaveBeenCalled();
-      expect(logOutput.some(l => l.includes('Agent SDK'))).toBe(true);
-      expect(logOutput.some(l => l.includes('claude-opus-4-6'))).toBe(true);
-      expect(logOutput.some(l => l.includes('Read, Glob, Grep'))).toBe(true);
     });
 
     it('should suppress tool use blocks from stderr', async () => {
@@ -639,7 +575,7 @@ describe('consult command', () => {
         return true;
       });
 
-      await consult({ model: 'claude', subcommand: 'general', args: ['test'] });
+      await consult({ model: 'claude', prompt: 'test' });
 
       // Tool use blocks are intentionally suppressed to reduce noise
       expect(stderrWrites.some(w => w.includes('Tool: Read'))).toBe(false);

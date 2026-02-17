@@ -85,31 +85,39 @@ program
 program
   .command('consult')
   .description('AI consultation with external models')
-  .argument('<subcommand>', 'Subcommand: pr, spec, plan, or general')
-  .argument('[args...]', 'Arguments for the subcommand')
+  .argument('[subcommand]', 'Optional: stats')
   .option('-m, --model <model>', 'Model to use (gemini, codex, claude, or aliases: pro, gpt, opus)')
-  .option('-n, --dry-run', 'Show what would execute without running')
-  .option('-t, --type <type>', 'Review type: spec-review, plan-review, impl-review, pr-ready, integration-review')
-  .option('-r, --role <role>', 'Custom role from codev/roles/<name>.md (e.g., gtm-specialist, security-reviewer)')
-  .option('--output <path>', 'Write consultation output to file (used by porch for review file collection)')
-  .option('--plan-phase <phase>', 'Scope impl review to a specific plan phase (used by porch for phased protocols)')
-  .option('--context <path>', 'Context file with previous iteration feedback (used by porch for stateful reviews)')
-  .option('--protocol <name>', 'Protocol context: spir, tick, bugfix (used by porch)')
-  .option('--project-id <id>', 'Porch project ID (used by porch)')
+  .option('--prompt <text>', 'Inline prompt (general mode)')
+  .option('--prompt-file <path>', 'Prompt file path (general mode)')
+  .option('--protocol <name>', 'Protocol name: spir, bugfix, tick, maintain')
+  .option('-t, --type <type>', 'Review type: spec, plan, impl, pr, phase, integration')
+  .option('--issue <number>', 'Issue number (required from architect context)')
+  .option('--output <path>', 'Write consultation output to file (used by porch)')
+  .option('--plan-phase <phase>', 'Scope review to a specific plan phase (used by porch)')
+  .option('--context <path>', 'Context file with previous iteration feedback (used by porch)')
+  .option('--project-id <id>', 'Project ID for metrics (used by porch)')
   .option('--days <n>', 'Stats: limit to last N days (default: 30)')
   .option('--project <id>', 'Stats: filter by project ID')
   .option('--last <n>', 'Stats: show last N individual invocations')
   .option('--json', 'Stats: output as JSON')
   .allowUnknownOption(true)
-  .action(async (subcommand, args, options) => {
+  .action(async (subcommand, options) => {
     try {
       // Stats subcommand doesn't require -m flag
       if (subcommand === 'stats') {
-        await handleStats(args, options);
+        await handleStats([], options);
         return;
       }
 
-      // All other subcommands require -m
+      // If an unrecognized subcommand was provided, error
+      if (subcommand) {
+        console.error(`Unknown subcommand: ${subcommand}`);
+        console.error('Use --prompt for general queries or --type for protocol reviews.');
+        console.error('For stats: consult stats');
+        process.exit(1);
+      }
+
+      // All modes except stats require -m
       if (!options.model) {
         console.error('Missing required option: -m, --model');
         process.exit(1);
@@ -117,15 +125,14 @@ program
 
       await consult({
         model: options.model,
-        subcommand,
-        args,
-        dryRun: options.dryRun,
-        reviewType: options.type,
-        role: options.role,
+        prompt: options.prompt,
+        promptFile: options.promptFile,
+        protocol: options.protocol,
+        type: options.type,
+        issue: options.issue,
         output: options.output,
         planPhase: options.planPhase,
         context: options.context,
-        protocol: options.protocol,
         projectId: options.projectId,
       });
       // Bugfix #341: Force exit after consult completes. SDK internals
