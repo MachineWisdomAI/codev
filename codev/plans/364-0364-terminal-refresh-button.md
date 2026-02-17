@@ -8,16 +8,18 @@
 
 ## Executive Summary
 
-Add a `TerminalControls` component rendered inside Terminal.tsx's container div — two small floating icon buttons (refresh + scroll-to-bottom) positioned horizontally in the top-right corner. This is a frontend-only change touching two files.
+Add a `TerminalControls` component rendered inside Terminal.tsx's container div — two small floating icon buttons (refresh + scroll-to-bottom) positioned horizontally in the top-right corner. **Must work on both desktop and mobile layouts.** Desktop: hover effects for discoverability. Mobile: touch-friendly tap targets (32px+), `touch-action: manipulation`. This is a frontend-only change touching two files.
 
 ## Success Metrics
 - [ ] Both buttons render in all terminal types (architect, builder, shell)
 - [ ] Refresh triggers fitAddon.fit() + sends resize to backend
 - [ ] Scroll-to-bottom calls terminal.scrollToBottom()
 - [ ] Neither button steals focus from xterm
-- [ ] Buttons are semi-transparent, unobtrusive, with hover brightening
-- [ ] Touch-friendly on mobile (32px+ tap targets)
+- [ ] **Desktop**: hover effects (opacity 0.4 → 0.8), cursor pointer
+- [ ] **Mobile**: touch-friendly tap targets (32px+), `touch-action: manipulation`
+- [ ] Buttons are semi-transparent, unobtrusive
 - [ ] aria-labels present for accessibility
+- [ ] Tested on both desktop and mobile viewports
 
 ## Phases (Machine Readable)
 
@@ -102,14 +104,15 @@ Revert the single commit — no backend changes, no data migration.
 **Dependencies**: Phase 1
 
 #### Objectives
-- Add CSS styles for the controls (opacity, hover, sizing, mobile tap targets)
-- Add Playwright tests for button visibility and interaction
+- Add CSS styles for the controls with **distinct desktop and mobile behavior**
+- Add Playwright tests for button visibility and interaction on **both viewports**
 
 #### Deliverables
 - [ ] CSS styles in index.css for .terminal-controls and child buttons
-- [ ] Hover effects (opacity 0.4 → 0.8)
-- [ ] 32px minimum tap targets for mobile
-- [ ] Playwright test: buttons visible in terminal
+- [ ] **Desktop**: hover effects (opacity 0.4 → 0.8), cursor pointer
+- [ ] **Mobile**: 32px minimum tap targets, `touch-action: manipulation`, `:active` feedback
+- [ ] Playwright test: buttons visible in terminal (desktop viewport)
+- [ ] Playwright test: buttons visible in terminal (mobile viewport)
 - [ ] Playwright test: buttons don't steal focus
 
 #### Implementation Details
@@ -117,29 +120,31 @@ Revert the single commit — no backend changes, no data migration.
 **CSS classes** (added to `index.css`):
 - `.terminal-controls` — absolute positioning container, flex row, gap between buttons
 - `.terminal-control-btn` — transparent background, no border, cursor pointer, opacity 0.4
-- `.terminal-control-btn:hover` — opacity 0.8
-- `.terminal-control-btn:active` — opacity 1.0
-- Touch-action: manipulation, user-select: none (matching VirtualKeyboard pattern)
+- `.terminal-control-btn:hover` — opacity 0.8 (desktop hover effect)
+- `.terminal-control-btn:active` — opacity 1.0 (touch/click feedback for mobile)
+- `touch-action: manipulation` — prevents double-tap zoom on mobile
+- `user-select: none` — prevents text selection (matching VirtualKeyboard pattern)
 - Min width/height: 32px for touch targets, with the SVG icon centered at 16-18px
 
 **Playwright tests** (new test file or added to existing terminal tests):
-- Verify both buttons are visible in the DOM
-- Verify clicking refresh doesn't move focus away from terminal
-- Verify clicking scroll-to-bottom doesn't move focus away from terminal
+- **Desktop viewport (1280×720)**: Verify both buttons visible, hover state works, click doesn't steal focus
+- **Mobile viewport (375×812)**: Verify both buttons visible and tappable, tap doesn't steal focus
+- Use `page.setViewportSize()` to test both viewports in the same test file
 
 **Files to modify**:
 - `packages/codev/dashboard/src/index.css`
 - `packages/codev/src/agent-farm/__tests__/e2e/` (add to existing terminal test file or create new)
 
 #### Acceptance Criteria
-- [ ] Buttons are semi-transparent (opacity ~0.4) and brighten on hover
-- [ ] Touch targets are at least 32px
-- [ ] Playwright tests pass for button visibility and focus retention
+- [ ] **Desktop**: Buttons are semi-transparent (opacity ~0.4) and brighten on hover (~0.8)
+- [ ] **Mobile**: Touch targets are at least 32px, `:active` provides feedback
+- [ ] Playwright tests pass for both desktop and mobile viewports
 - [ ] Existing tests still pass
 
 #### Test Plan
-- **Playwright**: Button visibility, focus retention after click
-- **Visual**: Manually verify on mobile viewport and desktop viewport
+- **Playwright (desktop)**: Button visibility at 1280×720, hover opacity change, focus retention
+- **Playwright (mobile)**: Button visibility at 375×812, tap interaction, focus retention
+- **Manual**: Verify visual appearance on real mobile device and desktop browser
 
 #### Rollback Strategy
 Revert the single commit.
@@ -161,5 +166,5 @@ Phase 1 (Controls Component) ──→ Phase 2 (Styling and Tests)
 | Buttons invisible on certain themes | Low | Low | Use fixed opacity values, not theme-dependent colors |
 
 ## Validation Checkpoints
-1. **After Phase 1**: Both buttons render and function correctly in all terminal types
-2. **After Phase 2**: Styles match spec, Playwright tests pass, existing tests unaffected
+1. **After Phase 1**: Both buttons render and function correctly in all terminal types on desktop and mobile
+2. **After Phase 2**: Styles match spec on both viewports, Playwright tests pass for desktop and mobile, existing tests unaffected
