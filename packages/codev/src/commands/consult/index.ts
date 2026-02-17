@@ -26,7 +26,7 @@ interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
-  gemini: { cli: 'gemini', args: [], envVar: 'GEMINI_SYSTEM_MD' },
+  gemini: { cli: 'gemini', args: ['--model', 'gemini-3-pro-preview'], envVar: 'GEMINI_SYSTEM_MD' },
 };
 
 // Models that use an Agent SDK instead of CLI subprocess
