@@ -103,15 +103,14 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
-  // Architect command - direct CLI access
+  // Architect command - start Claude session with architect role in current terminal
   program
     .command('architect [args...]')
-    .description('Start or attach to architect session (power user mode)')
-    .option('-l, --layout', 'Create multi-pane layout with status and shell')
-    .action(async (args: string[], options: { layout?: boolean }) => {
+    .description('Start an architect Claude session in the current terminal')
+    .action(async (args: string[]) => {
       const { architect } = await import('./commands/architect.js');
       try {
-        await architect({ args, layout: options.layout });
+        await architect({ args });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
@@ -228,29 +227,6 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       const { shell } = await import('./commands/shell.js');
       try {
         await shell({ name: options.name });
-      } catch (error) {
-        logger.error(error instanceof Error ? error.message : String(error));
-        process.exit(1);
-      }
-    });
-
-  // Consult command - runs consult as a subprocess
-  program
-    .command('consult')
-    .description('Run consult command as a subprocess')
-    .requiredOption('-m, --model <model>', 'Model to use (gemini, codex, claude)')
-    .option('--protocol <name>', 'Protocol name: spir, bugfix, tick, maintain')
-    .option('-t, --type <type>', 'Review type: spec, plan, impl, pr, phase, integration')
-    .option('--prompt <text>', 'Inline prompt (general mode)')
-    .action(async (options) => {
-      const { consult } = await import('./commands/consult.js');
-      try {
-        await consult({
-          model: options.model,
-          protocol: options.protocol,
-          type: options.type,
-          prompt: options.prompt,
-        });
       } catch (error) {
         logger.error(error instanceof Error ? error.message : String(error));
         process.exit(1);
