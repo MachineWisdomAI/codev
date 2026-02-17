@@ -607,6 +607,15 @@ export class OverviewCache {
       errors.issues = 'GitHub CLI unavailable — could not fetch issues';
     } else {
       backlog = deriveBacklog(issues, workspaceRoot, activeBuilderIssues, prLinkedIssues);
+
+      // Enrich builder titles from GitHub issue titles
+      // (status.yaml stores a slug, not the human-readable title)
+      const issueTitleMap = new Map(issues.map(i => [i.number, i.title]));
+      for (const b of builders) {
+        if (b.issueNumber !== null && issueTitleMap.has(b.issueNumber)) {
+          b.issueTitle = issueTitleMap.get(b.issueNumber)!;
+        }
+      }
     }
 
     const result: OverviewData = { builders, pendingPRs, backlog };

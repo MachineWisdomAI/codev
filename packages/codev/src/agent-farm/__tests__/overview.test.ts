@@ -1130,6 +1130,47 @@ describe('overview', () => {
       expect(data.builders).toHaveLength(0);
     });
 
+    it('enriches builder issueTitle from GitHub issue titles', async () => {
+      // status.yaml has a slug title, not the human-readable issue title
+      createBuilderWorktree(tmpDir, 'bugfix-381-work-view-fix', [
+        'id: bugfix-381',
+        'title: work-view-fix',
+        'protocol: bugfix',
+        'phase: investigate',
+      ].join('\n'), 'builder-bugfix-381-work-view-fix');
+
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([
+        { number: 381, title: 'Work view: builder rows show internal names', labels: [{ name: 'bug' }], createdAt: '2026-02-16T00:00:00Z' },
+      ]);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.builders).toHaveLength(1);
+      // The title should be enriched from the GitHub issue, not the slug
+      expect(data.builders[0].issueTitle).toBe('Work view: builder rows show internal names');
+    });
+
+    it('preserves slug title when GitHub issues are unavailable', async () => {
+      createBuilderWorktree(tmpDir, 'bugfix-400-some-fix', [
+        'id: bugfix-400',
+        'title: some-fix',
+        'protocol: bugfix',
+        'phase: fix',
+      ].join('\n'), 'builder-bugfix-400-some-fix');
+
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue(null);
+
+      const cache = new OverviewCache();
+      const data = await cache.getOverview(tmpDir);
+
+      expect(data.builders).toHaveLength(1);
+      // Falls back to slug from status.yaml
+      expect(data.builders[0].issueTitle).toBe('some-fix');
+    });
+
     it('invalidates cache when workspace root changes', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
