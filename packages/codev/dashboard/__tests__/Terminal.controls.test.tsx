@@ -1,10 +1,14 @@
 /**
  * Regression test for GitHub Issue #382: Terminal refresh button not working
  *
- * The refresh button was a no-op because FitAddon.fit() skips resize when
- * dimensions haven't changed, and node-pty only sends SIGWINCH on actual
- * dimension changes. The fix bounces dimensions (shrink by 1 col, then re-fit)
- * to force SIGWINCH regardless of current terminal size.
+ * Root cause: the terminal container lacked `overflow: hidden` and `min-height: 0`,
+ * so the flex item's default `min-height: auto` prevented the container from
+ * shrinking below the xterm content height. FitAddon.proposeDimensions() reads
+ * the container's computed height, which was stale after window resizes — it
+ * reflected the xterm content size, not the actual available space.
+ *
+ * Fix: add `overflow: hidden` + `min-height: 0` to the container, ensuring
+ * FitAddon always reads the correct flex-allocated dimensions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent } from '@testing-library/react';
@@ -132,41 +136,25 @@ describe('TerminalControls (Issue #382)', () => {
     expect(scrollBtn).not.toBeNull();
   });
 
-  it('refresh button bounces dimensions to force SIGWINCH', () => {
+  it('refresh button calls fitAddon.fit() and sends resize control frame', () => {
     const { container } = render(<Terminal wsPath="/ws/terminal/test" />);
     const refreshBtn = container.querySelector('button[aria-label="Refresh terminal"]')!;
 
     // Clear mocks from component mount
     mockFitFn.mockClear();
-    mockResizeFn.mockClear();
     mockWsSend.mockClear();
 
     fireEvent.pointerDown(refreshBtn);
 
-    // Step 1: terminal should be resized to cols-1 (bounce)
-    expect(mockResizeFn).toHaveBeenCalledWith(79, 24);
-
-    // Step 2: fit() should be called to restore correct dimensions
+    // fit() should be called to recalculate dimensions
     expect(mockFitFn).toHaveBeenCalledTimes(1);
-  });
 
-  it('refresh button sends bounce resize control frame on pointerdown', () => {
-    const { container } = render(<Terminal wsPath="/ws/terminal/test" />);
-    const refreshBtn = container.querySelector('button[aria-label="Refresh terminal"]')!;
-
-    // Clear initial control frames from component mount
-    mockWsSend.mockClear();
-
-    fireEvent.pointerDown(refreshBtn);
-
+    // A resize control frame should always be sent (even if fit() was a no-op)
     const controlFrames = getControlFrames();
-    // Should have at least the bounce resize frame (cols-1)
     expect(controlFrames.length).toBeGreaterThanOrEqual(1);
-    const bounceFrame = controlFrames.find(f =>
-      f.type === 'resize' && (f.payload as { cols: number }).cols === 79
-    );
-    expect(bounceFrame).toBeDefined();
-    expect(bounceFrame!.payload).toEqual({ cols: 79, rows: 24 });
+    const resizeFrame = controlFrames.find(f => f.type === 'resize');
+    expect(resizeFrame).toBeDefined();
+    expect(resizeFrame!.payload).toEqual({ cols: 80, rows: 24 });
   });
 
   it('scroll-to-bottom button calls scrollToBottom() on pointerdown', () => {

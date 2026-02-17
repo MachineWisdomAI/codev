@@ -33,19 +33,27 @@ function TerminalControls({
     const term = xtermRef.current;
     if (!fit || !ws || ws.readyState !== WebSocket.OPEN || !term) return;
 
-    // Force a PTY resize by bouncing dimensions: shrink by 1 col then
-    // re-fit to correct size. FitAddon.fit() is a no-op when dimensions
-    // haven't changed (see addon-fit source), and node-pty/the kernel
-    // only sends SIGWINCH on actual dimension changes. Without the
-    // bounce, clicking refresh when the terminal is already at the
-    // correct size does nothing — the shell never gets SIGWINCH and
-    // never redraws. Both operations are synchronous in the same event
-    // loop turn, so there is no visible flicker.
-    const { cols, rows } = term;
-    term.resize(Math.max(2, cols - 1), rows);
-    sendControl(ws, 'resize', { cols: Math.max(2, cols - 1), rows });
+    // Debug: trace the full resize path (Issue #382)
+    const beforeCols = term.cols;
+    const beforeRows = term.rows;
+    const container = term.element?.parentElement;
+    const containerStyle = container ? window.getComputedStyle(container) : null;
+    console.log('[refresh] before:', {
+      cols: beforeCols, rows: beforeRows,
+      containerW: containerStyle?.width, containerH: containerStyle?.height,
+    });
+
     fit.fit();
-    // fit() triggers onResize → sendControl with correct dimensions
+
+    console.log('[refresh] after fit():', {
+      cols: term.cols, rows: term.rows,
+      changed: term.cols !== beforeCols || term.rows !== beforeRows,
+    });
+
+    // Always send resize to PTY — even if fit() didn't change dimensions,
+    // force SIGWINCH so the shell redraws.
+    sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+    console.log('[refresh] sent resize control frame:', { cols: term.cols, rows: term.rows });
   };
 
   const handleScrollToBottom = (e: React.PointerEvent) => {
@@ -551,6 +559,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
         style={{
           width: '100%',
           flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
           backgroundColor: '#1a1a1a',
         }}
       />
