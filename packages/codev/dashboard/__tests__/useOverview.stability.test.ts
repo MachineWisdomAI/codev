@@ -31,6 +31,7 @@ const mockRefreshOverview = vi.fn<() => Promise<void>>();
 vi.mock('../src/lib/api.js', () => ({
   fetchOverview: (...args: unknown[]) => mockFetchOverview(...(args as [])),
   refreshOverview: (...args: unknown[]) => mockRefreshOverview(...(args as [])),
+  getSSEEventsUrl: () => 'http://localhost:0/api/events',
 }));
 
 describe('useOverview stability (bugfix #358)', () => {

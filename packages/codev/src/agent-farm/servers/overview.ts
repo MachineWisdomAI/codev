@@ -584,7 +584,7 @@ export class OverviewCache {
   private issueCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
   private closedCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
   private lastWorkspaceRoot: string | null = null;
-  private readonly TTL = 60_000;
+  private readonly TTL = 30_000;
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.

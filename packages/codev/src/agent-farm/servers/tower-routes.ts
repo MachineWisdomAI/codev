@@ -102,7 +102,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
-  'POST /api/overview/refresh': (_req, res) => handleOverviewRefresh(res),
+  'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
   'GET /api/browse':      (_req, res, url) => handleBrowse(res, url),
@@ -565,8 +565,13 @@ async function handleOverview(res: http.ServerResponse, url: URL, workspaceOverr
   res.end(JSON.stringify(data));
 }
 
-function handleOverviewRefresh(res: http.ServerResponse): void {
+function handleOverviewRefresh(res: http.ServerResponse, ctx?: RouteContext): void {
   overviewCache.invalidate();
+  // Bugfix #388: Broadcast SSE event so all connected dashboard clients
+  // immediately re-fetch instead of waiting for the next poll cycle.
+  if (ctx) {
+    ctx.broadcastNotification({ type: 'overview-changed', title: 'Overview updated', body: 'Cache invalidated' });
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true }));
 }

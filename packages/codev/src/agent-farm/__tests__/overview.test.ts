@@ -991,6 +991,25 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
+    it('re-fetches after 30s TTL expires (Bugfix #388)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      // Advance time past the 30s TTL
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(31_000);
+
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
     it('returns degraded data when gh fails for PRs', async () => {
       mockFetchPRList.mockResolvedValue(null);
       mockFetchIssueList.mockResolvedValue([]);
