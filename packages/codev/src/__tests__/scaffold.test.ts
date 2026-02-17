@@ -329,6 +329,11 @@ describe('Scaffold Utilities', () => {
       expect(CODEV_GITIGNORE_ENTRIES).toContain('.consult/');
       expect(CODEV_GITIGNORE_ENTRIES).toContain('.builders/');
     });
+
+    // Regression: Issue #383 — porch project state must not be versioned
+    it('should gitignore codev/projects/*/ to prevent state leaks across worktrees (issue #383)', () => {
+      expect(CODEV_GITIGNORE_ENTRIES).toContain('codev/projects/*/');
+    });
   });
 
   // Regression: Spec 0126 — projectlist.md should no longer be created by init/adopt

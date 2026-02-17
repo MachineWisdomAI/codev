@@ -13,6 +13,7 @@ export const CODEV_GITIGNORE_ENTRIES = `# Codev
 .agent-farm/
 .consult/
 codev/.update-hashes.json
+codev/projects/*/
 .builders/
 `;
 
