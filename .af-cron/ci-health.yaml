@@ -1,0 +1,12 @@
+# CI Health Check — detects broken builds on main
+#
+# Checks every minute (for testing). Change to "*/30 * * * *" for production.
+
+name: CI Health Check
+schedule: "*/30 * * * *"
+enabled: true
+command: gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length'
+condition: "output != '0'"
+message: "CI Alert: ${output} recent failure(s) on main. Run `gh run list --limit 5` to investigate."
+target: architect
+timeout: 30

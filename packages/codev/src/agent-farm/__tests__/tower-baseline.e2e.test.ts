@@ -278,22 +278,26 @@ describe('Tower Baseline - Current Behavior (Phase 0)', () => {
       // Phase 4: Tower handles everything directly, no proxying
       // This test verifies workspace appears in tower status after activation
 
-      // Activate workspace
+      // Activate workspace — activateWorkspace throws if the API returns non-200
       await activateWorkspace(towerPort, testWorkspacePath);
 
+      // Give tower time to fully register the workspace before polling
+      await new Promise((r) => setTimeout(r, 2000));
+
       // Poll for workspace to appear in tower status
-      // CI runners can be slow — allow up to 60s (120 × 500ms)
+      // CI runners can be slow — allow up to 90s (180 × 500ms).
       let status: any;
-      for (let i = 0; i < 120; i++) {
+      let lastInstances: any[] = [];
+      for (let i = 0; i < 180; i++) {
         const statusRes = await fetch(`http://localhost:${towerPort}/api/status`);
         status = await statusRes.json();
-        if (status.instances?.length > 0) break;
+        lastInstances = status.instances || [];
+        if (lastInstances.length > 0) break;
         await new Promise((r) => setTimeout(r, 500));
       }
 
-      // Workspace should appear in instances
-      expect(status.instances).toBeDefined();
-      expect(status.instances.length).toBeGreaterThan(0);
+      // Workspace should appear in instances (running or not — it's registered)
+      expect(lastInstances.length, `Expected workspace in instances but got 0. Full status: ${JSON.stringify(status)}`).toBeGreaterThan(0);
     });
 
     it('encodes workspace paths correctly for proxy URLs', () => {

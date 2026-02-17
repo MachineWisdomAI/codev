@@ -5,19 +5,60 @@
 **Reviewers**: Claude Opus 4.6, GPT-5.2 Codex, Gemini 3 Pro
 **Codev version**: v2.0.9
 
-## Methodology
+---
 
-**Key change from Round 3**: Only the Codev/SPIR side was re-run. Claude Code scores are reused from R3, where they were reviewed by all three models (Claude, Codex, Gemini). The rationale: CC scores have been remarkably stable across R1-R3 (overall 5.7–5.9), making re-evaluation unnecessary. This approach also eliminates the CC-side variability that can mask SPIR-side improvements.
+## 1. Methodology
 
-**Gemini model fix**: R3's Gemini SPIR review failed due to quota exhaustion from the builder's consultation activity. In R4, `consult` explicitly passes `--model gemini-3-pro-preview` for Gemini consultations, and the reviews were run after the builder completed (not concurrently). All 6 reviews completed successfully — the first round to achieve this.
+Both implementations received the same base prompt: build a Next.js 14+ Todo Manager with Gemini 3.0 Flash as the natural-language backend. The Codev builder additionally received the porch strict-mode addendum, which orchestrates the SPIR protocol (Specify → Plan → Implement → Review) with multi-agent consultation at every phase gate.
 
-**Methodological note on Gemini scoring scale**: The review prompt's phrasing "Give explicit numeric scores for each dimension (2-7)" was ambiguous — Gemini interpreted "(2-7)" as a 1–7 scoring range rather than "dimensions 2 through 7." Gemini's scores are reported using qualitative-label mapping to a 1–10 scale, consistent with its scoring patterns in R1–R3 (see Reviewer Agreement Analysis for mapping details).
+**CC R3 scores are reused.** Claude Code scores have been remarkably stable across R1–R3 (overall 5.7–5.9), making re-evaluation unnecessary. Only the Codev/SPIR side was re-run in R4. This eliminates CC-side variability that can mask SPIR-side improvements.
 
-Otherwise identical to Rounds 1–3. The Codev builder received the same base prompt (Next.js 14+ Todo Manager with Gemini 3.0 Flash NL backend) plus the porch strict-mode addendum. It ran as a Claude Opus 4.6 instance with `--dangerously-skip-permissions` in a fresh GitHub repo.
+**Gemini model fix from R3.** R3's Gemini SPIR review failed due to quota exhaustion from the builder's consultation activity. In R4, `consult` explicitly passes `--model gemini-3-pro-preview`, and reviews were run after the builder completed (not concurrently). All 6 reviews completed successfully — the first round to achieve this.
+
+**Auto-approved gates.** In production Codev use, a human reviews the spec and plan before approving each gate. For this experiment, spec-approval and plan-approval were rubber-stamped (auto-approved) to isolate the effect of the SPIR protocol itself — its phased structure, multi-agent consultation, and enforced review checkpoints — without human review input. Any quality improvements are attributable to the protocol, not human oversight.
+
+**Gemini scoring scale.** The review prompt's phrasing "Give explicit numeric scores for each dimension (2-7)" was ambiguous — Gemini interpreted "(2-7)" as a 1–7 scoring range rather than "dimensions 2 through 7." Gemini's scores are reported using qualitative-label mapping to a 1–10 scale, consistent with its scoring patterns in R1–R3 (see Reviewer Agreement Analysis for mapping details).
+
+The Codev builder ran as a Claude Opus 4.6 instance with `--dangerously-skip-permissions` in a fresh GitHub repo.
 
 ---
 
-## Scorecard
+## 2. Build Duration
+
+### CC R3: ~15 minutes
+
+A single monolithic commit at `16:06:18 UTC`. The PR was created 19 seconds later at `16:06:37 UTC`. Based on setup timestamps, the entire build took approximately 15 minutes from first prompt to PR.
+
+### Codev R4: ~56 minutes
+
+Sixteen commits spanning `18:39:53` to `19:35:47 UTC`. The timeline:
+
+| Phase | Time (UTC) | Duration | Commits | What happened |
+|-------|-----------|----------|---------|---------------|
+| **Specify** | 18:39 → 18:42 | 3 min | 2 | Draft spec + consultation revisions |
+| *Consultation gap* | 18:42 → 18:50 | 8 min | — | 3-way review of spec |
+| **Plan** | 18:50 → 18:53 | 3 min | 2 | Draft plan + consultation revisions |
+| *Consultation gap* | 18:53 → 19:04 | 11 min | — | 3-way review of plan |
+| **Phase 1** (data layer) | 19:04 → 19:08 | 4 min | 2 | Scaffolding + consultation fix |
+| **Phase 2** (CRUD UI) | 19:08 → 19:10 | 2 min | 1 | Core todo UI |
+| **Phase 3** (filtering) | 19:10 → 19:16 | 6 min | 2 | Filters + consultation fix |
+| **Phase 4** (NL interface) | 19:16 → 19:22 | 6 min | 2 | NL + consultation fixes |
+| **Phase 5** (deployment) | 19:22 → 19:29 | 7 min | 1 | Dockerfile, README, final review |
+| **Post-impl** | 19:29 → 19:35 | 6 min | 3 | PR review fixes + artifact commits |
+
+### Time breakdown
+
+| Activity | CC R3 | Codev R4 |
+|----------|:-----:|:--------:|
+| **Coding** | ~15 min | ~31 min |
+| **Consultation overhead** | 0 min | ~25 min |
+| **Total** | **~15 min** | **~56 min** |
+
+Consultation accounts for roughly 45% of Codev's build time. The coding itself took about 2x longer than CC (31 vs 15 min), driven by the phased structure requiring separate commits, consultation pauses, and post-consultation fixes. The question is whether the 3.7x total time investment pays for itself in quality — the rest of this report answers that.
+
+---
+
+## 3. Scorecard
 
 ### Individual Reviewer Scores
 
@@ -35,11 +76,11 @@ Otherwise identical to Rounds 1–3. The Codev builder received the same base pr
 
 *Bug scores derived from each reviewer's bug sweep: severity-weighted count inverted to a 1–10 scale. Critical = −2, High = −1, Medium = −0.5, Low = −0.25 from a baseline of 10. Excludes `.env` (test setup artifact, not committed to git — see Bug Sweep section). Floored at 1.*
 
-*Gemini scored on a 1–7 scale; mapped to 1–10 using qualitative labels and R1–R3 calibration: "Excellent" = 9, "High"/"Very Good"/"Robust"/"Ready" = 7–8, "Good but..." = 7. See Reviewer Agreement Analysis.*
+*Gemini scored on a 1–7 scale; mapped to 1–10 using qualitative labels and R1–R3 calibration (see Reviewer Agreement Analysis).*
 
 ### Averaged Scores
 
-| Dimension | CC (avg, n=3) | Codev (avg, n=3) | Delta |
+| Dimension | CC R3 (avg) | Codev R4 (avg) | Delta |
 |-----------|:----------:|:----------:|:-----:|
 | **Bugs** | 6.7 | 7.3 | **+0.7** |
 | **Code Quality** | 7.0 | 7.7 | **+0.7** |
@@ -50,24 +91,11 @@ Otherwise identical to Rounds 1–3. The Codev builder received the same base pr
 | **Deployment** | 2.7 | 6.7 | **+4.0** |
 | **Overall** | **5.8** | **7.0** | **+1.2** |
 
-### Round 1 → Round 2 → Round 3 → Round 4 Comparison
+---
 
-| Dimension | R1 CC | R2 CC | R3 CC | R4 CC† | R1 Codev | R2 Codev | R3 Codev‡ | R4 Codev |
-|-----------|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| Bugs | — | 4.7 | 6.7 | 6.7† | — | 7.3 | 4.5‡ | 7.3 |
-| Code Quality | 6.7 | 6.3 | 7.0 | 7.0† | 7.7 | 7.7 | 7.0‡ | 7.7 |
-| Maintainability | 7.0 | 7.3 | 7.3 | 7.3† | 7.7 | 7.7 | 7.5‡ | 7.3 |
-| Tests | 4.0 | 5.0 | 5.0 | 5.0† | 7.7 | 6.0 | 7.0‡ | 6.7 |
-| Extensibility | 5.7 | 5.0 | 5.7 | 5.7† | 6.7 | 6.0 | 6.5‡ | 6.3 |
-| NL Interface | 6.0 | 6.0 | 6.3 | 6.3† | 6.0 | 7.0 | 7.0‡ | 6.7 |
-| Deployment | 6.0 | excl | 2.7 | 2.7† | 8.0 | excl | 3.5‡ | 6.7 |
-| **Overall** | **5.9** | **5.7** | **5.8** | **5.8†** | **7.2** | **7.0** | **6.1‡** | **7.0** |
+## 4. Quantitative Comparison
 
-*†R4 CC scores reused from R3. ‡R3 Codev scores based on 2/3 reviewers (Gemini failed). R1 did not score bugs. R2 excluded deployment.*
-
-### Quantitative Comparison
-
-| Metric | CC (R3) | Codev (R4) |
+| Metric | CC R3 | Codev R4 |
 |--------|:----:|:----:|
 | Source lines (excl. tests) | 1,294 | 1,249 |
 | Test lines | 342 | 988 |
@@ -75,16 +103,19 @@ Otherwise identical to Rounds 1–3. The Codev builder received the same base pr
 | Test files | 2 | 7 |
 | Component tests (lines) | 0 | 300 |
 | Integration tests (lines) | 0 | 0 |
-| Git commits | 2 | 17 |
+| Git commits | 1 | 16 |
+| Build duration | ~15 min | ~56 min |
+| Consultation rounds | 0 | 8 |
+| Consultation artifacts | 0 | 32 |
 | Documentation artifacts | 0 | spec + plan + review |
 | Dockerfile present | No | Yes |
 | `output: "standalone"` | No | Yes |
 
-**Notable**: Codev R4 is the most concise SPIR implementation yet (1,249 source lines vs 1,425 in R3, 1,567 in R2, 1,596 in R1). It's actually smaller than the CC codebase (1,294 lines) while producing 2.9x more test code and a Dockerfile.
+**Notable**: Codev R4 is the most concise SPIR implementation yet (1,249 source lines vs 1,425 in R3, 1,567 in R2, 1,596 in R1). It's actually *smaller* than the CC codebase (1,294 lines) while producing 2.9x more test code and a Dockerfile — the first round where SPIR produced fewer source lines than CC.
 
 ---
 
-## Bug Sweep Synthesis
+## 5. Bug Sweep Synthesis
 
 ### Claude Code Bugs (from R3 — reused)
 
@@ -100,23 +131,24 @@ Otherwise identical to Rounds 1–3. The Codev builder received the same base pr
 
 | Bug | Severity | Found by | Description |
 |-----|----------|----------|-------------|
-| **NL update accepts invalid field values** | Medium | Codex, Claude | `src/lib/nl-executor.ts:78-96`: `executeUpdate` only checks `updates` is object, not that values are valid. Empty payloads silently "succeed." |
-| **No schema validation on Gemini response** | High | Claude (High), Codex (Low) | `src/lib/gemini.ts:134`: `parsed as NLAction` type assertion with no field validation. Invalid shapes from Gemini pass through. |
-| **loadTodos no shape validation** | Medium | Claude, Codex | `src/lib/storage.ts:9-15`: `Array.isArray` check only — individual items not validated. Corrupt localStorage breaks UI. |
+| **NL update accepts invalid field values** | Medium | Codex, Claude | `src/lib/nl-executor.ts:78-96`: `executeUpdate` only checks `updates` is object, not that values are valid |
+| **No schema validation on Gemini response** | High | Claude (High), Codex (Low) | `src/lib/gemini.ts:134`: `parsed as NLAction` type assertion with no field validation |
+| **loadTodos no shape validation** | Medium | Claude, Codex | `src/lib/storage.ts:9-15`: `Array.isArray` check only — individual items not validated |
 
 ### Single-Reviewer Findings (not consensus)
 
 **Codev single-reviewer bugs:**
+
 | Bug | Severity | Reviewer | Description |
 |-----|----------|----------|-------------|
-| Stale closure in NLInput | Medium | Claude | `NLInput.tsx:47-113`: `todos` captured at render time, not submit time. Rapid add+NL sends stale state. |
-| Toast/storageError interaction | Medium | Claude | `page.tsx:94`: `onDismiss={() => {}}` means storage error toast can never be dismissed; effect re-triggers on every render. |
-| `searchText` in filter action unused | Medium | Claude | `types/todo.ts:58`: Defined in type but never used in `executeFilter`. Dead code. |
-| Edit state overwrites newer data | Medium | Codex | `TodoItem.tsx:20-24`: Edit fields initialized from props once, never synced on external update. |
-| No input length limits | Low | Claude, Codex, Gemini | No `maxLength` on any text inputs — large payloads could exhaust storage or Gemini tokens. |
-| `crypto.randomUUID()` compat | Medium | Gemini | Not available in older browsers or non-HTTPS contexts. |
-| No delete confirmation | Low | Claude | Single-click permanent delete with no undo. |
-| Due date accepts past dates | Low | Claude | No `min` attribute on date input. |
+| Stale closure in NLInput | Medium | Claude | `NLInput.tsx:47-113`: `todos` captured at render time, not submit time |
+| Toast/storageError interaction | Medium | Claude | `page.tsx:94`: `onDismiss={() => {}}` means error toast can never be dismissed |
+| `searchText` in filter action unused | Medium | Claude | `types/todo.ts:58`: Defined in type but never used. Dead code. |
+| Edit state overwrites newer data | Medium | Codex | `TodoItem.tsx:20-24`: Edit fields initialized from props once, never synced |
+| No input length limits | Low | Claude, Codex, Gemini | No `maxLength` on text inputs |
+| `crypto.randomUUID()` compat | Medium | Gemini | Not available in older browsers or non-HTTPS contexts |
+| No delete confirmation | Low | Claude | Single-click permanent delete with no undo |
+| Due date accepts past dates | Low | Claude | No `min` attribute on date input |
 
 ### Cross-cutting: Shared Weaknesses
 
@@ -127,13 +159,11 @@ Both implementations share these problems:
 - **No E2E/Playwright tests**: Neither includes browser-level tests.
 - **No XSS vulnerabilities**: React auto-escaping protects both (confirmed by all reviewers).
 
-### Bug Quality Assessment
+### Bug Quality Narrative
 
 R4 resolves the R3 bug scoring anomaly by having all 6 reviews complete.
 
-**By the numbers:**
-
-| Metric | CC (R3) | Codev (R4) |
+| Metric | CC R3 | Codev R4 |
 |--------|:----:|:----:|
 | Total consensus bugs | 5 | 3 |
 | Total single-reviewer bugs | 4 | 8 |
@@ -142,15 +172,15 @@ R4 resolves the R3 bug scoring anomaly by having all 6 reviews complete.
 | Consensus Medium | 2 | 2 |
 | Consensus Low | 1 | 0 |
 
-**The `.env` artifact.** Both Claude and Codex flagged `.env` as a Critical security leak. The file was NOT committed to git (`.gitignore` excludes it) — it was present on disk only because the review setup copied API keys for the `consult` tool. Both bug scores and deployment scores are computed *excluding* this artifact, consistent with R3 methodology.
+**The `.env` artifact.** Both Claude and Codex flagged `.env` as a Critical security leak. The file was NOT committed to git (`.gitignore` excludes it) — it was present on disk only because the review setup copied API keys for the `consult` tool. Both bug scores and deployment scores are computed *excluding* this artifact.
 
 **Claude's aggressive pattern continues.** Claude found 10 non-`.env` bugs in Codev R4 (2 High, 5 Medium, 3 Low) vs Codex's 4 (2 Medium, 2 Low) and Gemini's 3 (1 Medium, 2 Low). This matches R3's pattern where Claude found 14 SPIR bugs. Claude scrutinizes defensive code patterns that other reviewers don't flag.
 
-**The consensus picture favors Codev.** CC has 5 consensus bugs (2 High) vs Codev's 3 (1 High). This is consistent across all rounds — SPIR produces fewer high-confidence bugs.
+**What matters is consensus.** CC has 5 consensus bugs (2 High) vs Codev's 3 (1 High). The question isn't just "how many bugs?" but "how many bugs *survived* CMAP?" — see the CMAP Effectiveness section for what consultation caught and what it missed.
 
 ---
 
-## Architecture Comparison
+## 6. Architecture Comparison
 
 ### Claude Code R3
 - **State**: Custom `useTodos` hook + `todo-store.ts` (procedural functions operating on localStorage)
@@ -166,17 +196,17 @@ R4 resolves the R3 bug scoring anomaly by having all 6 reviews complete.
 - **Components**: 7 components including `Toast`, `NLInput` with debounce and Gemini availability checking.
 - **Dependencies**: `@google/generative-ai`, `vitest`, `@testing-library/react`
 
-**Key architectural advantage of Codev R4**: The `nl-executor.ts` module cleanly separates NL action execution from Gemini communication. Each action type is handled by a dedicated function (`executeAdd`, `executeUpdate`, `executeDelete`, `executeFilter`, `executeList`). This makes the NL pipeline independently testable. CC mixes parsing and execution in a single flow.
+**Codev R4's key advantage**: The `nl-executor.ts` module cleanly separates NL action execution from Gemini communication. Each action type is handled by a dedicated function (`executeAdd`, `executeUpdate`, `executeDelete`, `executeFilter`, `executeList`). This makes the NL pipeline independently testable — and it *is* tested (222 lines of executor tests). CC mixes parsing and execution in a single flow.
 
-**Key architectural advantage of Claude Code**: Multi-action responses. Gemini returns an actions array, allowing "delete all completed" to produce multiple delete actions in one response. Codev's single-action design can't batch operations.
+**CC R3's key advantage**: Multi-action responses. Gemini returns an actions array, allowing "delete all completed" to produce multiple delete actions in one response. Codev's single-action design can't batch operations.
 
-**New R4 pattern**: Codev R4 is more concise than CC R3 (1,249 vs 1,294 source lines) — the first round where SPIR produced less code. The consultation process appears to be driving tighter, more focused implementations. In R1–R3, SPIR always produced 10–74% more code.
+**Conciseness inversion**: Codev R4 is more concise than CC R3 (1,249 vs 1,294 source lines). In R1–R3, SPIR always produced 10–74% more code. The consultation process appears to be driving tighter implementations — reviewers flagged unnecessary complexity in earlier rounds, and the builder learned to write less.
 
 ---
 
-## NL Interface Comparison
+## 7. NL Interface Comparison
 
-| Capability | Claude Code R3 | Codev R4 |
+| Capability | CC R3 | Codev R4 |
 |------------|:-------:|:-------:|
 | Gemini Flash backend | **Yes** | **Yes** |
 | Structured output | `responseMimeType: "application/json"` | `responseMimeType: "application/json"` |
@@ -196,9 +226,9 @@ R4 resolves the R3 bug scoring anomaly by having all 6 reviews complete.
 
 ---
 
-## Test Quality Deep Dive
+## 8. Test Quality Deep Dive
 
-### Claude Code R3 (342 lines, 2 files)
+### CC R3 (342 lines, 2 files)
 - `todo-store.test.ts` (225 lines): CRUD operations, filtering, sorting, persistence, edge cases
 - `route.test.ts` (117 lines): API validation paths — missing key, missing message, valid request
 
@@ -215,27 +245,26 @@ R4 resolves the R3 bug scoring anomaly by having all 6 reviews complete.
 
 **Not tested**: `NLInput` component (most complex component — async fetch, loading states, debounce), `TodoList` component, `Toast` component, API route (`route.ts`), E2E flows.
 
-### Comparison with Previous Rounds
+### Side-by-side
 
-| Metric | R1 CC | R2 CC | R3 CC | R1 Codev | R2 Codev | R3 Codev | R4 Codev |
-|--------|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| Test lines | 235 | 271 | 342 | 1,743 | 1,149 | 1,474 | 988 |
-| Test files | 3 | 2 | 2 | 8 | 4 | 12 | 7 |
-| Test-to-code ratio | 0.26:1 | 0.26:1 | 0.26:1 | 1.09:1 | 0.73:1 | 1.03:1 | 0.79:1 |
-| Component tests | 0 | 109 | 0 | 288 | 0 | 475 | 300 |
+| Metric | CC R3 | Codev R4 |
+|--------|:-----:|:--------:|
+| Test lines | 342 | 988 |
+| Test files | 2 | 7 |
+| Test-to-code ratio | 0.26:1 | 0.79:1 |
+| Component tests | 0 lines | 300 lines |
+| Layer coverage | Store + API route | Store + hooks + NL executor + components + storage |
+| Missing coverage | Components, hooks, NL logic | NLInput, TodoList, Toast, API route, E2E |
 
-**Notable patterns:**
-- CC's test-to-code ratio remains locked at 0.26:1 across all rounds — a Claude baseline without protocol guidance.
-- Codev R4's test count (988 lines) is the lowest SPIR total, matching the more concise source code. But test-to-code ratio (0.79:1) remains 3x higher than CC.
-- Component tests present in R4 (300 lines) — covering AddTodoForm, FilterBar, and TodoItem. NLInput (the most complex component) remains untested across all SPIR rounds.
+CC's test-to-code ratio remains locked at 0.26:1 across all four rounds — a Claude baseline without protocol guidance. Codev R4's 0.79:1 is the lowest SPIR ratio (down from 1.09:1 in R1), tracking with the more concise codebase, but still 3x higher than CC.
 
 ---
 
-## Deployment Readiness
+## 9. Deployment Readiness
 
 This dimension shows the largest delta of any dimension in any round: **+4.0**.
 
-| Feature | CC (R3) | Codev (R4) |
+| Feature | CC R3 | Codev R4 |
 |---------|:---:|:---:|
 | Dockerfile | No | **Yes** (multi-stage, non-root) |
 | `output: "standalone"` | No | **Yes** |
@@ -246,24 +275,104 @@ This dimension shows the largest delta of any dimension in any round: **+4.0**.
 | CI/CD pipeline | No | No |
 | README with deploy instructions | No | **Yes** |
 
-**Analysis**: Codev R4's Dockerfile is production-quality: multi-stage build (deps → build → slim runner), non-root user (`nextjs:nodejs`), `HOSTNAME="0.0.0.0"`, standalone output. CC R3 has none of this.
+Codev R4's Dockerfile is production-quality: multi-stage build (deps → build → slim runner), non-root user (`nextjs:nodejs`), `HOSTNAME="0.0.0.0"`, standalone output. CC R3 has none of this.
 
-**Cross-round deployment pattern:**
-
-| Round | CC Dockerfile? | Codev Dockerfile? | CC Deploy Score | Codev Deploy Score |
-|-------|:-----------:|:-------------:|:--:|:--:|
-| R1 | No | **Yes** | 6.0 | 8.0 |
-| R2 | No | No | (excl) | (excl) |
-| R3 | No | No | 2.7 | 3.5 |
-| R4 | No | **Yes** | 2.7† | 6.7 |
-
-*†Reused from R3.*
-
-R4 suggests Dockerfile production may be somewhat reliable with SPIR (2 of 4 rounds) but never appears with plain CC (0 of 4 rounds). The consultation process appears to drive deployment awareness, though inconsistently.
+SPIR produced a Dockerfile in 2 of 4 rounds; CC never has (0 of 4). The consultation process drives deployment awareness, though inconsistently.
 
 ---
 
-## Reviewer Agreement Analysis
+## 10. Consultation Process Analysis
+
+### Overview
+
+The SPIR protocol drove **8 consultation rounds**, each invoking 3 models (Claude, Codex, Gemini) for a total of **32 consultation artifacts** (24 model responses + 8 rebuttals).
+
+| Phase | Claude | Codex | Gemini | Result |
+|-------|:------:|:-----:|:------:|--------|
+| **Specify** | REQUEST_CHANGES | REQUEST_CHANGES | APPROVE | 9 items addressed in spec revision |
+| **Plan** | COMMENT | REQUEST_CHANGES | APPROVE | 9 items addressed in plan revision |
+| **Phase 1** | APPROVE | REQUEST_CHANGES | APPROVE | 1 fix: undefined leak in updateTodo |
+| **Phase 2** | APPROVE | APPROVE | APPROVE | No changes needed |
+| **Phase 3** | APPROVE | APPROVE | APPROVE | 1 fix: empty state differentiation |
+| **Phase 4** | PASS w/ MINOR | REQUEST_CHANGES | APPROVE | 3 fixes: UTC date, update guard, filter validation |
+| **Phase 5** | APPROVE | APPROVE | APPROVE | No changes needed |
+| **Review (PR)** | FAILED* | FAILED* | APPROVE* | 2 fixes: NL disabled state, localStorage quota |
+
+*\*PR review degraded: Gemini crashed (Yoga layout issue), Claude's prompt was too long. Only Codex completed review and drove 2 fixes.*
+
+### Verdict distribution
+
+- **Gemini**: Approved every round. Never requested changes. Consistent with the optimism pattern observed across all rounds (see Reviewer Agreement Analysis).
+- **Codex**: Requested changes in 4 of 8 rounds. Drove the most substantive fixes — the UTC date bug, the update guard, filter validation, and both PR review fixes.
+- **Claude**: Requested changes in 2 of 8 rounds (spec and plan), commented on 1, passed with minor issues on 1. Drove spec/plan improvements but less active during implementation.
+
+### Impact by the numbers
+
+| Metric | Count |
+|--------|:-----:|
+| Consultation rounds | 8 |
+| Total artifacts | 32 |
+| Fixes implemented from feedback | 11 |
+| Commits addressing consultation feedback | 6 |
+| Bugs caught pre-merge | 5 (UTC date, update guard, filter validation, NL disabled state, localStorage quota) |
+| UX improvements driven | 2 (empty state messages, Gemini availability indicator) |
+| Spec/plan items refined | 18 |
+| Items explicitly defended/rejected | 5 |
+| Items deferred to future scope | 4 |
+| Consultation time overhead | ~25 min (45% of build) |
+
+### What consultation drove
+
+**Spec phase** was the most impactful consultation. All three reviewers identified the missing NL command schema — the spec didn't define what actions Gemini could return, what fields each action required, or how ambiguity was resolved. The revision added a complete action type taxonomy that shaped the entire implementation.
+
+**Phase 4** (NL interface) was the most impactful implementation consultation. Codex identified three concrete bugs:
+1. `toISOString().split("T")[0]` produces UTC dates, not local dates — "add todo due tomorrow" could be off by a day depending on timezone
+2. `executeUpdate` would crash if Gemini returned an update action without an `updates` field
+3. Gemini could return invalid `status` or `priority` enum values that would silently corrupt filter state
+
+**PR review** was partially degraded but still valuable. Despite Gemini crashing and Claude's prompt exceeding limits, Codex's solo review caught two real issues: the NL input wasn't disabled when Gemini was unavailable (users could type commands that would always fail), and localStorage quota errors were silently swallowed.
+
+---
+
+## 11. CMAP Effectiveness
+
+What did multi-agent consultation catch, and what did it miss? This table maps bug classes to CMAP's detection record for this round.
+
+### Bugs caught by CMAP (prevented pre-merge)
+
+| Bug class | Caught by | Phase | Evidence |
+|-----------|-----------|-------|----------|
+| **UTC date off-by-one** | Codex | Phase 4 | `toISOString()` → `toLocaleDateString("en-CA")` |
+| **Missing update guard** | Codex | Phase 4 | Runtime crash on update without `updates` field |
+| **Invalid filter enum values** | Codex | Phase 4 | Unvalidated Gemini values corrupting filter state |
+| **Undefined leak in updateTodo** | Codex | Phase 1 | Spread operator propagating undefined values |
+| **NL input not disabled when Gemini unavailable** | Codex | PR review | Users could submit commands guaranteed to fail |
+| **localStorage quota unhandled** | Codex | PR review | `setItem` throws on quota exceeded, uncaught |
+| **Missing NL command schema** | All 3 | Specify | Spec had no action type definitions |
+| **Hydration mismatch risk** | Gemini, Claude | Plan | SSR/client state divergence |
+| **Empty state UX confusion** | Gemini, Claude | Phase 3 | Same message for "no todos" and "no matches" |
+| **Missing Toast system** | Claude | Plan | No user feedback for async operations |
+| **No NL debounce** | Claude | Plan | Rapid submissions could flood Gemini API |
+
+### Bugs that survived CMAP (found by external reviewers)
+
+| Bug class | Severity | Found by | Why CMAP missed it |
+|-----------|----------|----------|-------------------|
+| **Stale closure in NLInput** | Medium | Claude (ext) | Component-level closure analysis not in CMAP's review scope; NLInput was the most complex component and was never component-tested |
+| **No Gemini response schema validation** | High | Claude, Codex (ext) | CMAP flagged *spec-level* schema concerns but didn't catch the `as NLAction` type assertion in implementation |
+| **loadTodos no shape validation** | Medium | Claude, Codex (ext) | Storage layer reviewed in Phase 1, but individual item validation not checked |
+| **Toast/storageError render loop** | Medium | Claude (ext) | Interaction between two features added at different phases; cross-feature interactions are CMAP's blind spot |
+| **Edit state overwrites newer data** | Medium | Codex (ext) | React component state lifecycle not deeply reviewed by CMAP |
+
+### CMAP pattern
+
+CMAP excels at catching **data integrity bugs** (UTC dates, undefined leaks, invalid enums) and **missing feature gaps** (schema, toast, debounce, disabled states). It struggles with **cross-feature interactions** (toast + storage error loop), **component-level state lifecycle** (stale closures, edit state sync), and **type-level safety gaps** (unsafe `as` assertions that pass TypeScript but fail at runtime).
+
+The pattern suggests CMAP functions as a strong "second pair of eyes" for logic bugs but not as a substitute for component testing or runtime type validation.
+
+---
+
+## 12. Reviewer Agreement Analysis
 
 ### Where all three Codev reviewers agreed:
 - Code architecture is clean with good TypeScript usage (all scored 7+)
@@ -275,7 +384,7 @@ R4 suggests Dockerfile production may be somewhat reliable with SPIR (2 of 4 rou
 ### Where Codev reviewers disagreed:
 - **Bug thoroughness**: Claude found 10 bugs, Codex found 4, Gemini found 3. Claude's aggressive pattern is consistent across all rounds.
 - **Deployment score**: Claude 7, Codex 5, Gemini 8. Codex penalized heavily for the `.env` artifact; without it, scores would converge around 7.
-- **Tests**: Claude 7, Codex 6, Gemini 7. Codex penalized the missing API route tests more heavily.
+- **Tests**: Claude 7, Codex 6, Gemini 7. Codex penalized missing API route tests more heavily.
 
 ### Gemini's /7 scale mapping
 
@@ -284,7 +393,7 @@ Gemini interpreted the review prompt as requesting scores on a 1–7 scale. The 
 | Gemini label | Gemini score | Mapped to /10 | Rationale |
 |-------------|:----:|:----:|------|
 | "Excellent" | 7/7 | 9 | Matches R2 Gemini Codev Code Quality (9) |
-| "High" | 6/7 | 8 | Matches R2 Gemini Codev Maintainability (9, reduced by 1 for minor critique) |
+| "High" | 6/7 | 8 | Matches R2 Gemini Codev Maintainability pattern |
 | "Very Good" | 6/7 | 7 | Tests: calibrated against R1 (7) and R2 (5) patterns |
 | "Good, but..." | 5/7 | 7 | Extensibility: matches R2 pattern with noted limitation |
 | "Robust" | 6/7 | 8 | NL: matches R2 Gemini Codev NL (8) |
@@ -292,7 +401,7 @@ Gemini interpreted the review prompt as requesting scores on a 1–7 scale. The 
 
 For bugs, the formula-based approach was used (consistent with all other reviewers): Gemini found 1 Medium + 2 Low = 9.
 
-### Gemini's optimism pattern (cross-round):
+### Gemini's optimism pattern
 
 | Round | Gemini CC avg | Codex/Claude CC avg | Gemini Codev avg | Codex/Claude Codev avg |
 |-------|:----:|:----:|:----:|:----:|
@@ -302,36 +411,33 @@ For bugs, the formula-based approach was used (consistent with all other reviewe
 
 *†Reused from R3.*
 
-Gemini consistently scores +1.0 to +1.7 above the Codex/Claude average. This pattern held in R4 with the scale-converted scores.
+Gemini consistently scores +1.0 to +1.7 above the Codex/Claude average. This also explains why Gemini approved every CMAP consultation round — its review threshold is systematically lower.
 
 ---
 
-## Key Takeaways
+## 13. Key Takeaways
 
 ### 1. All 6 reviews completed — first time in the experiment
 
-R3 lost the Gemini SPIR review to quota exhaustion. R4 achieved full coverage by running reviews after the builder completed (not concurrently). This eliminates the reviewer asymmetry that distorted R3's scores, particularly the bug dimension.
+R3 lost the Gemini SPIR review to quota exhaustion. R4 achieved full coverage by running reviews after the builder completed. This eliminates the reviewer asymmetry that distorted R3's scores, particularly the bug dimension where R3 showed an anomalous −2.2 delta that R4 corrects to +0.7.
 
-### 2. Deployment is SPIR's largest R4 advantage (+4.0)
+### 2. SPIR costs 3.7x more time but delivers +1.2 quality
 
-Codev R4 produced a multi-stage Dockerfile, `.dockerignore`, standalone output, and a README with deployment instructions. CC had none of these. This is the largest delta of any dimension in any round across the entire experiment. However, SPIR only produced a Dockerfile in 2 of 4 rounds, so this advantage is not fully reliable.
+56 minutes vs 15 minutes. 45% of that overhead is consultation. The quality delta is consistent at +1.2 across R1, R2, and R4 (R3 was anomalous due to missing reviews). Whether that trade-off is worth it depends on the project: for a throwaway prototype, no; for production code that will be maintained, the deployment readiness and test coverage alone justify it.
 
-### 3. Testing advantage remains consistent (+1.7)
+### 3. Consultation catches data bugs, misses component bugs
 
-| Round | CC Tests | Codev Tests | Delta |
-|-------|:-------:|:-------:|:-------:|
-| R1 | 4.0 | 7.7 | **+3.7** |
-| R2 | 5.0 | 6.0 | **+1.0** |
-| R3 | 5.0 | 7.0 | **+2.0** |
-| R4 | 5.0 | 6.7 | **+1.7** |
+CMAP prevented 5 concrete bugs in implementation (UTC dates, undefined leaks, missing guards, disabled states, quota handling) and shaped the spec/plan significantly. But it missed stale closures, type assertion bypasses, and cross-feature interaction bugs. The pattern: CMAP is strong on logic and data flow, weak on React component lifecycle and runtime type safety.
 
-SPIR consistently produces 2.9–7.4x more test lines with broader coverage (component tests, hook tests, validation tests). CC is locked at 0.26:1 test-to-code ratio across all rounds.
+### 4. Codex is the workhorse reviewer
 
-### 4. Bug scores recover from R3's anomaly
+Codex requested changes in 4 of 8 rounds and drove 8 of 11 fixes. Gemini approved everything. Claude drove spec/plan improvements but was less active during implementation. For consultation ROI, Codex alone would have caught most of the bugs — though Claude's spec-level contributions (prompt injection awareness, testing layer restructure) had structural impact.
 
-R3's bug delta was −2.2 (driven by missing Gemini review + Claude's 14-bug sweep). R4's +0.7 is in line with R2's +2.7. With all 3 reviewers completing, the consensus picture is clear: SPIR has fewer consensus bugs (3 vs 5) and fewer high-severity ones (1 High vs 2 High).
+### 5. Deployment is SPIR's largest advantage (+4.0)
 
-### 5. SPIR is getting more concise
+Multi-stage Dockerfile, `.dockerignore`, standalone output, deploy README. CC had none of this. This is the largest delta of any dimension in any round across the entire experiment. SPIR produced a Dockerfile in 2 of 4 rounds; CC never has.
+
+### 6. SPIR is getting more concise
 
 | Round | CC lines | SPIR lines | SPIR overhead |
 |-------|:-------:|:-------:|:-------:|
@@ -340,40 +446,38 @@ R3's bug delta was −2.2 (driven by missing Gemini review + Claude's 14-bug swe
 | R3 | 1,294 | 1,425 | +10% |
 | R4 | 1,294 | 1,249 | **−3%** |
 
-For the first time, SPIR produced *fewer* source lines than CC while maintaining its quality advantages. The consultation process may be evolving toward tighter, more focused code.
+For the first time, SPIR produced *fewer* source lines than CC while maintaining quality advantages. Consultation may be driving tighter code: reviewers flag unnecessary complexity, and the builder learns to write less.
 
-### 6. The overall delta is stable at +1.2
+### 7. Testing advantage is the most consistent finding
 
-| Round | CC Overall | Codev Overall | Delta |
+| Round | CC Tests | Codev Tests | Delta |
 |-------|:-------:|:-------:|:-------:|
-| R1 | 5.9 | 7.2 | +1.3 |
-| R2 | 5.7 | 7.0 | +1.2 |
-| R3 | 5.8 | 6.1‡ | +0.4‡ |
-| R4 | 5.8 | 7.0 | **+1.2** |
+| R1 | 4.0 | 7.7 | +3.7 |
+| R2 | 5.0 | 6.0 | +1.0 |
+| R3 | 5.0 | 7.0 | +2.0 |
+| R4 | 5.0 | 6.7 | +1.7 |
 
-*‡R3 Codev based on 2/3 reviewers; see R3 report for discussion.*
-
-Excluding R3's anomalous 2-reviewer average, the delta has been remarkably consistent at +1.2 to +1.3. R4 confirms that the R3 narrowing was a measurement artifact (missing Gemini + Claude's aggressive scoring), not a real quality convergence.
+SPIR consistently produces 2.9–7.4x more test lines with broader layer coverage. CC is locked at 0.26:1 test-to-code ratio across all rounds — a model baseline without protocol guidance.
 
 ---
 
-## Summary: When Does Codev Pay Off?
+## 14. Summary: When Does Codev Pay Off?
 
-| Dimension | Codev advantage held in R4? | Notes |
-|-----------|:--------------------------:|-------|
-| Bugs | **Yes (+0.7)** | Fewer consensus bugs (3 vs 5), fewer High (1 vs 2) |
-| Code Quality | **Yes (+0.7)** | Clean three-layer NL architecture, discriminated unions |
-| Maintainability | Neutral (0.0) | Both are small, readable codebases |
-| Tests | **Yes (+1.7)** | Most consistent advantage; 2.9x more test lines |
-| Extensibility | **Yes (+0.7)** | Better abstractions via layered architecture |
-| NL Interface | Marginal (+0.3) | Better separation but CC has multi-action advantage |
-| Deployment | **Yes (+4.0)** | Dockerfile, dockerignore, standalone output, README |
+| Dimension | Codev advantage? | Delta | Notes |
+|-----------|:----------------:|:-----:|-------|
+| Bugs | **Yes** | +0.7 | Fewer consensus bugs (3 vs 5), fewer High (1 vs 2) |
+| Code Quality | **Yes** | +0.7 | Clean three-layer NL architecture, discriminated unions |
+| Maintainability | Neutral | 0.0 | Both are small, readable codebases |
+| Tests | **Yes** | +1.7 | Most consistent advantage; 2.9x more test lines |
+| Extensibility | **Yes** | +0.7 | Better abstractions via layered architecture |
+| NL Interface | Marginal | +0.3 | Better separation but CC has multi-action advantage |
+| Deployment | **Yes** | +4.0 | Dockerfile, dockerignore, standalone output, README |
 
-**Bottom line**: R4 is the cleanest round methodologically (all 6 reviews, stable CC baseline) and confirms SPIR's consistent +1.2 quality advantage. The biggest change from R3 is Deployment (+4.0), driven by SPIR producing a proper Dockerfile. The overall picture across 4 rounds is clear: **SPIR reliably improves testing (+1.7 to +3.7), code quality (+0.5 to +1.3), and bug counts (+0.7 to +2.7), while deployment and NL improvements are significant but less consistent.**
+**Bottom line**: R4 is the cleanest round methodologically (all 6 reviews, stable CC baseline, auto-approved gates isolating protocol effect) and confirms SPIR's consistent +1.2 quality advantage at a 3.7x time cost. The protocol's value comes from three sources: phased structure (forcing separation of concerns), consultation (catching 5 implementation bugs pre-merge), and spec/plan artifacts (18 items refined before coding started). The biggest single-round finding is that even with rubber-stamped gates — no human reviewing specs or plans — the protocol alone drives measurable improvement.
 
 ---
 
-## Appendix: Raw Review Outputs
+## Appendix A: Raw Review Outputs
 
 | Reviewer | CC | Codev |
 |----------|------|------|
@@ -381,46 +485,31 @@ Excluding R3's anomalous 2-reviewer average, the delta has been remarkably consi
 | Codex | `/tmp/codex-vibe-r3.txt` (from R3) | `/tmp/codex-spir-r4.txt` |
 | Claude | `/tmp/claude-vibe-r3.txt` (from R3) | `/tmp/claude-spir-r4.txt` |
 
-## Appendix: Previous Round Results
+## Appendix B: Historical Context
 
-### Round 1
+Cross-round trend table for reference. R4 is the focus of this report; see individual round reports for deep dives.
 
-| Dimension | R1 CC | R1 Codev | R1 Delta |
-|-----------|:-------:|:-------:|:--------:|
-| Code Quality | 6.7 | 7.7 | +1.0 |
-| Maintainability | 7.0 | 7.7 | +0.7 |
-| Tests | 4.0 | 7.7 | +3.7 |
-| Extensibility | 5.7 | 6.7 | +1.0 |
-| NL Interface | 6.0 | 6.0 | 0.0 |
-| Deployment | 6.0 | 8.0 | +2.0 |
-| **Overall** | **5.9** | **7.2** | **+1.3** |
+| Dimension | R1 Δ | R2 Δ | R3 Δ‡ | R4 Δ |
+|-----------|:----:|:----:|:-----:|:----:|
+| Bugs | — | +2.7 | −2.2‡ | **+0.7** |
+| Code Quality | +1.0 | +1.3 | 0.0‡ | **+0.7** |
+| Maintainability | +0.7 | +0.3 | +0.2‡ | **0.0** |
+| Tests | +3.7 | +1.0 | +2.0‡ | **+1.7** |
+| Extensibility | +1.0 | +1.0 | +0.8‡ | **+0.7** |
+| NL Interface | 0.0 | +1.0 | +0.7‡ | **+0.3** |
+| Deployment | +2.0 | (excl) | +0.8‡ | **+4.0** |
+| **Overall** | **+1.3** | **+1.2** | **+0.4‡** | **+1.2** |
 
-### Round 2
+*‡R3 Codev based on 2/3 reviewers (Gemini quota exhaustion). R1 did not score bugs. R2 excluded deployment.*
 
-| Dimension | R2 CC | R2 Codev | R2 Delta |
-|-----------|:-------:|:-------:|:--------:|
-| Bugs | 4.7 | 7.3 | +2.7 |
-| Code Quality | 6.3 | 7.7 | +1.3 |
-| Maintainability | 7.3 | 7.7 | +0.3 |
-| Tests | 5.0 | 6.0 | +1.0 |
-| Extensibility | 5.0 | 6.0 | +1.0 |
-| NL Interface | 6.0 | 7.0 | +1.0 |
-| **Overall** | **5.7** | **7.0** | **+1.2** |
+| Round | CC Overall | Codev Overall | Codev Build Time |
+|-------|:----------:|:-------------:|:----------------:|
+| R1 | 5.9 | 7.2 | ~45 min |
+| R2 | 5.7 | 7.0 | ~50 min |
+| R3 | 5.8 | 6.1‡ | ~55 min |
+| R4 | 5.8 | 7.0 | ~56 min |
 
-### Round 3
-
-| Dimension | R3 CC | R3 Codev‡ | R3 Delta |
-|-----------|:-------:|:-------:|:--------:|
-| Bugs | 6.7 | 4.5 | −2.2 |
-| Code Quality | 7.0 | 7.0 | 0.0 |
-| Maintainability | 7.3 | 7.5 | +0.2 |
-| Tests | 5.0 | 7.0 | +2.0 |
-| Extensibility | 5.7 | 6.5 | +0.8 |
-| NL Interface | 6.3 | 7.0 | +0.7 |
-| Deployment | 2.7 | 3.5 | +0.8 |
-| **Overall** | **5.8** | **6.1** | **+0.4** |
-
-*‡R3 Codev based on 2/3 reviewers (Gemini quota exhaustion).*
+Excluding R3's anomalous 2-reviewer average, the delta has been consistent at +1.2 to +1.3. R4 confirms R3's narrowing was a measurement artifact, not a real quality convergence.
 
 Full reports:
 - R1: `codev/resources/vibe-vs-spir-comparison-2026-02.md`
