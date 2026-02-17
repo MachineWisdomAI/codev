@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { globSync } from 'glob';
-import { readState, writeState, findStatusPath, getProjectDir } from './state.js';
+import { readState, writeState, findStatusPath, getProjectDir, resolveArtifactBaseName } from './state.js';
 import {
   loadProtocol,
   getPhaseConfig,
@@ -254,7 +254,10 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
   if (isBuildVerify(protocol, state.phase) && !state.build_complete && state.iteration === 1) {
     const buildConfig = getBuildConfig(protocol, state.phase);
     if (buildConfig?.artifact) {
-      const artifactGlob = buildConfig.artifact.replace('${PROJECT_ID}', state.id);
+      const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+      const artifactGlob = buildConfig.artifact
+        .replace('${PROJECT_ID}', state.id)
+        .replace('${PROJECT_TITLE}', artifactBaseName);
       if (isArtifactPreApproved(workspaceRoot, artifactGlob)) {
         // Auto-approve gate and advance
         const gateName = getPhaseGate(protocol, state.phase);

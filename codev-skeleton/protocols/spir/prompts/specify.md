@@ -11,7 +11,7 @@ Create a comprehensive specification document that thoroughly explores the probl
 - **Project ID**: {{project_id}}
 - **Project Title**: {{title}}
 - **Current State**: {{current_state}}
-- **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
+- **Spec File**: `codev/specs/{{artifact_name}}.md`
 
 ## Process
 
@@ -82,12 +82,12 @@ After completing the spec draft, signal completion. Porch will run 3-way consult
 
 ## Output
 
-Create or update the specification file at `codev/specs/{{project_id}}-{{title}}.md`.
+Create or update the specification file at `codev/specs/{{artifact_name}}.md`.
 
 **IMPORTANT**: Keep spec/plan/review filenames in sync:
-- Spec: `codev/specs/{{project_id}}-{{title}}.md`
-- Plan: `codev/plans/{{project_id}}-{{title}}.md`
-- Review: `codev/reviews/{{project_id}}-{{title}}.md`
+- Spec: `codev/specs/{{artifact_name}}.md`
+- Plan: `codev/plans/{{artifact_name}}.md`
+- Review: `codev/reviews/{{artifact_name}}.md`
 
 ## Signals
 
@@ -121,7 +121,7 @@ Make commits at these milestones:
 
 **CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
 ```bash
-git add codev/specs/{{project_id}}-{{title}}.md
+git add codev/specs/{{artifact_name}}.md
 ```
 
 ## Important Notes

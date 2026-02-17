@@ -19,6 +19,7 @@ import {
   getStatusPath,
   detectProjectId,
   resolveProjectId,
+  resolveArtifactBaseName,
 } from './state.js';
 import {
   loadProtocol,
@@ -180,7 +181,7 @@ export async function check(workspaceRoot: string, projectId: string): Promise<v
     return;
   }
 
-  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+  const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
   console.log('');
   console.log(chalk.bold('RUNNING CHECKS...'));
@@ -216,7 +217,7 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
 
   // Run checks first
   if (Object.keys(checks).length > 0) {
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
@@ -465,7 +466,7 @@ export async function approve(
   const checks = getPhaseChecks(protocol, state.phase);
 
   if (Object.keys(checks).length > 0) {
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: state.title };
+    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
 
     console.log('');
     console.log(chalk.bold('RUNNING CHECKS...'));
@@ -590,14 +591,15 @@ function getNextAction(state: ProjectState, protocol: Protocol): string {
   return `Complete the phase work, then run: porch done ${state.id}`;
 }
 
-function getArtifactForPhase(_workspaceRoot: string, state: ProjectState): string | null {
+function getArtifactForPhase(workspaceRoot: string, state: ProjectState): string | null {
+  const baseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
   switch (state.phase) {
     case 'specify':
-      return `codev/specs/${state.id}-${state.title}.md`;
+      return `codev/specs/${baseName}.md`;
     case 'plan':
-      return `codev/plans/${state.id}-${state.title}.md`;
+      return `codev/plans/${baseName}.md`;
     case 'review':
-      return `codev/reviews/${state.id}-${state.title}.md`;
+      return `codev/reviews/${baseName}.md`;
     default:
       return null;
   }

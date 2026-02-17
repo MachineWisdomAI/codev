@@ -11,9 +11,9 @@ Perform a comprehensive review, document lessons learned, and prepare for PR sub
 - **Project ID**: {{project_id}}
 - **Project Title**: {{title}}
 - **Current State**: {{current_state}}
-- **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
-- **Plan File**: `codev/plans/{{project_id}}-{{title}}.md`
-- **Review File**: `codev/reviews/{{project_id}}-{{title}}.md`
+- **Spec File**: `codev/specs/{{artifact_name}}.md`
+- **Plan File**: `codev/plans/{{artifact_name}}.md`
+- **Review File**: `codev/reviews/{{artifact_name}}.md`
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Compare final implementation to original specification:
 
 ### 3. Create Review Document
 
-Create `codev/reviews/{{project_id}}-{{title}}.md`:
+Create `codev/reviews/{{artifact_name}}.md`:
 
 ```markdown
 # Review: {{title}}
@@ -135,10 +135,10 @@ gh pr create --title "[Spec {{project_id}}] {{title}}" --body "$(cat <<'EOF'
 - Manual testing completed for [Y]
 
 ## Spec
-Link: codev/specs/{{project_id}}-{{title}}.md
+Link: codev/specs/{{artifact_name}}.md
 
 ## Review
-Link: codev/reviews/{{project_id}}-{{title}}.md
+Link: codev/reviews/{{artifact_name}}.md
 EOF
 )"
 ```
@@ -151,7 +151,7 @@ changes, you'll be respawned with their feedback.
 
 ## Output
 
-- Review document at `codev/reviews/{{project_id}}-{{title}}.md`
+- Review document at `codev/reviews/{{artifact_name}}.md`
 - Updated documentation (if needed)
 - Pull request created and ready for review
 

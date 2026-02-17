@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import type { ProjectState, Protocol, ProtocolPhase, PlanPhase, IterationRecord } from './types.js';
 import { getPhaseConfig, isPhased, isBuildVerify, getBuildConfig } from './protocol.js';
 import { findPlanFile, getCurrentPlanPhase, getPhaseContent } from './plan.js';
-import { getProjectDir } from './state.js';
+import { getProjectDir, resolveArtifactBaseName } from './state.js';
 import { fetchGitHubIssue } from '../../lib/github.js';
 
 /** Locations to search for protocol prompts */
@@ -107,12 +107,14 @@ function loadPromptFile(promptsDir: string, promptFile: string): string | null {
 function substituteVariables(
   prompt: string,
   state: ProjectState,
+  artifactBaseName: string,
   planPhase?: PlanPhase | null,
   summary?: string | null
 ): string {
   const variables: Record<string, string> = {
     project_id: state.id,
     title: state.title,
+    artifact_name: artifactBaseName,
     current_state: state.phase,
     protocol: state.protocol,
   };
@@ -249,6 +251,9 @@ export async function buildPhasePrompt(
     userAnswersSection = `# User Answers to Your Questions\n\n${state.context.user_answers}\n\n---\n\n`;
   }
 
+  // Resolve canonical artifact base name (prevents doubled IDs like "364-0364-name")
+  const artifactBaseName = resolveArtifactBaseName(workspaceRoot, state.id, state.title);
+
   // Try to load prompt from protocol directory
   const promptsDir = findPromptsDir(workspaceRoot, state.protocol);
   if (promptsDir) {
@@ -258,7 +263,7 @@ export async function buildPhasePrompt(
 
     const promptContent = loadPromptFile(promptsDir, promptFileName);
     if (promptContent) {
-      let result = substituteVariables(promptContent, state, currentPlanPhase, summary);
+      let result = substituteVariables(promptContent, state, artifactBaseName, currentPlanPhase, summary);
 
       // Add goal/summary header if available
       if (summary) {
