@@ -135,6 +135,23 @@ describe('overview', () => {
       expect(result.currentPlanPhase).toBe('tower_endpoint');
     });
 
+    it('parses started_at field (Bugfix #388)', () => {
+      const yaml = [
+        'id: bugfix-388',
+        'protocol: bugfix',
+        'phase: fix',
+        "started_at: '2026-02-17T08:54:32.623Z'",
+      ].join('\n');
+
+      const result = parseStatusYaml(yaml);
+      expect(result.startedAt).toBe('2026-02-17T08:54:32.623Z');
+    });
+
+    it('returns empty startedAt when not present', () => {
+      const result = parseStatusYaml('id: test\nphase: fix');
+      expect(result.startedAt).toBe('');
+    });
+
     it('parses gates section', () => {
       const yaml = [
         "id: '0126'",
@@ -513,24 +530,24 @@ describe('overview', () => {
   // ==========================================================================
 
   describe('extractProjectIdFromWorktreeName', () => {
-    it('extracts zero-padded ID from SPIR worktree', () => {
-      expect(extractProjectIdFromWorktreeName('spir-126-slug')).toBe('0126');
+    it('extracts unpadded ID from SPIR worktree', () => {
+      expect(extractProjectIdFromWorktreeName('spir-126-slug')).toBe('126');
     });
 
-    it('zero-pads short SPIR numbers', () => {
-      expect(extractProjectIdFromWorktreeName('spir-1-feature')).toBe('0001');
+    it('returns unpadded short SPIR numbers', () => {
+      expect(extractProjectIdFromWorktreeName('spir-1-feature')).toBe('1');
     });
 
     it('preserves 4+ digit SPIR numbers', () => {
       expect(extractProjectIdFromWorktreeName('spir-9999-big')).toBe('9999');
     });
 
-    it('extracts zero-padded ID from TICK worktree', () => {
-      expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('0130');
+    it('extracts unpadded ID from TICK worktree', () => {
+      expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('130');
     });
 
-    it('extracts builder-bugfix-N from bugfix worktree', () => {
-      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('builder-bugfix-296');
+    it('extracts bugfix-N from bugfix worktree', () => {
+      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('bugfix-296');
     });
 
     it('extracts legacy numeric ID', () => {
@@ -734,8 +751,8 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('strict');
     });
 
-    it('discovers bugfix builder matching builder-bugfix-N project dir', () => {
-      // Bugfix worktree with matching project dir (as created by af spawn)
+    it('discovers bugfix builder matching bugfix-N project dir', () => {
+      // Bugfix worktree with matching project dir (current porch naming)
       const builderDir = path.join(tmpDir, '.builders', 'bugfix-326-fix-discover');
       const projectsBase = path.join(builderDir, 'codev', 'projects');
 
@@ -749,10 +766,10 @@ describe('overview', () => {
       ].join('\n'));
 
       // The bugfix's own project dir (created by porch init via af spawn)
-      const bugfixDir = path.join(projectsBase, 'builder-bugfix-326-fix-discover');
+      const bugfixDir = path.join(projectsBase, 'bugfix-326-fix-discover');
       fs.mkdirSync(bugfixDir, { recursive: true });
       fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), [
-        'id: builder-bugfix-326',
+        'id: bugfix-326',
         'title: fix-discover',
         'protocol: bugfix',
         'phase: investigate',
@@ -760,7 +777,7 @@ describe('overview', () => {
 
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
-      expect(builders[0].id).toBe('builder-bugfix-326');
+      expect(builders[0].id).toBe('bugfix-326');
       expect(builders[0].issueNumber).toBe(326);
       expect(builders[0].mode).toBe('strict');
     });
@@ -784,6 +801,35 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('soft');
       expect(builders[0].issueNumber).toBe(300);
       expect(builders[0].id).toBe('bugfix-300-some-fix');
+    });
+
+    it('includes startedAt from status.yaml (Bugfix #388)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-501-test', [
+        'id: bugfix-501',
+        'title: test-elapsed',
+        'protocol: bugfix',
+        'phase: fix',
+        "started_at: '2026-02-17T08:54:32.623Z'",
+      ].join('\n'), 'bugfix-501-test-elapsed');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      expect(builders[0].startedAt).toBe('2026-02-17T08:54:32.623Z');
+    });
+
+    it('uses protocol phase when currentPlanPhase is "null" string (Bugfix #388)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-500-test', [
+        'id: bugfix-500',
+        'title: test-null-phase',
+        'protocol: bugfix',
+        'phase: fix',
+        'current_plan_phase: null',
+      ].join('\n'), 'bugfix-500-test-null-phase');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      // Should use 'fix' (protocol phase), not 'null' (string from YAML)
+      expect(builders[0].phase).toBe('fix');
     });
 
     it('treats builder with codev/projects but no matching status.yaml as soft', () => {
@@ -991,6 +1037,25 @@ describe('overview', () => {
       expect(mockFetchPRList).toHaveBeenCalledTimes(2);
     });
 
+    it('re-fetches after 30s TTL expires (Bugfix #388)', async () => {
+      mockFetchPRList.mockResolvedValue([]);
+      mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
+
+      const cache = new OverviewCache();
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(1);
+
+      // Advance time past the 30s TTL
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(31_000);
+
+      await cache.getOverview(tmpDir);
+      expect(mockFetchPRList).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
     it('returns degraded data when gh fails for PRs', async () => {
       mockFetchPRList.mockResolvedValue(null);
       mockFetchIssueList.mockResolvedValue([]);
@@ -1188,7 +1253,7 @@ describe('overview', () => {
         'title: some-fix',
         'protocol: bugfix',
         'phase: fix',
-      ].join('\n'), 'builder-bugfix-400-some-fix');
+      ].join('\n'), 'bugfix-400-some-fix');
 
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue(null);
@@ -1201,9 +1266,10 @@ describe('overview', () => {
       expect(data.builders[0].issueTitle).toBe('some-fix');
     });
 
-    it('invalidates cache when workspace root changes', async () => {
+    it('uses separate cache per workspace (Bugfix #333)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
 
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
@@ -1218,6 +1284,10 @@ describe('overview', () => {
         expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
         expect(mockFetchPRList).toHaveBeenLastCalledWith(tmpDir2);
         expect(mockFetchIssueList).toHaveBeenLastCalledWith(tmpDir2);
+
+        // Original workspace cache is still valid (not invalidated)
+        await cache.getOverview(tmpDir);
+        expect(mockFetchPRList).toHaveBeenCalledTimes(2); // no extra fetch
       } finally {
         fs.rmSync(tmpDir2, { recursive: true, force: true });
       }

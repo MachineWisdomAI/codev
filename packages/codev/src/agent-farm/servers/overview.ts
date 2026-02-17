@@ -41,6 +41,7 @@ export interface BuilderOverview {
   planPhases: PlanPhase[];
   progress: number;
   blocked: string | null;
+  startedAt: string | null;
 }
 
 export interface PROverview {
@@ -97,6 +98,7 @@ interface ParsedStatus {
   gates: Record<string, string>;
   gateRequestedAt: Record<string, string>;
   planPhases: PlanPhase[];
+  startedAt: string;
 }
 
 /**
@@ -113,6 +115,7 @@ export function parseStatusYaml(content: string): ParsedStatus {
     gates: {},
     gateRequestedAt: {},
     planPhases: [],
+    startedAt: '',
   };
 
   const lines = content.split('\n');
@@ -136,6 +139,9 @@ export function parseStatusYaml(content: string): ParsedStatus {
 
     const planPhaseMatch = line.match(/^current_plan_phase:\s*(\S+)/);
     if (planPhaseMatch) { result.currentPlanPhase = planPhaseMatch[1]; section = 'none'; continue; }
+
+    const startedMatch = line.match(/^started_at:\s*'?(.+?)'?\s*$/);
+    if (startedMatch) { result.startedAt = startedMatch[1]; section = 'none'; continue; }
 
     // Section headers
     if (/^gates:\s*$/.test(line)) {
@@ -434,6 +440,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        startedAt: null,
       });
       continue;
     }
@@ -472,7 +479,9 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             id: parsed.id || entry.name,
             issueNumber: Number.isNaN(issueNumber) ? null : issueNumber,
             issueTitle: parsed.title || null,
-            phase: (parsed.currentPlanPhase && parsed.currentPlanPhase !== 'null') ? parsed.currentPlanPhase : parsed.phase,
+            phase: (parsed.currentPlanPhase && parsed.currentPlanPhase !== 'null')
+              ? parsed.currentPlanPhase
+              : parsed.phase,
             mode: 'strict',
             gates: parsed.gates,
             worktreePath,
@@ -480,6 +489,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             planPhases: parsed.planPhases,
             progress: calculateProgress(parsed, workspaceRoot),
             blocked: detectBlocked(parsed),
+            startedAt: parsed.startedAt || null,
           });
           found = true;
           break;
@@ -505,6 +515,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
         planPhases: [],
         progress: 0,
         blocked: null,
+        startedAt: null,
       });
     }
   }
@@ -580,11 +591,10 @@ export function deriveBacklog(
 // =============================================================================
 
 export class OverviewCache {
-  private prCache: { data: GitHubPR[]; fetchedAt: number } | null = null;
-  private issueCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
-  private closedCache: { data: GitHubIssueListItem[]; fetchedAt: number } | null = null;
-  private lastWorkspaceRoot: string | null = null;
-  private readonly TTL = 60_000;
+  private prCache = new Map<string, { data: GitHubPR[]; fetchedAt: number }>();
+  private issueCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
+  private closedCache = new Map<string, { data: GitHubIssueListItem[]; fetchedAt: number }>();
+  private readonly TTL = 30_000;
 
   /**
    * Build the overview response. Aggregates builder state, PRs, and backlog.
@@ -595,12 +605,6 @@ export class OverviewCache {
    *   (backward-compatible / unit-test friendly).
    */
   async getOverview(workspaceRoot: string, activeBuilderRoleIds?: Set<string>): Promise<OverviewData> {
-    // Invalidate cache when workspace changes (prevents cross-workspace stale data)
-    if (this.lastWorkspaceRoot !== null && this.lastWorkspaceRoot !== workspaceRoot) {
-      this.invalidate();
-    }
-    this.lastWorkspaceRoot = workspaceRoot;
-
     const errors: { prs?: string; issues?: string } = {};
 
     // 1. Discover builders from .builders/ directory, then filter to live sessions
@@ -684,9 +688,9 @@ export class OverviewCache {
    * Invalidate all cached data.
    */
   invalidate(): void {
-    this.prCache = null;
-    this.issueCache = null;
-    this.closedCache = null;
+    this.prCache.clear();
+    this.issueCache.clear();
+    this.closedCache.clear();
   }
 
   // ===========================================================================
@@ -695,39 +699,42 @@ export class OverviewCache {
 
   private async fetchPRsCached(cwd: string): Promise<GitHubPR[] | null> {
     const now = Date.now();
-    if (this.prCache && (now - this.prCache.fetchedAt) < this.TTL) {
-      return this.prCache.data;
+    const cached = this.prCache.get(cwd);
+    if (cached && (now - cached.fetchedAt) < this.TTL) {
+      return cached.data;
     }
 
     const data = await fetchPRList(cwd);
     if (data !== null) {
-      this.prCache = { data, fetchedAt: now };
+      this.prCache.set(cwd, { data, fetchedAt: now });
     }
     return data;
   }
 
   private async fetchIssuesCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
     const now = Date.now();
-    if (this.issueCache && (now - this.issueCache.fetchedAt) < this.TTL) {
-      return this.issueCache.data;
+    const cached = this.issueCache.get(cwd);
+    if (cached && (now - cached.fetchedAt) < this.TTL) {
+      return cached.data;
     }
 
     const data = await fetchIssueList(cwd);
     if (data !== null) {
-      this.issueCache = { data, fetchedAt: now };
+      this.issueCache.set(cwd, { data, fetchedAt: now });
     }
     return data;
   }
 
   private async fetchRecentlyClosedCached(cwd: string): Promise<GitHubIssueListItem[] | null> {
     const now = Date.now();
-    if (this.closedCache && (now - this.closedCache.fetchedAt) < this.TTL) {
-      return this.closedCache.data;
+    const cached = this.closedCache.get(cwd);
+    if (cached && (now - cached.fetchedAt) < this.TTL) {
+      return cached.data;
     }
 
     const data = await fetchRecentlyClosed(cwd);
     if (data !== null) {
-      this.closedCache = { data, fetchedAt: now };
+      this.closedCache.set(cwd, { data, fetchedAt: now });
     }
     return data;
   }

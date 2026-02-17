@@ -88,6 +88,7 @@ export interface OverviewBuilder {
   planPhases: Array<{ id: string; title: string; status: string }>;
   progress: number;
   blocked: string | null;
+  startedAt: string | null;
 }
 
 export interface OverviewPR {
@@ -135,6 +136,11 @@ export async function fetchOverview(): Promise<OverviewData> {
   const res = await fetch(apiUrl('api/overview'), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch overview: ${res.status}`);
   return res.json();
+}
+
+/** Get the SSE events URL for push notifications (Bugfix #388). */
+export function getSSEEventsUrl(): string {
+  return apiUrl('api/events');
 }
 
 export async function refreshOverview(): Promise<void> {

@@ -659,6 +659,17 @@ describe('tower-routes', () => {
       expect(JSON.parse(body()).ok).toBe(true);
       expect(mockOverviewInvalidate).toHaveBeenCalledTimes(1);
     });
+
+    it('broadcasts overview-changed SSE event on refresh (Bugfix #388)', async () => {
+      const req = makeReq('POST', '/api/overview/refresh');
+      const { res } = makeRes();
+      const ctx = makeCtx();
+      await handleRequest(req, res, ctx);
+
+      expect(ctx.broadcastNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'overview-changed' }),
+      );
+    });
   });
 
   // =========================================================================
