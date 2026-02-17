@@ -56,6 +56,31 @@ Sixteen commits spanning `18:39:53` to `19:35:47 UTC`. The timeline:
 
 Consultation accounts for roughly 45% of Codev's build time. The coding itself took about 2x longer than CC (31 vs 15 min), driven by the phased structure requiring separate commits, consultation pauses, and post-consultation fixes. The question is whether the 3.7x total time investment pays for itself in quality — the rest of this report answers that.
 
+### Cost
+
+All costs from `consult stats` metrics DB (`~/.codev/metrics.db`). Builder session costs are estimated from typical Claude Opus 4.6 API token volumes (not directly measured — Claude Code doesn't log per-session billing locally).
+
+| Cost component | CC R3 | Codev R4 |
+|----------------|:-----:|:--------:|
+| **Builder session** (Claude Opus 4.6) | $3–6 (est.) | $8–14 (est.) |
+| **Builder consultations** (8 rounds × 3 models) | — | **$4.38** |
+| — Claude (9 calls) | — | $2.55 |
+| — Codex (8 calls) | — | $1.62 |
+| — Gemini (9 calls) | — | $0.21 |
+| **External reviews** (3 models) | **$1.43** | **$1.12** |
+| — Claude | $0.51 | $0.64 |
+| — Codex | $0.91 | $0.42 |
+| — Gemini | $0.01 | $0.06 |
+| **Total** | **$4–7** | **$14–19** |
+
+**Cost multiplier**: Codev R4 costs roughly **3–5x** more than CC R3. Consultation is the dominant added cost ($4.38) — more than the incremental builder session cost. Gemini consultations are negligibly cheap ($0.21 total for 9 calls); Claude drives the most consultation cost ($2.55) with Codex in between ($1.62).
+
+**Cost per quality point**: CC R3 scores 5.8 overall at ~$5.50 midpoint = **$0.95/point**. Codev R4 scores 7.0 at ~$16.50 midpoint = **$2.36/point**. The +1.2 quality delta costs ~$11 extra — about **$9/point of improvement**.
+
+**Review costs are comparable.** Despite Codev having more code surface to review (tests, deployment config), the review costs are similar ($1.12 vs $1.43). The CC Codex review was actually more expensive ($0.91 vs $0.42), likely because its simpler architecture required less structured output.
+
+*Session cost estimation methodology: CC R3 (~15 min session) estimated at 100K–200K input tokens + 20K–40K output tokens. Codev R4 (~56 min session with more file reads and tool calls) estimated at 300K–500K input + 50K–80K output. Claude Opus 4.6 API: $15/1M input, $75/1M output. Gemini consultations used Gemini 3 Pro (not Flash): $1.25/1M input, $5.00/1M output — verified against metrics DB effective rate of $1.06/1M (discount from cached tokens). Codex (GPT-5.2): $2.50/1M input, $10.00/1M output. All consultation costs are measured, not estimated.*
+
 ---
 
 ## 3. Scorecard
@@ -107,6 +132,7 @@ Consultation accounts for roughly 45% of Codev's build time. The coding itself t
 | Build duration | ~15 min | ~56 min |
 | Consultation rounds | 0 | 8 |
 | Consultation artifacts | 0 | 32 |
+| Estimated cost | $4–7 | $14–19 |
 | Documentation artifacts | 0 | spec + plan + review |
 | Dockerfile present | No | Yes |
 | `output: "standalone"` | No | Yes |
@@ -421,9 +447,9 @@ Gemini consistently scores +1.0 to +1.7 above the Codex/Claude average. This als
 
 R3 lost the Gemini SPIR review to quota exhaustion. R4 achieved full coverage by running reviews after the builder completed. This eliminates the reviewer asymmetry that distorted R3's scores, particularly the bug dimension where R3 showed an anomalous −2.2 delta that R4 corrects to +0.7.
 
-### 2. SPIR costs 3.7x more time but delivers +1.2 quality
+### 2. SPIR costs 3.7x more time and 3–5x more money but delivers +1.2 quality
 
-56 minutes vs 15 minutes. 45% of that overhead is consultation. The quality delta is consistent at +1.2 across R1, R2, and R4 (R3 was anomalous due to missing reviews). Whether that trade-off is worth it depends on the project: for a throwaway prototype, no; for production code that will be maintained, the deployment readiness and test coverage alone justify it.
+56 minutes vs 15 minutes; $14–19 vs $4–7. Consultation is the dominant added cost ($4.38, more than the incremental session cost). The quality delta is consistent at +1.2 across R1, R2, and R4 (R3 was anomalous due to missing reviews). Each point of quality improvement costs ~$9 extra. Whether that trade-off is worth it depends on the project: for a throwaway prototype, no; for production code that will be maintained, the deployment readiness and test coverage alone justify it.
 
 ### 3. Consultation catches data bugs, misses component bugs
 
@@ -473,7 +499,7 @@ SPIR consistently produces 2.9–7.4x more test lines with broader layer coverag
 | NL Interface | Marginal | +0.3 | Better separation but CC has multi-action advantage |
 | Deployment | **Yes** | +4.0 | Dockerfile, dockerignore, standalone output, README |
 
-**Bottom line**: R4 is the cleanest round methodologically (all 6 reviews, stable CC baseline, auto-approved gates isolating protocol effect) and confirms SPIR's consistent +1.2 quality advantage at a 3.7x time cost. The protocol's value comes from three sources: phased structure (forcing separation of concerns), consultation (catching 5 implementation bugs pre-merge), and spec/plan artifacts (18 items refined before coding started). The biggest single-round finding is that even with rubber-stamped gates — no human reviewing specs or plans — the protocol alone drives measurable improvement.
+**Bottom line**: R4 is the cleanest round methodologically (all 6 reviews, stable CC baseline, auto-approved gates isolating protocol effect) and confirms SPIR's consistent +1.2 quality advantage at a 3–5x cost premium ($14–19 vs $4–7). The protocol's value comes from three sources: phased structure (forcing separation of concerns), consultation (catching 5 implementation bugs pre-merge at $4.38), and spec/plan artifacts (18 items refined before coding started). The biggest single-round finding is that even with rubber-stamped gates — no human reviewing specs or plans — the protocol alone drives measurable improvement. At ~$9 per quality point, the ROI depends on what you're building.
 
 ---
 
