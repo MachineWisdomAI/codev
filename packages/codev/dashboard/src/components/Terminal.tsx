@@ -29,12 +29,23 @@ function TerminalControls({
   const handleRefresh = (e: React.PointerEvent) => {
     e.preventDefault();
     const fit = fitRef.current;
-    if (!fit) return;
-    fit.fit();
     const ws = wsRef.current;
     const term = xtermRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
-    sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
+    if (!fit || !ws || ws.readyState !== WebSocket.OPEN || !term) return;
+
+    // Force a PTY resize by bouncing dimensions: shrink by 1 col then
+    // re-fit to correct size. FitAddon.fit() is a no-op when dimensions
+    // haven't changed (see addon-fit source), and node-pty/the kernel
+    // only sends SIGWINCH on actual dimension changes. Without the
+    // bounce, clicking refresh when the terminal is already at the
+    // correct size does nothing — the shell never gets SIGWINCH and
+    // never redraws. Both operations are synchronous in the same event
+    // loop turn, so there is no visible flicker.
+    const { cols, rows } = term;
+    term.resize(Math.max(2, cols - 1), rows);
+    sendControl(ws, 'resize', { cols: Math.max(2, cols - 1), rows });
+    fit.fit();
+    // fit() triggers onResize → sendControl with correct dimensions
   };
 
   const handleScrollToBottom = (e: React.PointerEvent) => {
