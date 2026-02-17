@@ -51,7 +51,7 @@ test.describe('Terminal Controls (Spec 0364)', () => {
     await expect(scrollBtn).toBeVisible({ timeout: 5_000 });
   });
 
-  test('clicking controls does not steal focus from terminal', async ({ page }) => {
+  test('clicking controls does not steal focus — desktop', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto(PAGE_URL);
     await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
@@ -59,24 +59,51 @@ test.describe('Terminal Controls (Spec 0364)', () => {
     // Wait for terminal to be interactive
     const terminal = page.locator('.split-left .terminal-container');
     await expect(terminal).toBeVisible({ timeout: 15_000 });
-    // Give xterm time to fully initialize
     await page.waitForTimeout(2000);
 
     // Click inside the terminal to give it focus
     await terminal.click();
-
-    // Get the active element before clicking controls
     const xTermFocused = page.locator('.split-left .xterm-helper-textarea');
 
-    // Click refresh button — should not steal focus
+    // Click refresh button with real mouse click — should not steal focus
     const refreshBtn = page.locator('button[aria-label="Refresh terminal"]').first();
-    await refreshBtn.dispatchEvent('pointerdown');
-    // xterm textarea should still be the focused element
+    await refreshBtn.click({ force: true });
     await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
 
-    // Click scroll-to-bottom button — should not steal focus
+    // Re-focus terminal in case
+    await terminal.click();
+
+    // Click scroll-to-bottom button with real mouse click — should not steal focus
     const scrollBtn = page.locator('button[aria-label="Scroll to bottom"]').first();
-    await scrollBtn.dispatchEvent('pointerdown');
+    await scrollBtn.click({ force: true });
+    await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
+  });
+
+  test('tapping controls does not steal focus — mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(PAGE_URL);
+    await page.locator('#root').waitFor({ state: 'attached', timeout: 10_000 });
+
+    // Wait for terminal to be interactive
+    const terminal = page.locator('.terminal-container').first();
+    await expect(terminal).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(2000);
+
+    // Tap inside the terminal to give it focus
+    await terminal.tap();
+    const xTermFocused = page.locator('.xterm-helper-textarea').first();
+
+    // Tap refresh button — should not steal focus
+    const refreshBtn = page.locator('button[aria-label="Refresh terminal"]').first();
+    await refreshBtn.tap();
+    await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
+
+    // Re-focus terminal
+    await terminal.tap();
+
+    // Tap scroll-to-bottom button — should not steal focus
+    const scrollBtn = page.locator('button[aria-label="Scroll to bottom"]').first();
+    await scrollBtn.tap();
     await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
   });
 });
