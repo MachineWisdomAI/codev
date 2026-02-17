@@ -472,7 +472,7 @@ export function discoverBuilders(workspaceRoot: string): BuilderOverview[] {
             id: parsed.id || entry.name,
             issueNumber: Number.isNaN(issueNumber) ? null : issueNumber,
             issueTitle: parsed.title || null,
-            phase: parsed.currentPlanPhase || parsed.phase,
+            phase: (parsed.currentPlanPhase && parsed.currentPlanPhase !== 'null') ? parsed.currentPlanPhase : parsed.phase,
             mode: 'strict',
             gates: parsed.gates,
             worktreePath,
