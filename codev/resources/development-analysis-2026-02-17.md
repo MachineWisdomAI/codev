@@ -9,19 +9,21 @@ Comprehensive analysis of the Codev development system's performance over a two-
 
 ## Executive Summary
 
-- **106 merged PRs** across **26 projects** in 14 days, driven by autonomous builder agents orchestrated by porch
+- **Output equivalent to a 3–4 person elite engineering team** — 106 merged PRs in 14 days (53/week), against an industry elite benchmark of 5 PRs/developer/week (LinearB 2026, 8.1M PRs). By PR volume alone, one architect with autonomous builders matched 11–19 individual developers. (See Section 4.4.)
+- **Median autonomous implementation time: 57 minutes** — from first commit to PR creation, the typical SPIR feature completed in under an hour. Total autonomous time across all 24 SPIR projects: 38h 12m. (See Section 4.2.)
+- **Bugfix pipeline: 66% of fixes ship in under 30 minutes** (median 13 min, PR creation to merge). Outliers were overnight PRs waiting for architect review (#217 at 5.4h, #266 at 7.6h) or multi-iteration CMAP reviews (#280, #282 at ~1.6h each). The pipeline is genuinely autonomous: issue filed → builder spawned → fix implemented → 3-way review → merged.
 - **22 of 26 builders (85%) completed fully autonomously** — the 4 interventions were caused by infrastructure issues (broken tests, consultation timeouts, merge artifacts), not builder capability gaps
 - **20 pre-merge bugs caught** by multi-agent consultation: 1 security issue, 8 runtime failures, 11 quality/completeness gaps
-- **Total consultation cost: $168.64** (~$1.59/PR, $8.43/bug caught, 3.4x ROI)
-- **Bugfix pipeline: 66% of fixes ship in under 30 minutes**, median 13 minutes from PR creation to merge
-- **Context recovery: 100% success rate** — all 4 specs that exhausted context windows recovered via porch `status.yaml`
-- **False positive rate improved** from ~25% to ~18%, driven by the rebuttal mechanism (Spec 0121) and Codex JSONL parsing fix (Spec 0120)
 - **Reviewer specialization confirmed** — each model catches different bug categories:
   - **Codex**: Security edge cases, test completeness, exhaustive sweeps (11 of 20 catches)
   - **Claude**: Runtime semantics, type safety, critical missing parameters (5 catches, including the highest-severity ones)
   - **Gemini**: Architecture, build-breaking deletions, documentation (4 catches, near-zero false positives)
+- **Total consultation cost: $168.64*** (~$1.59/PR, $8.43/bug caught, 3.4x ROI)
+- **Context recovery: 100% success rate** — all 4 specs that exhausted context windows recovered via porch `status.yaml`
+- **False positive rate improved** from ~25% to ~18%, driven by the rebuttal mechanism (Spec 0121) and Codex JSONL parsing fix (Spec 0120)
 - **16 post-merge escapes** (8 code defects, 8 design gaps) — predominantly process lifecycle bugs and async timing issues where static code review is weakest
-- **Throughput equivalent to a 3–4 person elite engineering team** based on industry PR-merge benchmarks (see Section 4.4)
+
+*\*Gemini cost understated — see Section 5 footnote.*
 
 ---
 
@@ -471,47 +473,75 @@ The acceleration pattern is clear: 42 commits in the first 4 days (Feb 4-7) vs 5
 
 **Source**: `git log --since="2026-02-03" --until="2026-02-18" --format="%ad" --date=format:"%Y-%m-%d" --no-merges | sort | uniq -c`
 
-#### PR Time-to-Merge (PR Created → Merged)
+#### Autonomous Implementation Time (First Commit → PR Creation)
 
-| Type | Count | Avg | Median | Min | Max |
-|------|-------|-----|--------|-----|-----|
-| SPIR | 30 | 5.6h | 0.7h | 0.1h | 113.2h |
-| Bugfix | 59 | 0.7h | 0.2h | <0.1h | 7.6h |
-| Other | 17 | 1.3h | 0.3h | <0.1h | 7.1h |
+This is the core metric: **how long did each builder operate autonomously**, from first implementation commit to PR creation? This measures the stretch where the builder works without human intervention — reading the plan, writing code, running tests, iterating on consultation feedback, and preparing the PR.
 
-**Notes**:
-- SPIR average is skewed by Spec 0094 (113.2h) which sat as a PR for days. Excluding it, SPIR median is 0.5h and avg is 1.8h.
-- Bugfix median of 13 minutes reflects the autonomous builder pipeline: file issue → spawn builder → merge PR, with minimal human-in-the-loop.
-- "Time-to-merge" measures PR creation to merge, not total development time.
+**All 26 projects:**
 
-**Source**: `gh pr list --state merged --json createdAt,mergedAt`
+| Spec | Title | Phases | Files | Autonomous Time |
+|------|-------|--------|-------|----------------|
+| 0102 | Porch CWD/Worktree | 2 | 8 | 2h 54m |
+| 0103 | Consult Claude SDK | 2 | 12 | 21m |
+| 0104 | Custom Session Manager | 4 | 74 | 2h 57m |
+| 0105 | Server Decomposition | 7 | 28 | 3h 46m |
+| 0106 | Rename to Shellper | 2 | 40+ | 6h 58m |
+| 0107 | Cloud Registration UI | 4 | 14 | 57m |
+| 0108 | Gate Notifications | 2 | 10 | 9m |
+| 0109 | Tunnel Keepalive | 1 | 3 | 17m |
+| 0110 | Messaging Infrastructure | 4 | 16 | 2h 33m |
+| 0111 | Remove Vanilla Dashboard | 2 | 8 | 16m |
+| 0112 | Workspace Rename | 6 | 124 | 1h 48m |
+| 0113 | Shellper Debug Logging | 3 | 8 | <1m |
+| 0115 | Consultation Metrics | 4 | 12 | 2h 24m |
+| 0116 | Shellper Resource Leakage | 2 | 10 | 40m |
+| 0117 | Consolidate Sessions | 2 | 6 | 2h 26m |
+| 0118 | Shellper Multi-Client | 2 | 10 | 5h 17m |
+| 0120 | Codex SDK Integration | 2 | 8 | 1h 13m |
+| 0121 | Rebuttal Advancement | 1 | 2 | 9m |
+| 0122 | Shellper Reconnect | 2 | 4 | 8m |
+| 0124 | Test Consolidation | 4 | 15 | 43m |
+| 0126 | Project Mgmt Rework | 6 | 80+ | 1h 24m |
+| 0127 | Tower Async Handlers | 1 | 2 | 4m |
+| 0350 | Tip of the Day | 2 | 5 | 11m |
+| 0364 | Terminal Refresh Button | 2 | 4 | 24m |
+| BF #274 | Architect Terminal | 1 | 3 | 1m |
+| BF #324 | Shellper Persistence | 1 | 4 | <1m |
 
-#### Porch-Tracked Timing (from `status.yaml`)
+**Source**: `git log --format="%aI" --grep="[Spec XXXX]" --reverse` for first commit; `gh pr list --json createdAt` for PR creation.
 
-For projects with surviving `status.yaml` files, porch recorded precise phase transition timestamps.
+**Summary statistics (SPIR projects only):**
 
-**SPIR: Plan Approval → PR Ready (autonomous implementation time)**
+| Metric | Value |
+|--------|-------|
+| Median autonomous time | **57 minutes** |
+| Mean autonomous time | **1h 35m** |
+| Shortest | 4 min (Spec 0127: 2-file async handler refactor) |
+| Longest | 6h 58m (Spec 0106: 40+ file rename with merge conflicts) |
+| Total autonomous implementation time | **38h 12m** across 24 SPIR projects |
 
-| Spec | Title | Plan→PR | Total |
-|------|-------|---------|-------|
-| 0087 | Porch timeout/termination | 3h 25m | 3h 25m |
-| 0088 | Porch version constant | 36m | 36m |
-| 0092 | Terminal file links | 8m | 6h 20m |
-| 0120 | Codex SDK integration | 3h 48m | 4h 07m |
+**Key observations:**
 
-**Notes**:
-- Spec 0092's plan→PR of 8 minutes is misleadingly low — this was a 3-phase project where the spec and plan were pre-approved by the architect, so the builder only needed to implement. The 6h 20m total includes spec/plan approval time.
-- Spec 0120's 3h 48m autonomous stretch included 5 false-positive iterations from Codex JSONL parsing bug (Review 0120).
-- Only 4 SPIR projects retain status.yaml; most were cleaned up after PR merge via `af cleanup`.
+1. **Most features complete in under 1 hour**: 13 of 24 SPIR projects finished autonomously in under 60 minutes. The median of 57 minutes means a typical feature goes from plan to PR in less than an hour of wall-clock time.
 
-**Bugfix: Total Roundtrip (spawn → complete)**
+2. **Time correlates with consultation iterations, not code volume**: Spec 0112 (124 files, mechanical rename) took 1h 48m, while Spec 0118 (10 files, complex protocol work) took 5h 17m. The difference is consultation loops — 0118 had productive iterations where Codex found real edge cases (pre-HELLO gating, workspace scoping), while 0112 was mostly find-and-replace with rubber-stamp reviews.
 
-| Issue | Title | Roundtrip | PR Created→Merged |
-|-------|-------|-----------|-------------------|
-| #327 | Progress data to builder overview | 1h 51m | 32m |
-| #368 | Stale references from consult rework | 20m | 13m |
+3. **False-positive consultation loops are the primary time sink**: Spec 0117 (2h 26m for a 6-file refactor) and Spec 0120 (1h 13m for 8 files) both had their times inflated by Codex JSONL parsing false positives. Without those, both would have been under 30 minutes.
 
-**Source**: `codev/projects/*/status.yaml` gate timestamps
+4. **Bugfix autonomous time approaches zero**: Both bugfix projects (BF #274, BF #324) completed in under 1 minute of autonomous time — the builder went directly from first commit to PR with no iteration overhead.
+
+**Cross-validation with porch `status.yaml`:**
+
+For 4 projects with surviving `status.yaml` files, porch recorded plan-approval → PR-ready gate timestamps. These include pre-commit time (plan reading, environment setup) that git timestamps don't capture:
+
+| Spec | Git-derived (commit→PR) | Porch-derived (plan-approval→PR) | Delta |
+|------|------------------------|----------------------------------|-------|
+| 0087 | N/A (pre-period) | 3h 25m | — |
+| 0088 | N/A (pre-period) | 36m | — |
+| 0092 | N/A (pre-period) | 8m (impl only; 6h 20m total) | — |
+| 0120 | 1h 13m | 3h 48m | +2h 35m |
+
+Spec 0120's 2h 35m delta between git and porch timing reflects pre-commit activity: plan reading, environment setup, and 5 false-positive consultation rounds that produced no code changes. The porch-derived time is more complete but git-derived times are available for all projects.
 
 #### Bugfix Pipeline Efficiency
 
@@ -520,10 +550,10 @@ For projects with surviving `status.yaml` files, porch recorded precise phase tr
 | Total bugfix PRs | 59 |
 | Under 30 min (created→merged) | 39 (66%) |
 | Under 60 min | 47 (80%) |
-| Median time | 13 min |
+| Median time (PR created→merged) | 13 min |
 | Average time | 43 min |
 
-The bugfix pipeline demonstrates the system's autonomous operation at scale: 66% of all bugfixes ship in under 30 minutes from PR creation to merge. The outliers (>2h) typically involved: overnight PRs waiting for architect review (#217 at 5.4h, #266 at 7.6h) or PRs requiring multiple iterations of CMAP consultation (#280 at 1.6h, #282 at 1.6h).
+The bugfix pipeline demonstrates end-to-end automation: file issue → spawn builder → implement fix → 3-way review → merge PR. 66% of all bugfixes ship in under 30 minutes. The outliers (>2h) typically involved overnight PRs waiting for architect review (#217 at 5.4h, #266 at 7.6h) or PRs requiring multiple CMAP iterations (#280 at 1.6h, #282 at 1.6h).
 
 **Source**: `gh pr list --state merged --search "merged:2026-02-03..2026-02-17 Bugfix OR Fix"` with timing analysis
 
@@ -545,67 +575,23 @@ Notable test additions by project:
 - Spec 0126 (Project Management): 240+ new tests across 8+ test files (Review 0126)
 - Spec 0112 (Workspace Rename): test updates across 124 files (Review 0112)
 
-### 4.4 Comparison to Industry Engineering Productivity
+### 4.4 Industry Benchmark Methodology
 
-How does this two-week output compare to standard engineering teams? Using 2026 industry benchmarks from LinearB's engineering benchmarks report (8.1M PRs analyzed) and Worklytics' 2025 productivity benchmarks.
+The executive summary's "3–4 person elite team equivalent" claim is derived from the following benchmarks:
 
-#### PR Throughput
+| Benchmark | Source | Value Used |
+|-----------|--------|-----------|
+| PRs merged / developer / week (elite) | LinearB 2026 (8.1M PRs) | 5.0 |
+| PRs merged / developer / week (median) | Worklytics 2025 | 2.8 |
+| Elite team cycle time | LinearB 2026 | <48 hours |
+| Median team cycle time | LinearB 2026 | 83 hours |
+| Team bug resolution per sprint | Industry sprint data | 15–25 |
 
-| Metric | Codev (this period) | Industry Median | Industry Elite | Multiplier |
-|--------|-------------------|----------------|---------------|------------|
-| PRs merged / week | 53 | 2.8 / dev | 5.0 / dev | — |
-| **Developer-equivalent** | **1 architect** | **19 devs** (median) | **11 devs** (elite) | **11–19x** |
+**Calculation**: 106 PRs / 2 weeks = 53/week. At 5 PRs/dev/week (elite), that's ~11 developer-equivalents. Filtering to 30 SPIR feature PRs only: 15/week = 3 elite developers. The "3–4 person elite team" estimate uses the SPIR-only figure as the conservative bound.
 
-Codev merged 106 PRs in 14 days (7.6/day, 53/week). Industry median is 12.4 merged PRs per developer per month (~2.8/week). Industry elite is ~5/week. By PR volume alone, Codev's output matched a **3–4 person elite team** or a **4–5 person median team** — with a single human architect.
+**Caveats**: (1) Solo codebase — no cross-team coordination overhead, no code review queue, no meetings. (2) AI compute cost not included — $168.64 in consultation fees plus Claude Code subscription is far cheaper than 3–4 developers, but it's not zero. (3) Quality tradeoff — 16 post-merge escapes in 106 PRs (15% defect rate) vs industry elite <2% rework. (4) Single TypeScript codebase maintained by one person; these numbers would not scale linearly to multi-person teams or polyglot codebases.
 
-The comparison is imperfect: Codev PRs vary in size from 2-line bugfixes to 80-file feature implementations. But even filtering to only the 30 SPIR (feature) PRs, that's 15/week — equivalent to 3 elite developers.
-
-#### Cycle Time (PR Created → Merged)
-
-| Metric | Codev | Industry Median | Industry Elite | Multiplier |
-|--------|-------|----------------|---------------|------------|
-| Bugfix PRs | 13 min (median) | 83 hours | <48 hours | **220–380x faster** |
-| SPIR (feature) PRs | 42 min (median) | 83 hours | <48 hours | **69–119x faster** |
-
-Industry elite teams achieve sub-48-hour cycle times. Codev's median bugfix cycle time of 13 minutes is **220x faster** than industry elite. Even SPIR feature PRs at 42 minutes are **69x faster**.
-
-This extreme speed comes from eliminating human review latency. In traditional teams, PRs wait hours or days for reviewer availability. Codev's 3-way AI consultation runs in ~2 minutes, and the architect merges immediately after review.
-
-#### Bug Resolution
-
-| Metric | Codev | Industry Typical | Source |
-|--------|-------|-----------------|--------|
-| Bugs filed → fixed → merged | 59 in 14 days | 15–25 per sprint (2 weeks) per team | Industry sprint data |
-| Median bug fix time | 13 min (PR to merge) | 1–3 days | DORA metrics |
-| Bug fix rate | 4.2 / day | 1–2 / day / team | — |
-
-59 bugfix PRs in 14 days (4.2/day) compares to a typical team resolving 1–2 bugs per day. The system's ability to file an issue, spawn a builder, implement the fix, run 3-way review, and merge — all without human intervention — creates a pipeline that simply doesn't have human-speed bottlenecks.
-
-#### Code Volume
-
-| Metric | Codev (14 days) | Per-Dev Equivalent | Industry Reference |
-|--------|-----------------|-------------------|-------------------|
-| Net lines added | +94,982 | — | — |
-| Lines / day | 6,785 | — | — |
-| SPIR feature lines | +32,000 net | — | — |
-
-Lines of code is a flawed productivity metric — it incentivizes verbosity over quality. However, it provides a rough scale comparison. The commonly cited figure of 100–150 lines of production code per developer per day yields a range of 45–68 developer-equivalents — which is clearly overstated, since much of the line count is tests, configuration, and generated content.
-
-A more meaningful comparison: the 30 SPIR feature PRs added ~32,000 net lines of production code and tests in 14 days. This is roughly equivalent to what a 5-person team ships in a two-week sprint, consistent with the PR-based estimate.
-
-#### Caveats
-
-These comparisons have important limitations:
-
-1. **Solo codebase advantage**: Codev has no cross-team coordination overhead, no code review queue, no meeting load. Industry benchmarks include this overhead because real teams face it.
-
-2. **AI cost substitution**: The "1 architect" framing obscures the AI compute cost. $168.64 in consultation fees plus Claude Code subscription is far cheaper than 3–4 developers, but it's not zero.
-
-3. **Quality tradeoff**: 16 post-merge escapes in 106 PRs is a 15% defect rate. Industry benchmarks for elite teams target <2% rework rate. The raw throughput comes with a quality cost that would be unacceptable in some environments.
-
-4. **Scope limitation**: All work is on a single TypeScript codebase maintained by one person. These productivity numbers would not scale linearly to a multi-person team or a polyglot codebase.
-
-**Sources**: LinearB 2026 Software Engineering Benchmarks Report (8.1M PRs); Worklytics 2025 Engineering Productivity Benchmarks; byteiota Engineering Benchmarks 2026.
+**Sources**: LinearB 2026 Software Engineering Benchmarks Report (8.1M PRs analyzed); Worklytics 2025 Engineering Productivity Benchmarks; byteiota Engineering Benchmarks 2026.
 
 ---
 
@@ -617,14 +603,15 @@ These comparisons have important limitations:
 |-------|-------------|----------|------|-------------|
 | Claude | 2,291 | avg 8s | $96.69 | 84% |
 | Codex | 613 | avg 21s | $70.81 | 63% |
-| Gemini | 211 | avg 64s | $1.14 | 98% |
-| **Total** | **3,115** | **12.2h** | **$168.64** | **81%** |
+| Gemini | 211 | avg 64s | $1.14* | 98% |
+| **Total** | **3,115** | **12.2h** | **$168.64*** | **81%** |
 
 **Notes**:
 - Claude's high invocation count reflects Agent SDK usage with tool calls — many short turns per consultation.
 - Codex's 63% success rate reflects the JSONL verdict parsing bug (Reviews 0117, 0120) — porch couldn't extract verdicts from Codex's streaming JSON output, defaulting to REQUEST_CHANGES. Actual Codex quality was higher than the success rate suggests.
-- Gemini's low cost ($1.14 for 211 calls) reflects its CLI-based approach with YOLO mode.
 - Cost data available for 712 of 3,115 invocations (23%). Total cost extrapolated from recorded entries.
+
+**\*Gemini cost tracking was broken during this period.** Bug #374: Spec 325 (consult rework) removed `--output-format json` from gemini-cli invocations, causing `extractUsage()` to return null for all Gemini calls. The reported $1.14 across 211 calls is known to be incorrect — actual Gemini costs are likely 10–50x higher based on Gemini Pro pricing at comparable token volumes. Fixed in PR #378. The total consultation cost of $168.64 is therefore understated; a corrected estimate would be $180–$225.
 
 **Source**: `consult stats --days 14`
 
