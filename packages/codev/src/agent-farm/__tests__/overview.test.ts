@@ -513,24 +513,24 @@ describe('overview', () => {
   // ==========================================================================
 
   describe('extractProjectIdFromWorktreeName', () => {
-    it('extracts zero-padded ID from SPIR worktree', () => {
-      expect(extractProjectIdFromWorktreeName('spir-126-slug')).toBe('0126');
+    it('extracts unpadded ID from SPIR worktree', () => {
+      expect(extractProjectIdFromWorktreeName('spir-126-slug')).toBe('126');
     });
 
-    it('zero-pads short SPIR numbers', () => {
-      expect(extractProjectIdFromWorktreeName('spir-1-feature')).toBe('0001');
+    it('returns unpadded short SPIR numbers', () => {
+      expect(extractProjectIdFromWorktreeName('spir-1-feature')).toBe('1');
     });
 
     it('preserves 4+ digit SPIR numbers', () => {
       expect(extractProjectIdFromWorktreeName('spir-9999-big')).toBe('9999');
     });
 
-    it('extracts zero-padded ID from TICK worktree', () => {
-      expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('0130');
+    it('extracts unpadded ID from TICK worktree', () => {
+      expect(extractProjectIdFromWorktreeName('tick-130-slug')).toBe('130');
     });
 
-    it('extracts builder-bugfix-N from bugfix worktree', () => {
-      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('builder-bugfix-296');
+    it('extracts bugfix-N from bugfix worktree', () => {
+      expect(extractProjectIdFromWorktreeName('bugfix-296-slug')).toBe('bugfix-296');
     });
 
     it('extracts legacy numeric ID', () => {
@@ -734,8 +734,8 @@ describe('overview', () => {
       expect(builders[0].mode).toBe('strict');
     });
 
-    it('discovers bugfix builder matching builder-bugfix-N project dir', () => {
-      // Bugfix worktree with matching project dir (as created by af spawn)
+    it('discovers bugfix builder matching bugfix-N project dir', () => {
+      // Bugfix worktree with matching project dir (current porch naming)
       const builderDir = path.join(tmpDir, '.builders', 'bugfix-326-fix-discover');
       const projectsBase = path.join(builderDir, 'codev', 'projects');
 
@@ -749,10 +749,10 @@ describe('overview', () => {
       ].join('\n'));
 
       // The bugfix's own project dir (created by porch init via af spawn)
-      const bugfixDir = path.join(projectsBase, 'builder-bugfix-326-fix-discover');
+      const bugfixDir = path.join(projectsBase, 'bugfix-326-fix-discover');
       fs.mkdirSync(bugfixDir, { recursive: true });
       fs.writeFileSync(path.join(bugfixDir, 'status.yaml'), [
-        'id: builder-bugfix-326',
+        'id: bugfix-326',
         'title: fix-discover',
         'protocol: bugfix',
         'phase: investigate',
@@ -760,7 +760,7 @@ describe('overview', () => {
 
       const builders = discoverBuilders(tmpDir);
       expect(builders).toHaveLength(1);
-      expect(builders[0].id).toBe('builder-bugfix-326');
+      expect(builders[0].id).toBe('bugfix-326');
       expect(builders[0].issueNumber).toBe(326);
       expect(builders[0].mode).toBe('strict');
     });
@@ -1207,7 +1207,7 @@ describe('overview', () => {
         'title: some-fix',
         'protocol: bugfix',
         'phase: fix',
-      ].join('\n'), 'builder-bugfix-400-some-fix');
+      ].join('\n'), 'bugfix-400-some-fix');
 
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue(null);
