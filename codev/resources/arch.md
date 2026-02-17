@@ -76,7 +76,7 @@ tail -f ~/.agent-farm/tower.log
 | **TICK** | Amendment protocol for extending existing SPIR specs |
 | **MAINTAIN** | Codebase hygiene and documentation synchronization protocol |
 | **Worktree** | Git worktree providing isolated environment for a builder |
-| **node-pty** | Native PTY session manager replacing ttyd, multiplexed over WebSocket |
+| **node-pty** | Native PTY session manager, multiplexed over WebSocket |
 | **Shellper** | Detached Node.js process owning a PTY for session persistence across Tower restarts (Spec 0104) |
 | **SessionManager** | Tower-side orchestrator for shellper process lifecycle (spawn, reconnect, kill, auto-restart) |
 | **Skeleton** | Template files (`codev-skeleton/`) copied to projects on init/adopt |
@@ -183,7 +183,7 @@ Given a base port (e.g., 4200), ports are allocated from starting offsets:
 | +0 | 4200 | Dashboard HTTP + WebSocket server (all terminals multiplexed) |
 | +50+ | 4250+ | Annotation viewers (start offset) |
 
-**Note**: As of Spec 0085, all terminal connections are multiplexed over WebSocket at the single dashboard port (4200) using URL path namespaces `/ws/terminal/<id>`. Individual per-terminal ports (ttyd) are no longer used. Annotation viewers still use separate ports.
+**Note**: All terminal connections are multiplexed over WebSocket at the single dashboard port (4200) using URL path namespaces `/ws/terminal/<id>`. Annotation viewers still use separate ports.
 
 #### Global Registry (`~/.agent-farm/global.db`)
 
@@ -1086,9 +1086,7 @@ codev/                                  # Project root (git repository)
 │   │   │   ├── adopt.ts                # codev adopt
 │   │   │   ├── doctor.ts               # codev doctor
 │   │   │   ├── update.ts               # codev update
-│   │   │   ├── eject.ts                # codev eject
-│   │   │   ├── tower.ts                # codev tower
-│   │   │   ├── generate-image.ts       # codev generate-image (v1.5.0+)
+│   │   │   ├── generate-image.ts       # codev generate-image
 │   │   │   └── consult/                # consult command
 │   │   │       └── index.ts            # Multi-agent consultation
 │   │   ├── agent-farm/                 # af subcommands
@@ -1382,7 +1380,7 @@ af start --architect-cmd "claude --model opus"
 af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
-#### Configuration (`codev/config.json`)
+#### Configuration (`af-config.json`)
 
 ```json
 {
@@ -1970,10 +1968,10 @@ try {
 
 **Precedence** (highest to lowest):
 1. CLI arguments (`--port`, `--architect-cmd`, etc.)
-2. Config file (`codev/config.json`)
+2. Config file (`af-config.json`)
 3. Embedded defaults in code
 
-**Config file location**: `codev/config.json` (project-level, not user-level)
+**Config file location**: `af-config.json` (project root, project-level)
 
 ### State Persistence
 
