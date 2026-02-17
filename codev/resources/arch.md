@@ -986,7 +986,7 @@ const CONFIG = {
 - **Markdown**: Documentation format for specs, plans, reviews, and agent definitions
 - **Git**: Version control with worktree support for isolated builder environments
 - **YAML**: Configuration format for protocol manifests
-- **JSON**: Configuration format for agent-farm (`config.json`) and state management
+- **JSON**: Configuration format for agent-farm (`af-config.json` at project root) and state management
 
 ### Agent-Farm CLI (TypeScript)
 - **commander.js**: CLI argument parsing and command structure
@@ -1035,8 +1035,7 @@ This is where the Codev project uses Codev to develop itself:
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
   - `templates/` - HTML templates for Agent Farm (`af`) dashboard and annotation viewer
-  - `config.json` - Shell command configuration for agent-farm
-  - `bin/agent-farm` - Thin wrapper script to invoke TypeScript CLI
+  - Note: Shell command configuration is in `af-config.json` at the project root
 
 **Example**: `codev/specs/0001-test-infrastructure.md` documents the test infrastructure feature we built for Codev.
 
@@ -1052,8 +1051,7 @@ This is what gets distributed to users when they install Codev:
   - `agents/` - Agent definitions (copied during installation)
   - `roles/` - Role definitions for architect and builder
   - `templates/` - HTML templates for Agent Farm (`af`) dashboard UI
-  - `config.json` - Default shell command configuration
-  - `bin/agent-farm` - Thin wrapper script
+  - Note: Shell command configuration is in `af-config.json` at the project root
 
 **Key Distinction**: `codev-skeleton/` provides templates for other projects to use when they install Codev. Our own `codev/` directory has nearly identical structure but contains our actual specs, plans, and reviews. The skeleton's empty placeholder directories become populated with real content in each project that adopts Codev.
 
@@ -1132,17 +1130,13 @@ codev/                                  # Project root (git repository)
 │   ├── dist/                           # Compiled JavaScript
 │   ├── package.json                    # npm package config
 │   └── tsconfig.json                   # TypeScript configuration
+├── af-config.json                      # Shell command configuration (project root)
 ├── codev/                              # Our self-hosted instance
-│   ├── bin/                            # CLI wrapper scripts
-│   │   └── agent-farm                  # Thin wrapper → node agent-farm/dist/index.js
-│   ├── config.json                     # Shell command configuration
 │   ├── roles/                          # Role definitions
 │   │   ├── architect.md                # Architect role and commands
 │   │   └── builder.md                  # Builder role and status lifecycle
-│   ├── templates/                      # HTML templates
-│   │   ├── dashboard.html              # Basic dashboard
-│   │   ├── dashboard-split.html        # Split-pane tabbed dashboard
-│   │   └── annotate.html               # File annotation viewer
+│   ├── templates/                      # Document templates
+│   │   └── pr-overview.md              # PR description template
 │   ├── protocols/                      # Working copies for development
 │   │   ├── spir/                       # Multi-phase with consultation
 │   │   │   ├── protocol.md
@@ -1159,16 +1153,10 @@ codev/                                  # Project root (git repository)
 │   │   └── llms.txt                    # LLM-friendly documentation
 │   └── projects/                       # Active project state (managed by porch)
 ├── codev-skeleton/                     # Template for distribution
-│   ├── bin/                            # CLI wrapper
-│   │   └── agent-farm                  # Thin wrapper script
-│   ├── config.json                     # Default configuration
 │   ├── roles/                          # Role definitions
 │   │   ├── architect.md
 │   │   └── builder.md
-│   ├── templates/                      # HTML templates
-│   │   ├── dashboard.html
-│   │   ├── dashboard-split.html
-│   │   └── annotate.html
+│   ├── templates/                      # Document templates (CLAUDE.md, arch.md, etc.)
 │   ├── protocols/                      # Protocol definitions
 │   │   ├── spir/
 │   │   ├── tick/
@@ -1331,8 +1319,8 @@ codev import https://github.com/owner/repo
 # af command is installed globally via: npm install -g @cluesmith/codev
 
 # Starting/stopping
-af start                      # Start architect dashboard
-af stop                       # Stop all agent-farm processes
+af dash start                 # Start architect dashboard
+af dash stop                  # Stop all agent-farm processes
 
 # Managing builders
 af spawn 3 --protocol spir              # Spawn builder (strict mode, default)
@@ -1363,7 +1351,7 @@ af architect "initial prompt" # With initial prompt
 
 # Remote access (v1.5.2+)
 af tunnel                     # Show SSH command for remote access
-af start --remote user@host   # Start on remote machine with tunnel
+af dash start --remote user@host  # Start on remote machine with tunnel
 
 # Port management (multi-project support)
 af ports list                 # List port allocations
@@ -1376,7 +1364,7 @@ af db reset                   # Reset state database
 af db stats                   # Show database statistics
 
 # Command overrides
-af start --architect-cmd "claude --model opus"
+af dash start --architect-cmd "claude --model opus"
 af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 ```
 
@@ -1398,7 +1386,7 @@ af spawn 3 --protocol spir --builder-cmd "claude --model sonnet"
 }
 ```
 
-**Configuration Hierarchy**: CLI args > config.json > Defaults
+**Configuration Hierarchy**: CLI args > af-config.json > Defaults
 
 **Features**:
 - Commands can be strings OR arrays (arrays avoid shell-escaping issues)
@@ -1885,14 +1873,14 @@ base+50-69: Annotation viewers (20 slots)
 base+70-99: Reserved for future use
 ```
 
-### 14. config.json for Shell Command Customization
-**Decision**: Replace bash wrapper customization with JSON configuration file
+### 14. af-config.json for Shell Command Customization
+**Decision**: Replace bash wrapper customization with JSON configuration file at project root
 
 **Rationale**:
 - **Declarative configuration** - Easy to understand and modify
 - **Array-form commands** - Avoids shell escaping issues
 - **Environment variable expansion** - `${VAR}` syntax for secrets
-- **Configuration hierarchy** - CLI args > config.json > defaults
+- **Configuration hierarchy** - CLI args > af-config.json > defaults
 - **Early validation** - Fail fast if commands or directories invalid
 
 ### 15. Clean Slate with Safety Checks
