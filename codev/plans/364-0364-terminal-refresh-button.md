@@ -72,9 +72,7 @@ Scroll-to-bottom click handler:
 
 Both buttons use `onPointerDown` with `e.preventDefault()` and `tabIndex={-1}` (matching VirtualKeyboard.tsx pattern).
 
-**Render location**: Inside the terminal container div (the one with `containerRef`). Since xterm opens directly into the containerRef div, the TerminalControls must be rendered as a **sibling** — wrap the existing containerRef div and TerminalControls inside a new wrapper div, or render TerminalControls as a portal/overlay. The simplest approach: add a wrapper div with `position: relative` around the containerRef div. TerminalControls is `position: absolute; top: 8px; right: 8px; z-index: 10`.
-
-Actually, looking at the code more carefully: the containerRef div IS where xterm opens. We need to place the controls inside a **parent wrapper** that has `position: relative`, with both the terminal container and the controls as children.
+**Render location**: The existing outer `<div>` in Terminal.tsx's JSX return (the one with `display: flex; flexDirection: column`) already wraps the `containerRef` div. Add `position: relative` to this existing outer div. Then render `<TerminalControls>` as a sibling of the `containerRef` div inside it, with `position: absolute; top: 8px; right: 20px; z-index: 10`. The `right: 20px` accounts for the xterm virtual scrollbar width (~14px) to prevent overlap. No new wrapper div needed.
 
 **Files to modify**:
 - `packages/codev/dashboard/src/components/Terminal.tsx`
@@ -131,7 +129,7 @@ Revert the single commit — no backend changes, no data migration.
 
 **Files to modify**:
 - `packages/codev/dashboard/src/index.css`
-- `packages/codev/tests/e2e/` (new or existing test file)
+- `packages/codev/src/agent-farm/__tests__/e2e/` (add to existing terminal test file or create new)
 
 #### Acceptance Criteria
 - [ ] Buttons are semi-transparent (opacity ~0.4) and brighten on hover
