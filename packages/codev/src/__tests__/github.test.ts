@@ -82,7 +82,7 @@ describe('parseLinkedIssue', () => {
 
 describe('parseLabelDefaults', () => {
   it('returns defaults for empty labels', () => {
-    expect(parseLabelDefaults([])).toEqual({ type: 'feature', priority: 'medium' });
+    expect(parseLabelDefaults([])).toEqual({ type: 'issue', priority: 'medium' });
   });
 
   it('extracts type:bug label', () => {
@@ -94,7 +94,7 @@ describe('parseLabelDefaults', () => {
 
   it('extracts priority:high label', () => {
     expect(parseLabelDefaults([{ name: 'priority:high' }])).toEqual({
-      type: 'feature',
+      type: 'issue',
       priority: 'high',
     });
   });
@@ -125,7 +125,7 @@ describe('parseLabelDefaults', () => {
     expect(parseLabelDefaults([
       { name: 'priority:medium' },
       { name: 'priority:high' },
-    ])).toEqual({ type: 'feature', priority: 'high' });
+    ])).toEqual({ type: 'issue', priority: 'high' });
   });
 
   it('matches bare "bug" label when no type: prefix exists', () => {
@@ -153,6 +153,6 @@ describe('parseLabelDefaults', () => {
     expect(parseLabelDefaults([
       { name: 'help-wanted' },
       { name: 'good-first-issue' },
-    ])).toEqual({ type: 'feature', priority: 'medium' });
+    ])).toEqual({ type: 'issue', priority: 'medium' });
   });
 });

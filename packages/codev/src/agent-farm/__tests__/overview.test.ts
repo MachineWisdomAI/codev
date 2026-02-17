@@ -905,11 +905,11 @@ describe('overview', () => {
       expect(backlog[0].priority).toBe('high');
     });
 
-    it('defaults to feature/medium when labels are missing', () => {
+    it('defaults to issue/medium when labels are missing', () => {
       const issues = [issueItem(80, 'No labels')];
 
       const backlog = deriveBacklog(issues, tmpDir, new Set(), new Set());
-      expect(backlog[0].type).toBe('feature');
+      expect(backlog[0].type).toBe('issue');
       expect(backlog[0].priority).toBe('medium');
     });
 

@@ -186,7 +186,7 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
  * Extract type and priority from GitHub issue labels.
  *
  * Defaults:
- * - No type:* label → "feature"
+ * - No type:* label → "issue"
  * - No priority:* label → "medium"
  * - Multiple labels of same kind → first alphabetical
  */
@@ -216,7 +216,7 @@ export function parseLabelDefaults(labels: Array<{ name: string }>): {
     .sort();
 
   return {
-    type: typeLabels[0] || 'feature',
+    type: typeLabels[0] || 'issue',
     priority: priorityLabels[0] || 'medium',
   };
 }
