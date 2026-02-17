@@ -36,7 +36,7 @@ export interface CronDeps {
   log: (level: 'INFO' | 'ERROR' | 'WARN', message: string) => void;
   getKnownWorkspacePaths: () => string[];
   resolveTarget: (target: string, fallbackWorkspace?: string) => unknown;
-  getTerminalManager: () => { getSession: (id: string) => { write: (data: string) => void } | null };
+  getTerminalManager: () => { getSession: (id: string) => { write: (data: string) => void } | undefined };
 }
 
 // ============================================================================
