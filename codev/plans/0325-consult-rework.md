@@ -75,10 +75,12 @@ Four phases: (1) migrate prompt templates into protocol directories and update p
 **Modify (protocol.json verify.type values):**
 - `codev/protocols/spir/protocol.json` — specify: `spec-review` → `spec`, plan: `plan-review` → `plan`, implement: `impl-review` → `impl`, review: `pr-ready` → `pr`
 - `codev/protocols/bugfix/protocol.json` — `impl-review` → `impl`
-- `codev/protocols/maintain/protocol.json` — `impl-review` → `impl`
+- `codev/protocols/maintain/protocol.json` — `impl-review` → `impl`, verify phase: `pr-ready` → `pr`
 - `codev-skeleton/protocols/spir/protocol.json` — same changes as above
 - `codev-skeleton/protocols/bugfix/protocol.json` — same
 - `codev-skeleton/protocols/maintain/protocol.json` — same
+
+**Note on tick:** The tick protocol has no `protocol.json` — only `protocol.md` and templates. No verify.type updates needed for tick. Consult-types files are still created for tick so `consult -m X --protocol tick --type spec` works when users run reviews manually.
 
 **Modify (protocol-schema.json):**
 - `codev-skeleton/protocols/protocol-schema.json` — update `verify.type` enum to match new values
@@ -123,6 +125,11 @@ Four phases: (1) migrate prompt templates into protocol directories and update p
 - `--prompt` + `--prompt-file` together → error
 - `--protocol` without `--type` → error
 - `--protocol` and `--type` validated with `isValidRoleName()` pattern (alphanumeric + hyphens only)
+
+**Silent flag handling in general mode:**
+- `--issue` — silently ignored (no effect in general mode)
+- `--context`, `--plan-phase`, `--output`, `--project-id` — silently ignored (porch-only flags have no effect in general mode)
+- `consult stats -m <model>` — `-m` ignored (stats mode doesn't invoke a model; current behavior preserved)
 
 **Context resolution (protocol mode):**
 
@@ -279,7 +286,7 @@ Key changes:
 | Missing prompt templates cause runtime errors | Low | High | Phase 1 copies all files before Phase 2 removes old resolution |
 
 ## Validation Checkpoints
-1. **After Phase 1**: All protocol directories have consult-types/, old shared files removed, protocol.json updated. Build succeeds.
-2. **After Phase 2**: `consult -m gemini --prompt "test"` and `consult -m codex --protocol spir --type spec` work. Build succeeds.
-3. **After Phase 3**: Full porch → consult pipeline works. `porch next` generates valid commands.
+1. **After Phase 1**: All protocol directories have consult-types/, old shared files removed, protocol.json updated. `npm run build` succeeds.
+2. **After Phase 2**: `consult -m gemini --prompt "test"` and `consult -m codex --protocol spir --type spec` work. `npm run build` and `npm test` pass.
+3. **After Phase 3**: Full porch → consult pipeline works. `porch next` generates valid commands. `npm run build` and `npm test` pass.
 4. **After Phase 4**: Documentation is consistent with implementation.
