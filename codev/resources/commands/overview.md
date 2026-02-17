@@ -24,7 +24,7 @@ codev doctor
 af dash start
 
 # Consult an AI model about a spec
-consult -m gemini spec 42
+consult -m gemini --protocol spir --type spec
 ```
 
 ## Installation
@@ -67,12 +67,11 @@ See [agent-farm.md](agent-farm.md) for full documentation.
 
 ### consult - AI Consultation
 
-| Subcommand | Description |
-|------------|-------------|
-| `consult pr <num>` | Review a pull request |
-| `consult spec <num>` | Review a specification |
-| `consult plan <num>` | Review an implementation plan |
-| `consult general "<query>"` | General consultation |
+| Command | Description |
+|---------|-------------|
+| `consult -m <model> --prompt "text"` | General consultation |
+| `consult -m <model> --protocol spir --type spec` | Protocol-based review |
+| `consult stats` | View consultation statistics |
 
 See [consult.md](consult.md) for full documentation.
 
