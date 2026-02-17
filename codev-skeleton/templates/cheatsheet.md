@@ -104,7 +104,7 @@ Project management commands. Typically used by **humans** to set up and maintain
 | `codev doctor` | Check dependencies and configuration |
 | `codev update` | Update Codev framework |
 | `codev import` | Import specs from another project |
-| `codev tower` | Cross-project dashboard |
+| `af tower start` | Cross-project dashboard |
 
 ### agent-farm (af)
 
@@ -114,7 +114,7 @@ Architect-Builder orchestration. Used by both **humans and agents**—agents use
 |---------|-------------|
 | `af dash start` | Start dashboard (port 4200, 4300, etc.) |
 | `af dash stop` | Stop all processes |
-| `af spawn -p <id>` | Spawn a builder for project |
+| `af spawn <id> --protocol spir` | Spawn a builder for project |
 | `af status` | Check status of all builders |
 | `af send <target> <msg>` | Send message (builder↔architect) |
 | `af cleanup -p <id>` | Clean up a builder worktree |
@@ -166,9 +166,9 @@ Multi-agent consultation. Used by both humans and agents—**mostly agents** dur
 
 ```bash
 # Run 3-way review in parallel
-consult --model gemini pr <id> &
-consult --model codex pr <id> &
-consult --model claude pr <id> &
+consult -m gemini --protocol spir --type pr &
+consult -m codex --protocol spir --type pr &
+consult -m claude --protocol spir --type pr &
 wait
 ```
 
