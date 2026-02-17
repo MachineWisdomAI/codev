@@ -50,7 +50,8 @@ import {
   stopInstance,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
-import { getAllTasks, executeTask, getTaskId, loadWorkspaceTasks } from './tower-cron.js';
+import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
+import { getGlobalDb } from '../db/index.js';
 import type { CronTask } from './tower-cron.js';
 import {
   getWorkspaceTerminals,
@@ -2010,8 +2011,6 @@ function handleWorkspaceAnnotate(
 // Cron route handlers (Spec 399)
 // ============================================================================
 
-import { getGlobalDb } from '../db/index.js';
-
 function handleCronList(res: http.ServerResponse, url: URL): void {
   const workspaceFilter = url.searchParams.get('workspace') || undefined;
 
@@ -2034,7 +2033,7 @@ function handleCronList(res: http.ServerResponse, url: URL): void {
       enabled: row ? row.enabled === 1 : task.enabled,
       last_run: row?.last_run ?? null,
       last_result: row?.last_result ?? null,
-      workspace: task.workspacePath,
+      workspacePath: task.workspacePath,
     };
   });
 
@@ -2129,7 +2128,7 @@ function handleCronTaskStatus(res: http.ServerResponse, task: CronTask): void {
     last_run: row?.last_run ?? null,
     last_result: row?.last_result ?? null,
     last_output: row?.last_output ?? null,
-    workspace: task.workspacePath,
+    workspacePath: task.workspacePath,
     target: task.target,
     timeout: task.timeout,
   }));

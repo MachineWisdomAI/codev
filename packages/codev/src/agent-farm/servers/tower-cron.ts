@@ -377,20 +377,18 @@ function updateTaskState(
 }
 
 function isTaskEnabled(task: CronTask): boolean {
-  // Check YAML-level enabled flag first
-  if (!task.enabled) return false;
-
-  // Check DB-level enabled override
+  // DB-level override takes precedence when a row exists
   try {
     const db = getGlobalDb();
     const taskId = getTaskId(task.workspacePath, task.name);
     const row = db.prepare('SELECT enabled FROM cron_tasks WHERE id = ?').get(taskId) as
       | { enabled: number }
       | undefined;
-    if (row && row.enabled === 0) return false;
+    if (row) return row.enabled === 1;
   } catch {
-    // DB not available — treat as enabled
+    // DB not available — fall through to YAML
   }
 
-  return true;
+  // No DB row — use YAML-level enabled flag
+  return task.enabled;
 }

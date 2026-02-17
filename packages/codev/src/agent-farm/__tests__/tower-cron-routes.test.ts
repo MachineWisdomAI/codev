@@ -199,6 +199,7 @@ describe('GET /api/cron/tasks', () => {
     const body = JSON.parse(res._body);
     expect(body).toHaveLength(1);
     expect(body[0].name).toBe('CI Check');
+    expect(body[0].workspacePath).toBe('/ws');
     expect(body[0].last_run).toBe(1000);
     expect(body[0].last_result).toBe('success');
   });
