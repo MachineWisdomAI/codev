@@ -14,6 +14,51 @@ import type { ProjectState, Protocol, PlanPhase } from './types.js';
 export const PROJECTS_DIR = 'codev/projects';
 
 // ============================================================================
+// ID / Name Utilities
+// ============================================================================
+
+/**
+ * Strip the project ID prefix from a title string.
+ * Handles zero-padded IDs: stripIdPrefix('0364-terminal-refresh', '364') → 'terminal-refresh'
+ */
+export function stripIdPrefix(title: string, projectId: string): string {
+  const normalizedId = projectId.replace(/^0+/, '') || '0';
+  return title.replace(new RegExp(`^0*${normalizedId}-`), '');
+}
+
+/**
+ * Resolve the canonical artifact base name (e.g. "0364-terminal-refresh-button")
+ * by looking up the actual spec file on disk. Falls back to `${projectId}-${cleanTitle}`.
+ *
+ * This prevents doubled IDs like "364-0364-name" when state.id is unpadded
+ * but spec files use zero-padded IDs.
+ */
+export function resolveArtifactBaseName(workspaceRoot: string, projectId: string, title: string): string {
+  const isNumericId = /^\d+$/.test(projectId);
+  if (isNumericId) {
+    const specsDir = path.join(workspaceRoot, 'codev', 'specs');
+    if (fs.existsSync(specsDir)) {
+      const normalizedId = projectId.replace(/^0+/, '') || '0';
+      try {
+        const files = fs.readdirSync(specsDir);
+        const specFile = files.find(f => {
+          if (!f.endsWith('.md')) return false;
+          const numMatch = f.match(/^(\d+)/);
+          if (!numMatch) return false;
+          return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+        });
+        if (specFile) {
+          return specFile.replace(/\.md$/, '');
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  // Fallback: strip any existing ID prefix from title, then prepend projectId
+  const cleanTitle = stripIdPrefix(title, projectId);
+  return `${projectId}-${cleanTitle}`;
+}
+
+// ============================================================================
 // Path Utilities
 // ============================================================================
 
@@ -21,7 +66,7 @@ export const PROJECTS_DIR = 'codev/projects';
  * Get the project directory path
  */
 export function getProjectDir(workspaceRoot: string, projectId: string, name: string): string {
-  return path.join(workspaceRoot, PROJECTS_DIR, `${projectId}-${name}`);
+  return path.join(workspaceRoot, PROJECTS_DIR, `${projectId}-${stripIdPrefix(name, projectId)}`);
 }
 
 /**

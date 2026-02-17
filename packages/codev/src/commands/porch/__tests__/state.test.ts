@@ -16,6 +16,8 @@ import {
   resolveProjectId,
   getProjectDir,
   getStatusPath,
+  stripIdPrefix,
+  resolveArtifactBaseName,
   PROJECTS_DIR,
 } from '../state.js';
 import type { ProjectState, Protocol } from '../types.js';
@@ -395,6 +397,84 @@ updated_at: "${state.updated_at}"
       // Task worktrees return null from CWD detection, and empty root has no projects
       expect(() => resolveProjectId(undefined, '/repo/.builders/task-aB2C', emptyProjectRoot))
         .toThrow('Cannot determine project ID');
+    });
+  });
+
+  // ==========================================================================
+  // Bugfix #365: Doubled project ID regression tests
+  // ==========================================================================
+
+  describe('stripIdPrefix', () => {
+    it('should strip zero-padded ID prefix from title', () => {
+      expect(stripIdPrefix('0364-terminal-refresh-button', '364')).toBe('terminal-refresh-button');
+    });
+
+    it('should strip matching unpadded ID prefix', () => {
+      expect(stripIdPrefix('364-terminal-refresh-button', '364')).toBe('terminal-refresh-button');
+    });
+
+    it('should return title unchanged if no ID prefix present', () => {
+      expect(stripIdPrefix('terminal-refresh-button', '364')).toBe('terminal-refresh-button');
+    });
+
+    it('should handle bugfix IDs (non-numeric) gracefully', () => {
+      // Non-numeric IDs: the regex normalizes by stripping leading zeros
+      // "bugfix-42" doesn't start with digits, so the regex won't match
+      expect(stripIdPrefix('fix-login-bug', 'bugfix-42')).toBe('fix-login-bug');
+    });
+  });
+
+  describe('resolveArtifactBaseName', () => {
+    let artifactTestDir: string;
+
+    beforeEach(() => {
+      artifactTestDir = fs.mkdtempSync(path.join(tmpdir(), 'artifact-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(artifactTestDir, { recursive: true, force: true });
+    });
+
+    it('should resolve from spec file with zero-padded ID', () => {
+      const specsDir = path.join(artifactTestDir, 'codev', 'specs');
+      fs.mkdirSync(specsDir, { recursive: true });
+      fs.writeFileSync(path.join(specsDir, '0364-terminal-refresh-button.md'), '# Spec');
+
+      expect(resolveArtifactBaseName(artifactTestDir, '364', '0364-terminal-refresh-button'))
+        .toBe('0364-terminal-refresh-button');
+    });
+
+    it('should prevent doubled ID (the #365 bug)', () => {
+      const specsDir = path.join(artifactTestDir, 'codev', 'specs');
+      fs.mkdirSync(specsDir, { recursive: true });
+      fs.writeFileSync(path.join(specsDir, '0364-terminal-refresh-button.md'), '# Spec');
+
+      // Without the fix, this would produce "364-0364-terminal-refresh-button"
+      const result = resolveArtifactBaseName(artifactTestDir, '364', '0364-terminal-refresh-button');
+      expect(result).not.toContain('364-0364');
+      expect(result).toBe('0364-terminal-refresh-button');
+    });
+
+    it('should fall back to id-cleanTitle when no spec file exists', () => {
+      expect(resolveArtifactBaseName(artifactTestDir, '364', 'terminal-refresh-button'))
+        .toBe('364-terminal-refresh-button');
+    });
+
+    it('should handle bugfix IDs (non-numeric)', () => {
+      expect(resolveArtifactBaseName(artifactTestDir, 'bugfix-42', 'fix-login-bug'))
+        .toBe('bugfix-42-fix-login-bug');
+    });
+  });
+
+  describe('getProjectDir (bugfix #365 regression)', () => {
+    it('should not double the ID prefix', () => {
+      const dir = getProjectDir('/root', '364', '0364-terminal-refresh-button');
+      expect(dir).toBe('/root/codev/projects/364-terminal-refresh-button');
+    });
+
+    it('should handle title without ID prefix', () => {
+      const dir = getProjectDir('/root', '364', 'terminal-refresh-button');
+      expect(dir).toBe('/root/codev/projects/364-terminal-refresh-button');
     });
   });
 });

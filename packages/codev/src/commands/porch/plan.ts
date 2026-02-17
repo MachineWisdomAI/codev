@@ -11,6 +11,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { PlanPhase } from './types.js';
+import { stripIdPrefix } from './state.js';
 
 // ============================================================================
 // Plan File Discovery
@@ -25,14 +26,26 @@ export function findPlanFile(workspaceRoot: string, projectId: string, projectNa
 
   // New structure: codev/projects/<id>-<name>/plan.md
   if (projectName) {
-    searchPaths.push(path.join(workspaceRoot, 'codev/projects', `${projectId}-${projectName}`, 'plan.md'));
+    const cleanName = stripIdPrefix(projectName, projectId);
+    searchPaths.push(path.join(workspaceRoot, 'codev/projects', `${projectId}-${cleanName}`, 'plan.md'));
   }
 
   // Legacy structure: codev/plans/<id>-*.md
+  // Use normalized numeric matching to handle zero-padded IDs (e.g. "0364" vs "364")
   const plansDir = path.join(workspaceRoot, 'codev/plans');
   if (fs.existsSync(plansDir)) {
     const files = fs.readdirSync(plansDir);
-    const match = files.find(f => f.startsWith(`${projectId}-`) && f.endsWith('.md'));
+    const isNumericId = /^\d+$/.test(projectId);
+    const normalizedId = isNumericId ? (projectId.replace(/^0+/, '') || '0') : null;
+    const match = files.find(f => {
+      if (!f.endsWith('.md')) return false;
+      if (normalizedId) {
+        const numMatch = f.match(/^(\d+)/);
+        if (!numMatch) return false;
+        return (numMatch[1].replace(/^0+/, '') || '0') === normalizedId;
+      }
+      return f.startsWith(`${projectId}-`);
+    });
     if (match) {
       searchPaths.push(path.join(plansDir, match));
     }

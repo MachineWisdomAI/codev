@@ -11,8 +11,8 @@ Transform the approved specification into an executable implementation plan with
 - **Project ID**: {{project_id}}
 - **Project Title**: {{title}}
 - **Current State**: {{current_state}}
-- **Spec File**: `codev/specs/{{project_id}}-{{title}}.md`
-- **Plan File**: `codev/plans/{{project_id}}-{{title}}.md`
+- **Spec File**: `codev/specs/{{artifact_name}}.md`
+- **Plan File**: `codev/plans/{{artifact_name}}.md`
 
 ## Prerequisites
 
@@ -74,7 +74,7 @@ After completing the plan draft, signal completion. Porch will run 3-way consult
 
 ## Output
 
-Create the plan file at `codev/plans/{{project_id}}-{{title}}.md`.
+Create the plan file at `codev/plans/{{artifact_name}}.md`.
 
 Use the plan template from `codev/protocols/spir/templates/plan.md` if available.
 
@@ -129,7 +129,7 @@ Make commits at these milestones:
 
 **CRITICAL**: Never use `git add .` or `git add -A`. Always stage specific files:
 ```bash
-git add codev/plans/{{project_id}}-{{title}}.md
+git add codev/plans/{{artifact_name}}.md
 ```
 
 ## Important Notes
