@@ -65,9 +65,12 @@ test.describe('Terminal Controls (Spec 0364)', () => {
     await terminal.click();
     const xTermFocused = page.locator('.split-left .xterm-helper-textarea');
 
-    // Click refresh button with real mouse click — should not steal focus
+    // Click refresh button with real mouse click — should not steal focus.
+    // IMPORTANT: Do NOT use { force: true } here — we need Playwright's
+    // actionability check to verify the button isn't obscured by xterm overlays.
+    // See Issue #382: force:true masked a z-index stacking bug.
     const refreshBtn = page.locator('button[aria-label="Refresh terminal"]').first();
-    await refreshBtn.click({ force: true });
+    await refreshBtn.click();
     await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
 
     // Re-focus terminal in case
@@ -75,7 +78,7 @@ test.describe('Terminal Controls (Spec 0364)', () => {
 
     // Click scroll-to-bottom button with real mouse click — should not steal focus
     const scrollBtn = page.locator('button[aria-label="Scroll to bottom"]').first();
-    await scrollBtn.click({ force: true });
+    await scrollBtn.click();
     await expect(xTermFocused).toBeFocused({ timeout: 2_000 });
   });
 
