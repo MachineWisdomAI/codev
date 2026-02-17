@@ -5,6 +5,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
 import type { Builder, Config } from '../types.js';
 import { getConfig } from '../utils/index.js';
 import { logger, fatal } from '../utils/logger.js';
@@ -35,6 +36,60 @@ async function cleanupPorchState(projectId: string, config: Config): Promise<voi
   } catch (error) {
     logger.warn(`Warning: Failed to cleanup porch state: ${error}`);
   }
+}
+
+/**
+ * Find and kill shellper processes associated with a worktree path (Bugfix #389).
+ *
+ * When Tower is not running (or the terminal was already removed from Tower's
+ * registry), the Tower API kill path silently fails, leaving shellper processes
+ * orphaned. This function searches `ps` output for shellper-main.js processes
+ * whose JSON config contains the worktree path as `cwd`, and kills them directly.
+ *
+ * Uses process group kill (-pid) to also terminate PTY children (Claude, bash).
+ */
+export async function killShellperProcesses(worktreePath: string): Promise<number> {
+  let killed = 0;
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      // -ww prevents arg truncation on macOS/Linux
+      execFile('ps', ['-ww', '-eo', 'pid,args'], (err, out) => {
+        if (err) { reject(err); return; }
+        resolve(out);
+      });
+    });
+
+    // Match shellper-main.js processes whose JSON config cwd is this worktree.
+    // The shellper is spawned with JSON as argv[2]: {"cwd":"/path/to/worktree",...}
+    const cwdPattern = `"cwd":"${worktreePath}"`;
+
+    for (const line of stdout.split('\n')) {
+      if (!line.includes('shellper-main.js')) continue;
+      if (!line.includes(cwdPattern)) continue;
+
+      const pid = parseInt(line.trim(), 10);
+      if (isNaN(pid) || pid <= 0 || pid === process.pid) continue;
+
+      try {
+        // Kill process group (shellper + its PTY child) to prevent orphaned
+        // PTY processes. Shellper is spawned with detached:true, so it's a
+        // process group leader.
+        process.kill(-pid, 'SIGTERM');
+        killed++;
+      } catch {
+        // Process group kill failed — try individual PID
+        try {
+          process.kill(pid, 'SIGTERM');
+          killed++;
+        } catch {
+          // Process already dead
+        }
+      }
+    }
+  } catch {
+    // ps not available or failed — non-fatal
+  }
+  return killed;
 }
 
 export interface CleanupOptions {
@@ -199,6 +254,16 @@ async function cleanupBuilder(builder: Builder, force?: boolean, issueNumber?: n
       }
     } catch {
       // Tower may not be running
+    }
+  }
+
+  // Bugfix #389: Kill shellper processes directly by worktree path.
+  // The Tower API kill may fail if Tower isn't running, the terminal was already
+  // removed, or Tower was restarted. This catches any surviving shellper processes.
+  if (!isShellMode && builder.worktree) {
+    const shellpersKilled = await killShellperProcesses(builder.worktree);
+    if (shellpersKilled > 0) {
+      logger.info(`Killed ${shellpersKilled} shellper process(es)`);
     }
   }
 
