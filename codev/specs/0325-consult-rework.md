@@ -1,8 +1,13 @@
+---
+approved: 2026-02-16
+validated: [claude]
+---
+
 # Specification: Consult CLI Rework
 
 ## Metadata
-- **ID**: 0125
-- **Status**: draft
+- **ID**: 325
+- **Status**: approved
 - **Created**: 2026-02-16
 
 ## Problem Statement
@@ -14,9 +19,22 @@ The `consult` CLI has accumulated complexity that makes it confusing to use and 
 3. **Prompt sourcing is opaque**: Review type prompts come from `codev/consult-types/` with skeleton fallbacks. Users can't tell what the model sees
 4. **Inconsistent file access**: All three models should have file access in whatever worktree they're running in
 
+### Current Architecture (for context)
+
+The consult CLI lives at `packages/codev/src/commands/consult/index.ts` (~1,130 lines). It currently uses positional subcommands (`spec`, `plan`, `pr`, `impl`, `general`, `stats`) with model-specific invocation:
+
+- **Claude**: Uses `@anthropic-ai/claude-agent-sdk` `query()` with Read/Glob/Grep tools
+- **Codex**: Uses `@openai/codex-sdk` `Codex` class with read-only sandbox
+- **Gemini**: Spawned as subprocess via `gemini --yolo`, role via `GEMINI_SYSTEM_MD` env var
+
+Porch calls consult from `packages/codev/src/commands/porch/next.ts` (lines 445-447), generating commands like:
+```bash
+consult --model gemini --type spec-review --protocol spir --project-id 42 --output "..." spec 42
+```
+
 ## Design
 
-Two modes: **general** and **protocol-based**.
+Three modes: **general**, **protocol-based**, and **stats**.
 
 ### Mode 1: General (default)
 
@@ -28,72 +46,138 @@ consult -m codex --prompt-file questions.md
 ```
 
 Flags:
-- `-m, --model` — which model (gemini, codex, claude). Required.
+- `-m, --model` — which model (gemini, codex, claude). Required. Aliases preserved: `pro` (gemini), `gpt` (codex), `opus` (claude).
 - `--prompt` — inline prompt string
-- `--prompt-file` — path to a prompt file
+- `--prompt-file` — path to a prompt file (must exist and be readable, error otherwise)
 
-One of `--prompt` or `--prompt-file` is required in general mode.
+Exactly one of `--prompt` or `--prompt-file` is required in general mode. Providing both is an error.
 
 ### Mode 2: Protocol-based
 
-For structured reviews that follow a protocol. The `--protocol` and `--type` together form the path to the prompt template.
+For structured reviews that follow a protocol.
 
 ```bash
 consult -m gemini --protocol spir --type spec
 consult -m codex --protocol spir --type plan
+consult -m claude --protocol spir --type impl
 consult -m claude --protocol bugfix --type pr
-consult -m gemini --protocol spir --type integration
+consult -m gemini --type integration
 consult -m codex --protocol spir --type phase
 ```
 
 Flags:
-- `-m, --model` — which model. Required.
-- `--protocol` — protocol name (spir, bugfix, tick). Required for protocol mode.
-- `--type` — review type (spec, plan, pr, integration, phase). Required for protocol mode.
+- `-m, --model` — which model. Required. Aliases: `pro`, `gpt`, `opus`.
+- `--protocol` — protocol name (spir, bugfix, tick). Optional — narrows prompt lookup to a protocol directory.
+- `--type` — review type (spec, plan, impl, pr, integration, phase). Required for protocol mode.
 - `--issue` — issue number. Required when running from the architect (not in a builder worktree).
+
+**Mode conflict**: If both general flags (`--prompt`/`--prompt-file`) and protocol flags (`--type`) are provided, the command errors with a clear message. The two modes are mutually exclusive.
 
 #### Prompt resolution
 
-`--protocol` + `--type` map to a prompt template path:
-```
-codev/consult-types/<type>-review.md
-```
-(Or protocol-specific overrides at `codev/protocols/<protocol>/consult-types/<type>-review.md` if they exist.)
+Prompt lookup depends on whether `--protocol` is provided:
+
+1. If `--protocol` is given → `codev/protocols/<protocol>/consult-types/<type>-review.md`
+2. If `--type` alone (no `--protocol`) → `codev/consult-types/<type>-review.md`
+3. Error if the file doesn't exist in the resolved location
+
+#### Prompt template layout
+
+Each protocol owns its prompts in a `consult-types/` subdirectory:
+
+| Protocol | Prompts |
+|----------|---------|
+| `spir` | spec-review, plan-review, impl-review, phase-review, pr-review |
+| `bugfix` | impl-review, pr-review |
+| `tick` | spec-review, plan-review, impl-review, pr-review |
+| shared (`codev/consult-types/`) | integration-review |
+
+Notes:
+- `phase-review.md` is a copy of `impl-review.md` (same prompt, may diverge later)
+- `pr-review.md` replaces the old `pr-ready.md` for naming consistency
+- The old top-level `codev/consult-types/` retains only `integration-review.md`
+- The old files (`spec-review.md`, `plan-review.md`, `impl-review.md`, `pr-ready.md`) in the top-level directory are removed
 
 #### Context resolution
 
 The consult command must figure out what artifact to review. The rules depend on where it's running:
 
 **In a builder worktree** (auto-detected via `.builders/` in cwd):
-- `--type spec` → finds the spec file automatically from porch state or the `codev/specs/` directory in the worktree
-- `--type plan` → finds the plan file automatically
-- `--type pr` → finds the PR associated with the current branch
-- `--type phase` → detects the current phase from porch state
-- `--type integration` → same as pr but uses the integration-review prompt
+- `--type spec` — finds the spec file from porch state (`codev/projects/<id>-<name>/status.yaml` → title → `codev/specs/<title>.md`) or glob `codev/specs/<id>-*.md`
+- `--type plan` — finds the plan file using same resolution as spec
+- `--type impl` — reviews implementation code; uses git diff from merge-base to HEAD. Supports `--plan-phase` to scope to a specific phase.
+- `--type pr` — finds the PR associated with the current branch via `gh pr list --head <branch-name> --json number,url --jq '.[0]'`. Errors if no PR found.
+- `--type phase` — detects the current phase automatically from porch state (`status.yaml` → `current_plan_phase`). Scopes the diff to the phase's atomic commit (`git show HEAD`) rather than the full branch diff. The SPIR protocol requires one atomic commit per phase, so this gives the model exactly the code that changed in that phase.
+- `--type integration` — same as pr but uses the `integration-review.md` template
 
 **From the architect** (main worktree):
 - `--issue <N>` is required — consult uses it to locate the artifact:
-  - `--type spec` → looks up `codev/specs/<N>-*.md`
-  - `--type plan` → looks up `codev/plans/<N>-*.md`
-  - `--type pr` → looks up the PR linked to issue N (via `gh pr list --search`)
-  - `--type integration` → same as pr with integration-review prompt
-  - `--type phase` → error (phases only exist in builders)
+  - `--type spec` — globs `codev/specs/<N>-*.md`. Errors if zero or multiple matches.
+  - `--type plan` — globs `codev/plans/<N>-*.md`. Same error handling.
+  - `--type impl` — uses `--issue` to find the builder branch, gets diff from merge-base
+  - `--type pr` — looks up the PR via `gh pr list --search "<N>" --json number,headRefName --jq '.[0]'`. Errors if not found.
+  - `--type integration` — same as pr with integration-review template
+  - `--type phase` — error ("phases only exist in builders, and require the phase commit to exist")
 
-For PR reviews (`--type pr` and `--type integration`), the model should run with cwd set to a temporary worktree of the PR branch so file reads reflect the actual PR code.
+**Builder detection**: A worktree is identified as a builder context if `cwd` contains `/.builders/` in the path. If `--issue` is explicitly provided in a builder worktree, it overrides the auto-detected context.
+
+**Multiple matches**: If a glob like `codev/specs/<N>-*.md` returns multiple files, the command errors with a list of matches and asks the user to resolve.
+
+For PR reviews (`--type pr` and `--type integration`), the model runs with cwd set to a temporary worktree of the PR branch so file reads reflect the actual PR code. See "Temporary worktree lifecycle" below.
+
+### Temporary worktree lifecycle
+
+PR reviews (`--type pr` and `--type integration`) need the model to see the actual PR branch code, not the current branch. The consult command handles this by creating a temporary git worktree:
+
+1. **Creation**: `git worktree add --detach <tmp-path> <pr-branch>` where `<tmp-path>` is `.consult-tmp/<pr-number>-<timestamp>` relative to the workspace root.
+2. **Model execution**: The model runs with `cwd` set to the temporary worktree.
+3. **Cleanup (success)**: After the model completes, the worktree is removed via `git worktree remove <tmp-path>`.
+4. **Cleanup (failure)**: Register cleanup in a `finally` block. Also register `SIGINT`/`SIGTERM` handlers to clean up on process kill. If the process is hard-killed (SIGKILL), the worktree may linger — `git worktree prune` (run by git periodically) handles stale entries.
+5. **Conflict handling**: If the PR branch cannot be checked out (e.g., deleted remote branch), error clearly: "Cannot create worktree for PR #N: branch not found."
 
 ### All models get file access
 
 All three models (Claude, Codex, Gemini) must be able to read files in the worktree they're running in. The prompt contract is: "You are in a directory with the full codebase. Read any file you need."
 
+Currently:
+- Claude gets Read/Glob/Grep tools via the Agent SDK — **no change needed**
+- Codex gets read-only sandbox access — **no change needed**
+- Gemini has NO file access (subprocess only) — **NEW WORK required**
+
+**Gemini file access (new capability)**: The `gemini` CLI supports `--yolo` mode which auto-approves tool calls. When running in a worktree with file access tools available, Gemini can read files via its built-in tools. The implementation must:
+1. Set `cwd` to the correct worktree before spawning the `gemini` subprocess
+2. Verify Gemini's built-in tools include file reading (the `--yolo` flag enables this)
+3. Include an instruction in the prompt: "You have file access. Read files directly from disk to review code."
+
+This is a meaningful change because today's Gemini invocation passes the entire query as text with no expectation of file reading. The new approach relies on Gemini's tool-use capability.
+
+### Mode 3: Stats (unchanged)
+
+The `stats` subcommand (`consult stats`) is independent of review modes and preserved as-is:
+
+```bash
+consult stats                           # All-time stats
+consult stats --days 30                 # Last 30 days
+consult stats --project 42              # Filter by project
+consult stats --last 10                 # Last 10 invocations
+consult stats --json                    # JSON output
+```
+
+No `-m` flag needed. Reads from `~/.codev/metrics.db`. No model invocation.
+
+### Input validation
+
+The `--protocol` and `--type` values are used to construct file paths (e.g., `codev/protocols/<protocol>/consult-types/<type>-review.md`). These values must be validated to prevent path traversal — same pattern as the existing `isValidRoleName()` function. Only alphanumeric characters and hyphens are allowed.
+
 ## Flags Summary
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `-m, --model` | Always | Model to use (gemini, codex, claude) |
-| `--prompt` | General mode | Inline prompt |
-| `--prompt-file` | General mode | Path to prompt file |
-| `--protocol` | Protocol mode | Protocol name |
-| `--type` | Protocol mode | Review type (spec, plan, pr, integration, phase) |
+| `-m, --model` | Always (except stats) | Model to use (gemini/pro, codex/gpt, claude/opus) |
+| `--prompt` | General mode (one of) | Inline prompt |
+| `--prompt-file` | General mode (one of) | Path to prompt file |
+| `--protocol` | Optional | Protocol name (narrows prompt lookup to protocol directory) |
+| `--type` | Protocol mode | Review type (spec, plan, impl, pr, integration, phase) |
 | `--issue` | Architect + protocol | Issue number for artifact lookup |
 | `--output` | Porch only | Write output to file |
 | `--context` | Porch only | Previous iteration context file |
@@ -131,16 +215,51 @@ These flags remain as explicit CLI flags (not env vars) so they're visible in lo
 
 When porch runs consult inside a builder worktree, `--issue` is not needed (context is auto-detected). When porch runs consult from the architect context, it passes `--issue`.
 
+### Porch command generation changes
+
+Porch generates consult commands in `packages/codev/src/commands/porch/next.ts` (around line 445). The current format:
+```bash
+consult --model gemini --type spec-review --protocol spir --project-id 42 --output "..." spec 42
+```
+
+Must change to:
+```bash
+consult -m gemini --protocol spir --type spec --project-id 42 --output "..."
+```
+
+Key differences:
+- No positional subcommand (`spec 42`) — replaced by `--protocol spir --type spec`
+- `--type` value changes from `spec-review` to `spec` (the `-review` suffix is implicit)
+- `--issue` only needed from architect context (builders auto-detect)
+
 ## Success Criteria
 
+### Functional
 - [ ] `consult -m X --prompt "question"` works for general queries
+- [ ] `consult -m X --prompt-file path.md` works, errors if file missing
 - [ ] `consult -m X --protocol spir --type spec` auto-detects spec in builder worktrees
 - [ ] `consult -m X --protocol spir --type spec --issue 42` finds spec from architect
+- [ ] `consult -m X --protocol spir --type impl` reviews implementation via git diff
 - [ ] `consult -m X --protocol spir --type pr` runs model against PR branch code, not main
-- [ ] `consult -m X --protocol spir --type phase` detects current phase in builder
-- [ ] All three models have file access in the correct worktree
-- [ ] Porch integration works without env vars — all context via explicit flags
+- [ ] `consult -m X --protocol spir --type phase` detects current phase and scopes diff to phase commit
+- [ ] `consult -m X --type integration` works without `--protocol` (shared prompt)
+- [ ] All three models (including Gemini) have file access in the correct worktree
+- [ ] Porch integration works — all context via explicit flags
+- [ ] `consult stats` continues to work unchanged
+- [ ] Metrics recording continues to work with new command structure
+- [ ] Model aliases (`pro`, `gpt`, `opus`) continue to work
+- [ ] Protocol-specific prompt templates are loaded from `codev/protocols/<protocol>/consult-types/`
+
+### Error handling
 - [ ] Errors clearly when required context is missing (e.g., `--type spec` from architect without `--issue`)
+- [ ] Errors when both `--prompt` and `--type` are provided (mode conflict)
+- [ ] Errors when both `--prompt` and `--prompt-file` are provided
+- [ ] Errors when `--type phase` used from architect context
+- [ ] Errors when spec/plan glob matches zero or multiple files
+- [ ] Errors when PR not found for current branch or issue
+- [ ] Errors when `--protocol`/`--type` contain invalid characters (path traversal prevention)
+- [ ] Errors when prompt template file not found in resolved location
+- [ ] Temporary PR worktree is cleaned up on success, error, and signal (SIGINT/SIGTERM)
 
 ## Constraints
 
@@ -148,6 +267,8 @@ When porch runs consult inside a builder worktree, `--issue` is not needed (cont
 - Must not require additional API keys or new model installations
 - Temporary worktrees for PR reviews must be cleaned up reliably
 - All flags visible in logs (no hidden env var state)
+- Claude SDK nesting guard bypass (`CLAUDECODE` env var removal) must be preserved
+- Forced `process.exit(0)` after completion must be preserved (SDK dangling handle workaround)
 
 ## Migration
 
@@ -166,6 +287,7 @@ consult -m gemini --protocol spir --type spec --project-id 42 --output "..."
 Key differences:
 - No positional subcommand (`spec 42`) — replaced by `--protocol spir --type spec`
 - `--type` value changes from `spec-review` to `spec` (the `-review` suffix is implicit)
+- `--type impl-review` becomes `--type impl`
 - `--issue` only needed from architect context (builders auto-detect)
 
 ### What changes for users
@@ -177,15 +299,54 @@ For general queries:
 Old: `consult -m gemini general "question"`
 New: `consult -m gemini --prompt "question"`
 
+### Features removed
+
+- **`--role` / `-r`**: Removed. Custom roles added unnecessary complexity.
+- **`--dry-run` / `-n`**: Removed. Not useful enough to justify the code.
+
+### Features preserved
+
+- **Model aliases**: `pro` (gemini), `gpt` (codex), `opus` (claude)
+- **`stats` subcommand**: All stats flags (`--days`, `--project`, `--last`, `--json`)
+- **Metrics recording**: Same SQLite database, same schema
+
+### Review type mapping (old → new)
+
+| Old `--type` value | New `--type` value | Template file |
+|---------------------|---------------------|---------------|
+| `spec-review` | `spec` | `spec-review.md` |
+| `plan-review` | `plan` | `plan-review.md` |
+| `impl-review` | `impl` | `impl-review.md` |
+| `pr-ready` | `pr` | `pr-review.md` |
+| `integration-review` | `integration` | `integration-review.md` |
+| *(new)* | `phase` | `phase-review.md` |
+
+The `-review` suffix is always appended when resolving the template file.
+
 ### What changes for protocols and prompts
 
-- Existing `codev/consult-types/*.md` templates remain unchanged
-- Protocol definitions (`protocol.json`) may need verify section updates if they reference old consult subcommands
+- Prompt templates move from `codev/consult-types/` into `codev/protocols/<protocol>/consult-types/`
+- `pr-ready.md` renamed to `pr-review.md` everywhere
+- New `phase-review.md` added to SPIR (copy of `impl-review.md`)
+- Only `integration-review.md` stays in shared `codev/consult-types/`
+- Old top-level files (`spec-review.md`, `plan-review.md`, `impl-review.md`, `pr-ready.md`) are removed
+- Protocol definitions (`protocol.json`) verify sections need updates for new consult command format
 - `codev/resources/commands/consult.md` must be rewritten
 - CLAUDE.md/AGENTS.md consultation examples must be updated
+
+### What changes in the codebase
+
+Files that need modification:
+- `packages/codev/src/commands/consult/index.ts` — Main CLI rewrite (command parsing, mode routing, context resolution)
+- `packages/codev/src/commands/porch/next.ts` — Porch command generation (line ~445)
+- `packages/codev/src/cli.ts` — Commander.js command registration
+- `codev/resources/commands/consult.md` — CLI documentation
+- `codev-skeleton/resources/commands/consult.md` — Skeleton CLI documentation
 
 ## Out of Scope
 
 - Changing the prompt template content (just the CLI and context resolution)
-- Adding new review types
+- Adding new review types beyond phase
 - Multi-model parallel execution (user handles that with `&` or scripting)
+- Changing the metrics database schema
+- Changing model pricing or token tracking
