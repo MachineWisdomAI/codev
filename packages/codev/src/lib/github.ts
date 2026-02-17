@@ -197,8 +197,8 @@ export function parseLinkedIssue(prBody: string, prTitle: string): number | null
 /** Labels that map directly to a type without the `type:` prefix. */
 const BARE_TYPE_LABELS = new Set(['bug', 'project']);
 
-/** Title keywords that suggest a bug report. */
-const BUG_TITLE_PATTERNS = /\b(fix|bug|broken|error|crash|fail|wrong|issue|regression|not working)\b/i;
+/** Title keywords that suggest a bug report. Trailing \b omitted to match plurals/verb forms. */
+const BUG_TITLE_PATTERNS = /\b(fix|bug|broken|error|crash|fail|wrong|regression|not working)/i;
 
 export function parseLabelDefaults(
   labels: Array<{ name: string }>,

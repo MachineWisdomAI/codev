@@ -232,4 +232,17 @@ describe('parseLabelDefaults', () => {
       priority: 'medium',
     });
   });
+
+  it('matches verb variants like "Fixes" and "Errors"', () => {
+    expect(parseLabelDefaults([], 'Fixes stale data in cache').type).toBe('bug');
+    expect(parseLabelDefaults([], 'Errors in production logs').type).toBe('bug');
+    expect(parseLabelDefaults([], 'Crashed during migration').type).toBe('bug');
+    expect(parseLabelDefaults([], 'Failed to load config').type).toBe('bug');
+  });
+
+  it('does not misclassify "issue" in title as bug', () => {
+    expect(parseLabelDefaults([], 'Add issue tracking').type).toBe('project');
+    expect(parseLabelDefaults([], 'Create issue template').type).toBe('project');
+    expect(parseLabelDefaults([], 'Improve issue search').type).toBe('project');
+  });
 });
