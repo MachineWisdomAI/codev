@@ -786,6 +786,21 @@ describe('overview', () => {
       expect(builders[0].id).toBe('bugfix-300-some-fix');
     });
 
+    it('uses protocol phase when currentPlanPhase is "null" string (Bugfix #388)', () => {
+      createBuilderWorktree(tmpDir, 'bugfix-500-test', [
+        'id: bugfix-500',
+        'title: test-null-phase',
+        'protocol: bugfix',
+        'phase: fix',
+        'current_plan_phase: null',
+      ].join('\n'), 'bugfix-500-test-null-phase');
+
+      const builders = discoverBuilders(tmpDir);
+      expect(builders).toHaveLength(1);
+      // Should use 'fix' (protocol phase), not 'null' (string from YAML)
+      expect(builders[0].phase).toBe('fix');
+    });
+
     it('treats builder with codev/projects but no matching status.yaml as soft', () => {
       const builderDir = path.join(tmpDir, '.builders', 'spir-999-no-match');
       fs.mkdirSync(path.join(builderDir, 'codev', 'projects', 'unrelated'), { recursive: true });
@@ -1220,9 +1235,10 @@ describe('overview', () => {
       expect(data.builders[0].issueTitle).toBe('some-fix');
     });
 
-    it('invalidates cache when workspace root changes', async () => {
+    it('uses separate cache per workspace (Bugfix #333)', async () => {
       mockFetchPRList.mockResolvedValue([]);
       mockFetchIssueList.mockResolvedValue([]);
+      mockFetchRecentlyClosed.mockResolvedValue([]);
 
       const cache = new OverviewCache();
       await cache.getOverview(tmpDir);
@@ -1237,6 +1253,10 @@ describe('overview', () => {
         expect(mockFetchIssueList).toHaveBeenCalledTimes(2);
         expect(mockFetchPRList).toHaveBeenLastCalledWith(tmpDir2);
         expect(mockFetchIssueList).toHaveBeenLastCalledWith(tmpDir2);
+
+        // Original workspace cache is still valid (not invalidated)
+        await cache.getOverview(tmpDir);
+        expect(mockFetchPRList).toHaveBeenCalledTimes(2); // no extra fetch
       } finally {
         fs.rmSync(tmpDir2, { recursive: true, force: true });
       }
