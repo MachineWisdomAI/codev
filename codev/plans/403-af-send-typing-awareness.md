@@ -177,6 +177,10 @@ Extract the delivery logic (lines 722-744) into a helper function `deliverMessag
 
 The `SendBuffer` singleton is created at module level and started when the tower server initializes. The `getSession` callback uses `getTerminalManager().getSession()`.
 
+**Lifecycle wiring** in `packages/codev/src/agent-farm/servers/tower-server.ts`:
+- **Start**: Call `sendBuffer.start(...)` after server is listening (after `initTerminals()`)
+- **Stop**: Call `sendBuffer.stop()` in `gracefulShutdown()` between step 4 (clear intervals) and step 5 (disconnect tunnel), at approximately line 138. `stop()` delivers any remaining buffered messages before the timer is cleared.
+
 **Response contract change** (line 748-753):
 ```typescript
 // Before:
@@ -194,7 +198,8 @@ The `SendBuffer` singleton is created at module level and started when the tower
 - [ ] `af send` returns `deferred: true` when message is buffered
 - [ ] `af send` returns `deferred: false` when message is delivered immediately
 - [ ] Broadcast happens at delivery time, not at buffer time
-- [ ] Messages for dead sessions are discarded (no error, no leak)
+- [ ] Messages for dead sessions are discarded with a warning log (session died — delivery is impossible, not a message "loss" per spec intent)
+- [ ] `interrupt: true` option bypasses buffering — delivers immediately regardless of typing state
 - [ ] SendBuffer cleanup runs on tower shutdown
 - [ ] All existing tests pass
 
@@ -204,12 +209,14 @@ The `SendBuffer` singleton is created at module level and started when the tower
   - Enqueue + deferred flush when session is active
   - Max age triggers delivery regardless of typing state
   - Multiple messages delivered in order
-  - Dead session messages are discarded
+  - Dead session messages are discarded with warning log
+  - Interrupt option bypasses buffering
   - start/stop lifecycle
 - **Unit Tests (tower-routes.test.ts updates)**:
   - handleSend returns `deferred: false` when session is idle
   - handleSend returns `deferred: true` when session has recent input
 - **Manual Testing**: Send `af send` while typing in dashboard terminal, verify message arrives after pause
+- **Note on Playwright**: The spec states "No changes to the dashboard" — this feature is server-side only. Playwright is not required since no UI code is modified.
 
 #### Rollback Strategy
 Revert `send-buffer.ts`, revert `tower-routes.ts` changes. No data migrations.
