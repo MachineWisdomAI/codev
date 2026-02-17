@@ -149,7 +149,7 @@
         },
         "type": {
           "type": "string",
-          "description": "Review type (spec-review, plan-review, impl-review, pr-ready)"
+          "description": "Review type (spec, plan, impl, pr, phase, integration)"
         },
         "parallel": {
           "type": "boolean",

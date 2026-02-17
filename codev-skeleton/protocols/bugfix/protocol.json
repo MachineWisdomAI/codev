@@ -76,7 +76,7 @@
       "consultation": {
         "on": "review",
         "models": ["gemini", "codex"],
-        "type": "impl-review",
+        "type": "impl",
         "parallel": true,
         "max_rounds": 1
       },
