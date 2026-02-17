@@ -19,7 +19,7 @@ export function BuilderCard({ builder, onOpen }: BuilderCardProps) {
   const displayId = builder.issueNumber ? `#${builder.issueNumber}` : builder.id;
   const displayTitle = builder.issueTitle || builder.id;
   const isBlocked = builder.blocked !== null && builder.blocked !== '';
-  const pct = Math.min(100, Math.max(0, Math.round((builder.progress ?? 0) * 100)));
+  const pct = Math.min(100, Math.max(0, Math.round(builder.progress ?? 0)));
 
   return (
     <div className={`builder-row${isBlocked ? ' builder-row--blocked' : ''}`}>
