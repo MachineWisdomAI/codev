@@ -1,6 +1,6 @@
 ---
 name: consult
-description: AI consultation CLI quick reference. Use when running consult commands to check syntax for PR reviews, spec reviews, plan reviews, and general queries across Gemini, Codex, and Claude.
+description: AI consultation CLI quick reference. Use when running consult commands to check syntax for general queries, protocol reviews, and stats across Gemini, Codex, and Claude.
 disable-model-invocation: false
 ---
 
@@ -9,73 +9,90 @@ disable-model-invocation: false
 ## Synopsis
 
 ```bash
-consult -m <model> <subcommand> [args] [options]
+consult -m <model> [options]
+consult stats [options]
 ```
 
-The `-m` / `--model` flag is **always required**.
+The `-m` / `--model` flag is **always required** (except for stats).
 
 ## Models
 
 | Model | Alias | Speed | Approach |
 |-------|-------|-------|----------|
-| `gemini` | `pro` | ~120-150s | Pure text analysis, fast |
+| `gemini` | `pro` | ~120-150s | File access via --yolo, fast |
 | `codex` | `gpt` | ~200-250s | Shell command exploration, thorough |
-| `claude` | `opus` | ~60-120s | Balanced tool use |
+| `claude` | `opus` | ~60-120s | Agent SDK with tool use |
 
-## Subcommands
+## Modes
 
+### General Mode
 ```bash
-consult -m gemini pr 42              # Review a pull request
-consult -m codex spec 42             # Review a specification
-consult -m gemini plan 42            # Review an implementation plan
-consult -m claude general "query"    # General question (quoted string)
+consult -m gemini --prompt "What's the best way to structure auth?"
+consult -m codex --prompt-file review-checklist.md
+```
+
+### Protocol Mode
+```bash
+consult -m gemini --protocol spir --type spec       # Review a specification
+consult -m codex --protocol spir --type plan        # Review a plan
+consult -m claude --protocol spir --type impl       # Review implementation
+consult -m gemini --protocol spir --type pr         # Review a PR
+consult -m codex --protocol spir --type phase       # Phase-scoped review
+consult -m gemini --type integration                # Integration review
+```
+
+### Stats Mode
+```bash
+consult stats                     # 30-day summary
+consult stats --days 7 --json     # Last 7 days as JSON
 ```
 
 ## Options
 
 ```bash
--n, --dry-run              # Show command without running
--t, --type <type>          # Review type (spec-review, plan-review, impl-review, pr-ready, integration-review)
--r, --role <role>          # Custom role from codev/roles/ (without .md extension)
+-m, --model <model>         # Model to use (required except stats)
+--prompt <text>              # Inline prompt (general mode)
+--prompt-file <path>         # Prompt from file (general mode)
+--protocol <name>            # Protocol: spir, bugfix, tick, maintain
+-t, --type <type>            # Review type: spec, plan, impl, pr, phase, integration
+--issue <number>             # Issue number (architect context)
 ```
 
-## Review Types (--type)
+## Review Types (--type with --protocol)
 
-| Type | Stage | Use Case |
-|------|-------|----------|
-| `spec-review` | conceived | Review spec completeness |
-| `plan-review` | specified | Review implementation plan |
-| `impl-review` | implementing | Review code implementation |
-| `pr-ready` | implemented | Final check before PR |
-| `integration-review` | committed | Architect's integration review |
+| Type | Use Case |
+|------|----------|
+| `spec` | Review specification completeness |
+| `plan` | Review implementation plan |
+| `impl` | Review code implementation |
+| `pr` | Review pull request before merge |
+| `phase` | Phase-scoped review (builder only) |
+| `integration` | Architect's integration review |
 
-Review type prompts live in `codev/consult-types/` and can be customized.
+Protocol-specific prompts live in `codev/protocols/<protocol>/consult-types/`.
+
+## Context Resolution
+
+- **Builder context** (cwd in `.builders/`): auto-detects project from porch state
+- **Architect context** (cwd outside `.builders/`): requires `--issue <N>`
 
 ## Parallel Consultation (3-Way / cmap)
 
 Run all three models in parallel for thorough reviews:
 
 ```bash
-consult -m gemini spec 42 &
-consult -m codex spec 42 &
-consult -m claude spec 42 &
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
 ```
 
 Or from Claude Code, use **cmap** pattern: three parallel background Bash calls.
 
-## Custom Roles
-
-```bash
-consult -m gemini --role security-reviewer pr 42
-consult -m codex --role architect general "Review this design"
-```
-
-Roles are markdown files in `codev/roles/`. Create your own by adding `.md` files there.
-
 ## Common Mistakes
 
-- The `-m` flag is **required** — `consult pr 42` will fail without it
-- PR numbers are GitHub PR numbers, not spec numbers
-- Spec/plan numbers match the `0042` prefix in filenames (pass just `42`, not `0042`)
-- General queries must be **quoted**: `consult -m gemini general "your question here"`
+- The `-m` flag is **required** — `consult --type spec` will fail without it
+- Cannot combine `--prompt` with `--type` (mode conflict)
+- Cannot use `--prompt` and `--prompt-file` together
+- `--protocol` requires `--type` — cannot use alone
+- General mode: `--prompt` text is passed directly, not as a positional arg

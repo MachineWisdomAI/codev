@@ -1,277 +1,139 @@
 # consult - AI Consultation CLI
 
-The `consult` command provides a unified interface for AI consultation with external models (Gemini, Codex, Claude). Use it for code reviews, spec reviews, and general questions.
+The `consult` command provides a unified interface for AI consultation with external models (Gemini, Codex, Claude). It operates in three modes: general (ad-hoc prompts), protocol-based (structured reviews), and stats.
 
 ## Synopsis
 
 ```
-consult -m <model> <subcommand> [args] [options]
+consult -m <model> [options]
+consult stats [options]
 ```
 
 ## Required Option
 
 ```
--m, --model <model>    Model to use (required)
+-m, --model <model>    Model to use (required for all modes except stats)
 ```
 
 ## Models
 
-| Model | Alias | CLI Used | Notes |
-|-------|-------|----------|-------|
-| `gemini` | `pro` | gemini-cli | Pure text analysis, fast |
-| `codex` | `gpt` | @openai/codex | Shell command exploration, thorough |
-| `claude` | `opus` | @anthropic-ai/claude-code | Balanced analysis |
+| Model | Alias | Backend | Notes |
+|-------|-------|---------|-------|
+| `gemini` | `pro` | gemini-cli | File access via --yolo, fast |
+| `codex` | `gpt` | @openai/codex | Read-only sandbox, thorough |
+| `claude` | `opus` | Claude Agent SDK | Balanced analysis with tool use |
 
-## Options
+## Modes
 
-```
--n, --dry-run           Show what would execute without running
--t, --type <type>       Review type (see Review Types below)
--r, --role <role>       Custom role from codev/roles/ (see Custom Roles below)
-```
+### General Mode
 
-## Subcommands
-
-### consult pr
-
-Review a pull request.
+Send an ad-hoc prompt to a model.
 
 ```bash
-consult -m <model> pr <number>
+# Inline prompt
+consult -m gemini --prompt "What's the best way to structure auth middleware?"
+
+# Prompt from file
+consult -m codex --prompt-file review-checklist.md
 ```
 
-**Arguments:**
-- `number` - PR number to review
+**Options:**
+- `--prompt <text>` — Inline prompt text
+- `--prompt-file <path>` — Read prompt from a file
 
-**Description:**
+Cannot combine `--prompt` with `--prompt-file` or `--type`.
 
-Reviews a GitHub pull request. The consultant reads:
-- PR info and description
-- Comments and discussions
-- Diff of all changes
-- File metadata
+### Protocol Mode
 
-Outputs a structured review with verdict: APPROVE, REQUEST_CHANGES, or COMMENT.
-
-**Examples:**
+Run structured reviews tied to a development protocol (SPIR, TICK, bugfix, maintain).
 
 ```bash
-# Review PR #42 with Gemini
-consult -m gemini pr 42
+# Review a spec (auto-detects project context in builder worktrees)
+consult -m gemini --protocol spir --type spec
 
-# Review with Codex (more thorough, slower)
-consult -m codex pr 42
+# Review a plan
+consult -m codex --protocol spir --type plan
 
-# Dry run to see command
-consult -m gemini pr 42 --dry-run
+# Review implementation
+consult -m claude --protocol spir --type impl
+
+# Review a PR
+consult -m gemini --protocol spir --type pr
+
+# Phase-scoped review (builder context only)
+consult -m codex --protocol spir --type phase
+
+# Integration review
+consult -m gemini --type integration
 ```
 
----
+**Options:**
+- `--protocol <name>` — Protocol: spir, bugfix, tick, maintain
+- `-t, --type <type>` — Review type: spec, plan, impl, pr, phase, integration
+- `--issue <number>` — Issue number (required from architect context)
 
-### consult spec
+**Context resolution:**
+- **Builder context** (cwd inside `.builders/`): auto-detects project ID, spec, plan, and PR from porch state
+- **Architect context** (cwd outside `.builders/` or `--issue` provided): requires `--issue <N>` to identify the project
 
-Review a specification.
+**Prompt templates:**
+Protocol-specific prompts are loaded from `codev/protocols/<protocol>/consult-types/<type>-review.md`. The `integration` type uses the shared `codev/consult-types/integration-review.md`.
+
+### Stats Mode
+
+View consultation statistics and history.
 
 ```bash
-consult -m <model> spec <number>
+consult stats
+consult stats --days 7
+consult stats --project 42
+consult stats --last 10
+consult stats --json
 ```
 
-**Arguments:**
-- `number` - Spec number to review (e.g., `42` for `codev/specs/42-*.md`)
+**Options:**
+- `--days <n>` — Limit to last N days (default: 30)
+- `--project <id>` — Filter by project ID
+- `--last <n>` — Show last N individual invocations
+- `--json` — Output as JSON
 
-**Description:**
+## Porch Integration Options
 
-Reviews a specification file for:
-- Clarity and completeness
-- Technical feasibility
-- Edge cases and error scenarios
-- Security considerations
-- Testing strategy
+These flags are used by porch (the protocol orchestrator) when generating consult commands. They're not typically used directly.
 
-If a matching plan exists, it's included for context.
-
-**Examples:**
-
-```bash
-# Review spec 42
-consult -m gemini spec 42
-
-# With specific review type
-consult -m gemini spec 42 --type spec-review
 ```
-
----
-
-### consult plan
-
-Review an implementation plan.
-
-```bash
-consult -m <model> plan <number>
+--output <path>         Write output to file
+--plan-phase <phase>    Scope review to a specific plan phase
+--context <path>        Context file with previous iteration feedback
+--project-id <id>       Project ID for metrics
 ```
-
-**Arguments:**
-- `number` - Plan number to review (e.g., `42` for `codev/plans/42-*.md`)
-
-**Description:**
-
-Reviews an implementation plan for:
-- Alignment with specification
-- Implementation approach
-- Task breakdown and ordering
-- Risk identification
-- Testing strategy
-
-If a matching spec exists, it's included for context.
-
-**Example:**
-
-```bash
-consult -m gemini plan 42
-```
-
----
-
-### consult general
-
-General AI consultation.
-
-```bash
-consult -m <model> general "<query>"
-```
-
-**Arguments:**
-- `query` - Question or request (quoted string)
-
-**Description:**
-
-Sends a free-form query to the consultant. The consultant role is still loaded, so responses follow the consultant guidelines.
-
-**Examples:**
-
-```bash
-# Ask about code design
-consult -m gemini general "What's the best way to structure auth middleware?"
-
-# Get architecture advice
-consult -m codex general "Review src/lib/database.ts for potential issues"
-```
-
----
-
-## Review Types
-
-Use `--type` to load stage-specific review prompts:
-
-| Type | Stage | Use Case |
-|------|-------|----------|
-| `spec-review` | conceived | Review specification completeness |
-| `plan-review` | specified | Review implementation plan |
-| `impl-review` | implementing | Review code implementation |
-| `pr-ready` | implemented | Final check before PR |
-| `integration-review` | committed | Architect's integration review |
-
-**Location:** Review type prompts are stored in `codev/consult-types/`. You can customize existing prompts or add your own by creating new `.md` files in this directory.
-
-> **Migration Note (v1.4.0+)**: Review types moved from `codev/roles/review-types/` to `codev/consult-types/`. The old location still works with a deprecation warning. To migrate:
-> ```bash
-> mkdir -p codev/consult-types
-> mv codev/roles/review-types/* codev/consult-types/
-> rm -r codev/roles/review-types
-> ```
-
-**Example:**
-
-```bash
-consult -m gemini spec 42 --type spec-review
-consult -m codex pr 68 --type integration-review
-```
-
----
-
-## Custom Roles
-
-Use `--role` to load a custom role instead of the default consultant:
-
-```bash
-consult -m gemini --role security-reviewer general "Audit this API endpoint"
-consult -m codex --role gtm-specialist general "Review our landing page copy"
-```
-
-**Arguments:**
-- `role` - Name of role file in `codev/roles/` (without `.md` extension)
-
-**Available roles** depend on your project. Common ones include:
-- `architect` - System design perspective
-- `builder` - Implementation-focused review
-- `consultant` - Default balanced review (used when no `--role` specified)
-
-**Creating custom roles:**
-
-1. Create a markdown file in `codev/roles/`:
-   ```bash
-   # codev/roles/security-reviewer.md
-   # Role: Security Reviewer
-
-   You are a security-focused code reviewer...
-   ```
-
-2. Use it with `--role`:
-   ```bash
-   consult -m gemini --role security-reviewer pr 42
-   ```
-
-**Role name restrictions:**
-- Only letters, numbers, hyphens, and underscores
-- No path separators (security: prevents directory traversal)
-- Falls back to embedded skeleton if not found locally
-
-**Example:**
-
-```bash
-# Use the architect role for high-level review
-consult -m gemini --role architect general "Review this system design"
-
-# Use a custom GTM specialist role
-consult -m codex --role gtm-specialist general "Analyze our pricing page"
-```
-
----
 
 ## Parallel Consultation (3-Way Reviews)
 
 For thorough reviews, run multiple models in parallel:
 
 ```bash
-# Using background processes
-consult -m gemini spec 42 &
-consult -m codex spec 42 &
-consult -m claude spec 42 &
+# 3-way spec review
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
 ```
-
-Or with separate terminal sessions for better output separation.
-
----
 
 ## Performance
 
 | Model | Typical Time | Approach |
 |-------|--------------|----------|
-| Gemini | ~120-150s | Pure text analysis |
-| Codex | ~200-250s | Shell command exploration |
-| Claude | ~60-120s | Balanced tool use |
-
-Codex is slower because it executes shell commands (git show, rg, etc.) sequentially. It's more thorough but takes ~2x longer than Gemini.
-
----
+| Gemini | ~120-150s | File access via --yolo, pure text output |
+| Codex | ~200-250s | Shell command exploration, read-only sandbox |
+| Claude | ~60-120s | Agent SDK with Read/Glob/Grep tools |
 
 ## Prerequisites
 
 Install the model CLIs you plan to use:
 
 ```bash
-# Claude
+# Claude Agent SDK
 npm install -g @anthropic-ai/claude-code
 
 # Codex
@@ -286,58 +148,50 @@ Configure API keys:
 - Codex: `OPENAI_API_KEY`
 - Gemini: `GOOGLE_API_KEY` or `GEMINI_API_KEY`
 
----
-
 ## The Consultant Role
 
 The consultant role (`codev/roles/consultant.md`) defines behavior:
 - Provides second perspectives on decisions
 - Offers alternatives and considerations
 - Works constructively (not adversarial, not a rubber stamp)
-- Uses `git show <branch>:<file>` for PR reviews
 
-Customize by copying to your local codev/ directory:
-
-```bash
-mkdir -p codev/roles
-cp $(npm root -g)/@cluesmith/codev/skeleton/roles/consultant.md codev/roles/
-```
-
----
+Customize by editing your local `codev/roles/consultant.md`.
 
 ## Query Logging
 
 All consultations are logged to `.consult/history.log`:
 
 ```
-2024-01-15T10:30:00.000Z model=gemini duration=142.3s query=Review spec 42...
+2026-02-16T10:30:00.000Z model=gemini duration=142.3s query=Review spec...
 ```
-
----
 
 ## Examples
 
 ```bash
-# Quick spec review
-consult -m gemini spec 42
+# General: ask a question
+consult -m gemini --prompt "How should I structure the caching layer?"
 
-# Thorough PR review
-consult -m codex pr 68
+# General: from file
+consult -m codex --prompt-file design-question.md
 
-# Architecture question
-consult -m claude general "How should I structure the caching layer?"
+# Protocol: spec review (builder context, auto-detected)
+consult -m gemini --protocol spir --type spec
 
-# Dry run to see command
-consult -m gemini pr 42 --dry-run
+# Protocol: PR review (architect context)
+consult -m codex --protocol spir --type pr --issue 42
+
+# Protocol: implementation review with bugfix protocol
+consult -m claude --protocol bugfix --type impl
 
 # 3-way parallel review
-consult -m gemini spec 42 &
-consult -m codex spec 42 &
-consult -m claude spec 42 &
+consult -m gemini --protocol spir --type spec &
+consult -m codex --protocol spir --type spec &
+consult -m claude --protocol spir --type spec &
 wait
-```
 
----
+# Stats
+consult stats --days 7 --json
+```
 
 ## See Also
 

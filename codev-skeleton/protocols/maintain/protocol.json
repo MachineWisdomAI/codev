@@ -20,7 +20,7 @@
         "artifact": "codev/maintain/*.md"
       },
       "verify": {
-        "type": "impl-review",
+        "type": "impl",
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
@@ -41,7 +41,7 @@
         "artifact": "src/**/*.{ts,tsx,js,jsx}"
       },
       "verify": {
-        "type": "impl-review",
+        "type": "impl",
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
@@ -74,7 +74,7 @@
         "artifact": "codev/resources/*.md"
       },
       "verify": {
-        "type": "impl-review",
+        "type": "impl",
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },
@@ -95,7 +95,7 @@
         "artifact": "codev/maintain/*.md"
       },
       "verify": {
-        "type": "pr-ready",
+        "type": "pr",
         "models": ["gemini", "codex", "claude"],
         "parallel": true
       },

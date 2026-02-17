@@ -1,7 +1,10 @@
 /**
  * consult - AI consultation with external models
  *
- * Provides unified interface to gemini-cli, codex, and Claude Agent SDK.
+ * Three modes:
+ * 1. General — ad-hoc prompts via --prompt or --prompt-file
+ * 2. Protocol — structured reviews via --protocol + --type
+ * 3. Stats — consultation metrics (delegated to stats.ts, handled in cli.ts)
  */
 
 import * as fs from 'node:fs';
@@ -11,7 +14,7 @@ import { tmpdir } from 'node:os';
 import chalk from 'chalk';
 import { query as claudeQuery } from '@anthropic-ai/claude-agent-sdk';
 import { Codex } from '@openai/codex-sdk';
-import { resolveCodevFile, readCodevFile, findWorkspaceRoot, hasLocalOverride } from '../../lib/skeleton.js';
+import { readCodevFile, findWorkspaceRoot } from '../../lib/skeleton.js';
 import { MetricsDB } from './metrics.js';
 import { extractUsage, extractReviewText, type SDKResultLike, type UsageData } from './usage-extractor.js';
 
@@ -40,17 +43,19 @@ const MODEL_ALIASES: Record<string, string> = {
   opus: 'claude',
 };
 
-interface ConsultOptions {
+export interface ConsultOptions {
   model: string;
-  subcommand: string;
-  args: string[];
-  dryRun?: boolean;
-  reviewType?: string;
-  role?: string;
+  // General mode
+  prompt?: string;
+  promptFile?: string;
+  // Protocol mode
+  protocol?: string;
+  type?: string;
+  issue?: string;
+  // Porch flags
   output?: string;
   planPhase?: string;
   context?: string;
-  protocol?: string;
   projectId?: string;
 }
 
@@ -102,70 +107,12 @@ function recordMetrics(ctx: MetricsContext, extra: {
   }
 }
 
-// Valid review types
-const VALID_REVIEW_TYPES = [
-  'spec-review',
-  'plan-review',
-  'impl-review',
-  'pr-ready',
-  'integration-review',
-];
-
 /**
- * Validate role name to prevent directory traversal attacks.
+ * Validate name to prevent directory traversal attacks.
  * Only allows alphanumeric, hyphen, and underscore characters.
  */
-function isValidRoleName(roleName: string): boolean {
-  return /^[a-zA-Z0-9_-]+$/.test(roleName);
-}
-
-/**
- * List available roles in codev/roles/
- * Excludes non-role files like README.md, review-types/, etc.
- */
-function listAvailableRoles(workspaceRoot: string): string[] {
-  const rolesDir = path.join(workspaceRoot, 'codev', 'roles');
-  if (!fs.existsSync(rolesDir)) return [];
-
-  const excludePatterns = ['readme', 'review-types', 'overview', 'index'];
-
-  return fs.readdirSync(rolesDir)
-    .filter(f => {
-      if (!f.endsWith('.md')) return false;
-      const basename = f.replace('.md', '').toLowerCase();
-      return !excludePatterns.some(pattern => basename.includes(pattern));
-    })
-    .map(f => f.replace('.md', ''));
-}
-
-/**
- * Load a custom role from codev/roles/<name>.md
- * Falls back to embedded skeleton if not found locally.
- */
-function loadCustomRole(workspaceRoot: string, roleName: string): string {
-  // Validate role name to prevent directory traversal
-  if (!isValidRoleName(roleName)) {
-    throw new Error(
-      `Invalid role name: '${roleName}'\n` +
-      'Role names can only contain letters, numbers, hyphens, and underscores.'
-    );
-  }
-
-  // Use readCodevFile which handles local-first with skeleton fallback
-  const rolePath = `roles/${roleName}.md`;
-  const roleContent = readCodevFile(rolePath, workspaceRoot);
-
-  if (!roleContent) {
-    const available = listAvailableRoles(workspaceRoot);
-    const availableStr = available.length > 0
-      ? `\n\nAvailable roles:\n${available.map(r => `  - ${r}`).join('\n')}`
-      : '\n\nNo custom roles found in codev/roles/';
-    throw new Error(
-      `Role '${roleName}' not found.${availableStr}`
-    );
-  }
-
-  return roleContent;
+function isValidRoleName(name: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(name);
 }
 
 /**
@@ -185,33 +132,28 @@ function loadRole(workspaceRoot: string): string {
 }
 
 /**
- * Load a review type prompt.
- * Checks consult-types/{type}.md first (new location),
- * then falls back to roles/review-types/{type}.md (deprecated) with a warning.
+ * Resolve protocol prompt template.
+ * 1. If --protocol given → codev/protocols/<protocol>/consult-types/<type>-review.md
+ * 2. If --type alone → codev/consult-types/<type>-review.md
+ * 3. Error if file not found
  */
-function loadReviewTypePrompt(workspaceRoot: string, reviewType: string): string | null {
-  const primaryPath = `consult-types/${reviewType}.md`;
-  const fallbackPath = `roles/review-types/${reviewType}.md`;
+function resolveProtocolPrompt(workspaceRoot: string, protocol: string | undefined, type: string): string {
+  const templateName = `${type}-review.md`;
 
-  // 1. Check LOCAL consult-types/ first (preferred location)
-  if (hasLocalOverride(primaryPath, workspaceRoot)) {
-    return readCodevFile(primaryPath, workspaceRoot);
+  const relativePath = protocol
+    ? `protocols/${protocol}/consult-types/${templateName}`
+    : `consult-types/${templateName}`;
+
+  const content = readCodevFile(relativePath, workspaceRoot);
+
+  if (!content) {
+    const location = protocol
+      ? `codev/protocols/${protocol}/consult-types/${templateName}`
+      : `codev/consult-types/${templateName}`;
+    throw new Error(`Prompt template not found: ${location}`);
   }
 
-  // 2. Check LOCAL roles/review-types/ (deprecated location with warning)
-  if (hasLocalOverride(fallbackPath, workspaceRoot)) {
-    console.error(chalk.yellow('Warning: Review types in roles/review-types/ are deprecated.'));
-    console.error(chalk.yellow('Move your custom types to consult-types/ for future compatibility.'));
-    return readCodevFile(fallbackPath, workspaceRoot);
-  }
-
-  // 3. Fall back to embedded skeleton consult-types/ (default)
-  const skeletonPrompt = readCodevFile(primaryPath, workspaceRoot);
-  if (skeletonPrompt) {
-    return skeletonPrompt;
-  }
-
-  return null;
+  return content;
 }
 
 /**
@@ -246,39 +188,94 @@ function loadDotenv(workspaceRoot: string): void {
 }
 
 /**
- * Find a spec file by number
+ * Find a spec file by number. Returns null if not found.
+ * Errors if multiple matches found.
  */
 function findSpec(workspaceRoot: string, number: number): string | null {
   const specsDir = path.join(workspaceRoot, 'codev', 'specs');
   const pattern = String(number).padStart(4, '0');
 
   if (fs.existsSync(specsDir)) {
-    const files = fs.readdirSync(specsDir);
-    for (const file of files) {
-      if (file.startsWith(pattern) && file.endsWith('.md')) {
-        return path.join(specsDir, file);
-      }
+    const matches = fs.readdirSync(specsDir).filter(f => f.startsWith(pattern) && f.endsWith('.md'));
+    if (matches.length > 1) {
+      const list = matches.map(f => `  - codev/specs/${f}`).join('\n');
+      throw new Error(`Multiple spec files match '${pattern}*':\n${list}`);
+    }
+    if (matches.length === 1) {
+      return path.join(specsDir, matches[0]);
     }
   }
   return null;
 }
 
 /**
- * Find a plan file by number
+ * Find a plan file by number. Returns null if not found.
+ * Errors if multiple matches found.
  */
 function findPlan(workspaceRoot: string, number: number): string | null {
   const plansDir = path.join(workspaceRoot, 'codev', 'plans');
   const pattern = String(number).padStart(4, '0');
 
   if (fs.existsSync(plansDir)) {
-    const files = fs.readdirSync(plansDir);
-    for (const file of files) {
-      if (file.startsWith(pattern) && file.endsWith('.md')) {
-        return path.join(plansDir, file);
-      }
+    const matches = fs.readdirSync(plansDir).filter(f => f.startsWith(pattern) && f.endsWith('.md'));
+    if (matches.length > 1) {
+      const list = matches.map(f => `  - codev/plans/${f}`).join('\n');
+      throw new Error(`Multiple plan files match '${pattern}*':\n${list}`);
+    }
+    if (matches.length === 1) {
+      return path.join(plansDir, matches[0]);
     }
   }
   return null;
+}
+
+/**
+ * Check if running in a builder worktree
+ */
+function isBuilderContext(): boolean {
+  return process.cwd().includes('/.builders/');
+}
+
+/**
+ * Get builder project state from status.yaml
+ */
+function getBuilderProjectState(workspaceRoot: string): { id: string; title: string; currentPlanPhase: string | null } {
+  const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
+  if (!fs.existsSync(projectsDir)) {
+    throw new Error('No project state found. Are you in a builder worktree?');
+  }
+
+  const entries = fs.readdirSync(projectsDir);
+  const projectDirs = entries.filter(e => {
+    return fs.statSync(path.join(projectsDir, e)).isDirectory();
+  });
+
+  if (projectDirs.length === 0) {
+    throw new Error('No project found in codev/projects/');
+  }
+  if (projectDirs.length > 1) {
+    throw new Error(`Multiple projects found: ${projectDirs.join(', ')}`);
+  }
+
+  const dir = projectDirs[0];
+  const statusPath = path.join(projectsDir, dir, 'status.yaml');
+  if (!fs.existsSync(statusPath)) {
+    throw new Error(`status.yaml not found in ${dir}`);
+  }
+
+  const content = fs.readFileSync(statusPath, 'utf-8');
+
+  // Simple YAML parsing for the fields we need
+  const idMatch = content.match(/^id:\s*'?(\d+)'?\s*$/m);
+  const titleMatch = content.match(/^title:\s*(.+)$/m);
+  const phaseMatch = content.match(/^current_plan_phase:\s*(.+)$/m);
+
+  const id = idMatch?.[1] ?? '';
+  const title = titleMatch?.[1]?.trim() ?? '';
+  const rawPhase = phaseMatch?.[1]?.trim() ?? 'null';
+  const currentPlanPhase = rawPhase === 'null' ? null : rawPhase;
+
+  return { id, title, currentPlanPhase };
 }
 
 /**
@@ -520,45 +517,18 @@ async function runClaudeConsultation(
 }
 
 /**
- * Run the consultation
+ * Run the consultation — dispatches to the correct model runner.
  */
 async function runConsultation(
   model: string,
   query: string,
   workspaceRoot: string,
-  dryRun: boolean,
-  reviewType?: string,
-  customRole?: string,
+  role: string,
   outputPath?: string,
   metricsCtx?: MetricsContext,
 ): Promise<void> {
-  // Use custom role if specified, otherwise use default consultant role
-  let role = customRole ? loadCustomRole(workspaceRoot, customRole) : loadRole(workspaceRoot);
-
-  // Append review type prompt if specified
-  if (reviewType) {
-    const typePrompt = loadReviewTypePrompt(workspaceRoot, reviewType);
-    if (typePrompt) {
-      role = role + '\n\n---\n\n' + typePrompt;
-      console.error(`Review type: ${reviewType}`);
-    } else {
-      console.error(chalk.yellow(`Warning: Review type prompt not found: ${reviewType}`));
-    }
-  }
-
-  // SDK-based models — handle separately from CLI subprocess models
+  // SDK-based models
   if (model === 'claude') {
-    if (dryRun) {
-      console.log(chalk.yellow(`[claude] Would invoke Agent SDK:`));
-      console.log(`  Model: claude-opus-4-6`);
-      console.log(`  Tools: Read, Glob, Grep`);
-      console.log(`  Max turns: ${CLAUDE_MAX_TURNS}`);
-      console.log(`  Max budget: $25.00`);
-      const promptPreview = query.substring(0, 200) + (query.length > 200 ? '...' : '');
-      console.log(`  Prompt: ${promptPreview}`);
-      return;
-    }
-
     const startTime = Date.now();
     await runClaudeConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
     const duration = (Date.now() - startTime) / 1000;
@@ -568,16 +538,6 @@ async function runConsultation(
   }
 
   if (model === 'codex') {
-    if (dryRun) {
-      console.log(chalk.yellow(`[codex] Would invoke Codex SDK:`));
-      console.log(`  Model: gpt-5.2-codex`);
-      console.log(`  Sandbox: read-only`);
-      console.log(`  Reasoning effort: medium`);
-      const promptPreview = query.substring(0, 200) + (query.length > 200 ? '...' : '');
-      console.log(`  Prompt: ${promptPreview}`);
-      return;
-    }
-
     const startTime = Date.now();
     await runCodexConsultation(query, role, workspaceRoot, outputPath, metricsCtx);
     const duration = (Date.now() - startTime) / 1000;
@@ -592,15 +552,13 @@ async function runConsultation(
     throw new Error(`Unknown model: ${model}`);
   }
 
-  // Check if CLI exists (skip for dry-run mode)
-  if (!dryRun && !commandExists(config.cli)) {
+  // Check if CLI exists
+  if (!commandExists(config.cli)) {
     throw new Error(`${config.cli} not found. Please install it first.`);
   }
 
   let tempFile: string | null = null;
   const env: Record<string, string> = {};
-
-  // Prepare command and environment based on model
   let cmd: string[];
 
   if (model === 'gemini') {
@@ -609,40 +567,22 @@ async function runConsultation(
     fs.writeFileSync(tempFile, role);
     env['GEMINI_SYSTEM_MD'] = tempFile;
 
-    cmd = [config.cli, ...config.args, '--output-format', 'json', query];
+    // No --output-format json — let Gemini output text directly
+    cmd = [config.cli, ...config.args, query];
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
 
-  if (dryRun) {
-    console.log(chalk.yellow(`[${model}] Would execute:`));
-    console.log(`  Command: ${cmd.join(' ')}`);
-    if (Object.keys(env).length > 0) {
-      for (const [key, value] of Object.entries(env)) {
-        if (key === 'GEMINI_SYSTEM_MD') {
-          console.log(`  Env: ${key}=<temp file with consultant role>`);
-        } else {
-          const preview = value.substring(0, 50) + (value.length > 50 ? '...' : '');
-          console.log(`  Env: ${key}=${preview}`);
-        }
-      }
-    }
-    if (tempFile) fs.unlinkSync(tempFile);
-    return;
-  }
-
   // Execute with passthrough stdio
   // Use 'ignore' for stdin to prevent blocking when spawned as subprocess
-  // When outputPath is set, capture stdout to write to file (used by porch)
   const fullEnv = { ...process.env, ...env };
   const startTime = Date.now();
-  const stdoutMode = 'pipe'; // Always pipe to capture structured output for metrics
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd[0], cmd.slice(1), {
       cwd: workspaceRoot,
       env: fullEnv,
-      stdio: ['ignore', stdoutMode, 'inherit'],
+      stdio: ['ignore', 'pipe', 'inherit'],
     });
 
     const chunks: Buffer[] = [];
@@ -650,7 +590,6 @@ async function runConsultation(
     if (proc.stdout) {
       proc.stdout.on('data', (chunk: Buffer) => {
         chunks.push(chunk);
-        // Gemini: buffer only (JSON is one blob, text emitted on close)
       });
     }
 
@@ -668,10 +607,8 @@ async function runConsultation(
       const reviewText = extractReviewText(model, rawOutput);
       const outputContent = reviewText ?? rawOutput; // Fallback to raw on parse failure
 
-      // Write extracted text to stdout for Gemini (was fully buffered)
-      if (model === 'gemini') {
-        process.stdout.write(outputContent);
-      }
+      // Write text to stdout (was fully buffered)
+      process.stdout.write(outputContent);
 
       // Write to output file
       if (outputPath && outputContent.length > 0) {
@@ -732,7 +669,6 @@ async function runConsultation(
 
 /**
  * Get a compact diff stat summary and list of changed files.
- * Returns { stat, files } where stat is the `--stat` output and files is the list of paths.
  */
 function getDiffStat(workspaceRoot: string, ref: string): { stat: string; files: string[] } {
   const stat = execSync(`git diff --stat ${ref}`, { cwd: workspaceRoot, encoding: 'utf-8' }).toString();
@@ -742,7 +678,7 @@ function getDiffStat(workspaceRoot: string, ref: string): { stat: string; files:
 }
 
 /**
- * Fetch PR metadata (no diff — reviewers read files from disk)
+ * Fetch PR metadata (no diff — that's fetched separately)
  */
 function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; comments: string } {
   console.error(`Fetching PR #${prNumber} data...`);
@@ -766,11 +702,23 @@ function fetchPRData(prNumber: number): { info: string; changedFiles: string[]; 
 }
 
 /**
- * Build query for PR review.
- * Provides file list and instructs reviewers to read files from disk.
+ * Fetch the full PR diff via gh pr diff
  */
-function buildPRQuery(prNumber: number, _workspaceRoot: string): string {
+function fetchPRDiff(prNumber: number): string {
+  try {
+    return execSync(`gh pr diff ${prNumber}`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+  } catch (err) {
+    throw new Error(`Failed to fetch PR diff for #${prNumber}: ${err}`);
+  }
+}
+
+/**
+ * Build query for PR review.
+ * Includes full PR diff + file list; model reads surrounding context from disk.
+ */
+function buildPRQuery(prNumber: number): string {
   const prData = fetchPRData(prNumber);
+  const diff = fetchPRDiff(prNumber);
 
   const fileList = prData.changedFiles.map(f => `- ${f}`).join('\n');
 
@@ -784,10 +732,13 @@ ${prData.info}
 ## Changed Files
 ${fileList}
 
+## PR Diff
+\`\`\`diff
+${diff}
+\`\`\`
+
 ## How to Review
-**Read the changed files from disk** to review their current content. You have full filesystem access.
-For each changed file listed above, read it and evaluate the code quality, correctness, and test coverage.
-Do NOT rely on git diffs to determine the current state of code — diffs miss uncommitted changes in worktrees.
+Review the PR diff above for the changes. You also have **full filesystem access** — read files from disk for surrounding context beyond what the diff shows.
 
 ## Comments
 ${prData.comments}
@@ -856,27 +807,28 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 
 /**
  * Build query for implementation review.
- * Provides diff stat + file list and instructs reviewers to read files from disk.
+ * Accepts spec/plan paths and optional diff reference override.
  */
-function buildImplQuery(projectNumber: number, workspaceRoot: string, planPhase?: string): string {
-  const specPath = findSpec(workspaceRoot, projectNumber);
-  const planPath = findPlan(workspaceRoot, projectNumber);
-
-  // Get compact diff summary against base branch
+function buildImplQuery(
+  workspaceRoot: string,
+  specPath: string | null,
+  planPath: string | null,
+  planPhase?: string,
+  diffRef?: string,
+): string {
+  // Get compact diff summary
   let diffStat = '';
   let changedFiles: string[] = [];
   try {
-    const mergeBase = execSync('git merge-base HEAD main', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
-    // Use mergeBase (not mergeBase..HEAD) to include uncommitted working tree changes.
-    // The ..HEAD syntax is commit-to-commit and misses uncommitted work in builder worktrees.
-    const result = getDiffStat(workspaceRoot, mergeBase);
+    const ref = diffRef ?? execSync('git merge-base HEAD main', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
+    const result = getDiffStat(workspaceRoot, ref);
     diffStat = result.stat;
     changedFiles = result.files;
   } catch {
     // If git diff fails, reviewer will explore filesystem
   }
 
-  let query = `Review Implementation for Project ${projectNumber}`;
+  let query = `Review Implementation`;
   if (planPhase) {
     query += ` — Phase: ${planPhase}`;
   }
@@ -975,131 +927,343 @@ KEY_ISSUES: [List of critical issues if any, or "None"]`;
 }
 
 /**
+ * Build query for phase-scoped review.
+ * Uses git show HEAD for the phase's atomic commit diff.
+ */
+function buildPhaseQuery(
+  workspaceRoot: string,
+  planPhase: string,
+  specPath: string | null,
+  planPath: string | null,
+): string {
+  let phaseDiff = '';
+  try {
+    phaseDiff = execSync('git show HEAD', { cwd: workspaceRoot, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+  } catch {
+    // If git show fails, reviewer explores filesystem
+  }
+
+  let query = `Review Phase Implementation: "${planPhase}"\n\n## Context Files\n`;
+
+  if (specPath) query += `- Spec: ${specPath}\n`;
+  if (planPath) query += `- Plan: ${planPath}\n`;
+
+  query += `
+## REVIEW SCOPE — CURRENT PLAN PHASE ONLY
+You are reviewing **plan phase "${planPhase}" ONLY**.
+Read the plan, find the section for "${planPhase}", and scope your review to ONLY the work described in that phase.
+
+**DO NOT** request changes for work that belongs to other plan phases.
+**DO NOT** flag missing functionality that is scheduled for a later phase.
+**DO** verify that this phase's deliverables are complete and correct.
+
+## Phase Commit Diff
+\`\`\`
+${phaseDiff}
+\`\`\`
+
+## How to Review
+The diff above shows the atomic commit for this phase. You also have **full filesystem access** — read files from disk to understand surrounding code.
+
+Please review:
+1. **Spec Adherence**: Does the code fulfill the spec requirements for this phase?
+2. **Code Quality**: Is the code readable, maintainable, and bug-free?
+3. **Test Coverage**: Are there adequate tests for the changes in this phase?
+4. **Error Handling**: Are edge cases and errors handled properly?
+5. **Plan Alignment**: Does the implementation follow the plan for phase "${planPhase}"?
+
+End your review with a verdict in this EXACT format:
+
+---
+VERDICT: [APPROVE | REQUEST_CHANGES | COMMENT]
+SUMMARY: [One-line summary of your review]
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+---
+
+KEY_ISSUES: [List of critical issues if any, or "None"]`;
+
+  return query;
+}
+
+/**
+ * Find PR number for the current branch
+ */
+function findPRForCurrentBranch(workspaceRoot: string): number {
+  const branchName = execSync('git branch --show-current', { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
+  const prJson = execSync(
+    `gh pr list --head "${branchName}" --json number --jq '.[0].number'`,
+    { cwd: workspaceRoot, encoding: 'utf-8' }
+  ).trim();
+
+  if (!prJson) {
+    throw new Error(`No PR found for branch: ${branchName}`);
+  }
+
+  const prNumber = parseInt(prJson, 10);
+  if (isNaN(prNumber)) {
+    throw new Error(`No PR found for branch: ${branchName}`);
+  }
+
+  return prNumber;
+}
+
+/**
+ * Find PR number for a given issue number (architect mode)
+ */
+function findPRForIssue(workspaceRoot: string, issueNumber: number): { number: number; headRefName: string } {
+  const prJson = execSync(
+    `gh pr list --search "${issueNumber}" --json number,headRefName --jq '.[0]'`,
+    { cwd: workspaceRoot, encoding: 'utf-8' }
+  ).trim();
+
+  if (!prJson || prJson === 'null') {
+    throw new Error(`No PR found for issue #${issueNumber}`);
+  }
+
+  return JSON.parse(prJson);
+}
+
+/**
+ * Resolve query for builder context (auto-detected from porch state)
+ */
+function resolveBuilderQuery(workspaceRoot: string, type: string, options: ConsultOptions): string {
+  const projectState = getBuilderProjectState(workspaceRoot);
+  const projectNumber = parseInt(projectState.id, 10);
+
+  switch (type) {
+    case 'spec': {
+      const specPath = findSpec(workspaceRoot, projectNumber);
+      if (!specPath) throw new Error(`Spec ${projectState.id} not found in codev/specs/`);
+      const planPath = findPlan(workspaceRoot, projectNumber);
+      console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      return buildSpecQuery(specPath, planPath);
+    }
+
+    case 'plan': {
+      const planPath = findPlan(workspaceRoot, projectNumber);
+      if (!planPath) throw new Error(`Plan ${projectState.id} not found in codev/plans/`);
+      const specPath = findSpec(workspaceRoot, projectNumber);
+      console.error(`Plan: ${planPath}`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      return buildPlanQuery(planPath, specPath);
+    }
+
+    case 'impl': {
+      const specPath = findSpec(workspaceRoot, projectNumber);
+      const planPath = findPlan(workspaceRoot, projectNumber);
+      console.error(`Project: ${projectState.id}`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
+      return buildImplQuery(workspaceRoot, specPath, planPath, options.planPhase);
+    }
+
+    case 'pr': {
+      const prNumber = findPRForCurrentBranch(workspaceRoot);
+      console.error(`PR: #${prNumber}`);
+      return buildPRQuery(prNumber);
+    }
+
+    case 'phase': {
+      const currentPhase = options.planPhase ?? projectState.currentPlanPhase;
+      if (!currentPhase) {
+        throw new Error('No current plan phase detected. Use --plan-phase to specify.');
+      }
+      const specPath = findSpec(workspaceRoot, projectNumber);
+      const planPath = findPlan(workspaceRoot, projectNumber);
+      console.error(`Phase: ${currentPhase}`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      return buildPhaseQuery(workspaceRoot, currentPhase, specPath, planPath);
+    }
+
+    case 'integration': {
+      const prNumber = findPRForCurrentBranch(workspaceRoot);
+      console.error(`PR: #${prNumber} (integration review)`);
+      return buildPRQuery(prNumber);
+    }
+
+    default:
+      throw new Error(`Unknown review type: ${type}\nValid types: spec, plan, impl, pr, phase, integration`);
+  }
+}
+
+/**
+ * Resolve query for architect context (requires --issue)
+ */
+function resolveArchitectQuery(workspaceRoot: string, type: string, options: ConsultOptions): string {
+  if (type === 'phase') {
+    throw new Error('--type phase requires a builder worktree. Phases only exist in builders and require the phase commit to exist.');
+  }
+
+  if (!options.issue) {
+    throw new Error(
+      `--issue is required from architect context for --type ${type}.\n` +
+      `Example: consult -m gemini --protocol spir --type ${type} --issue 42`
+    );
+  }
+
+  const issueNumber = parseInt(options.issue, 10);
+  if (isNaN(issueNumber)) {
+    throw new Error(`Invalid issue number: ${options.issue}`);
+  }
+
+  switch (type) {
+    case 'spec': {
+      const specPath = findSpec(workspaceRoot, issueNumber);
+      if (!specPath) throw new Error(`Spec ${issueNumber} not found in codev/specs/`);
+      const planPath = findPlan(workspaceRoot, issueNumber);
+      console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      return buildSpecQuery(specPath, planPath);
+    }
+
+    case 'plan': {
+      const planPath = findPlan(workspaceRoot, issueNumber);
+      if (!planPath) throw new Error(`Plan ${issueNumber} not found in codev/plans/`);
+      const specPath = findSpec(workspaceRoot, issueNumber);
+      console.error(`Plan: ${planPath}`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      return buildPlanQuery(planPath, specPath);
+    }
+
+    case 'impl': {
+      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      // Fetch the branch and diff from merge-base
+      try {
+        execSync(`git fetch origin ${pr.headRefName}`, { cwd: workspaceRoot, stdio: 'pipe' });
+      } catch {
+        // May already be fetched
+      }
+      const mergeBase = execSync(`git merge-base main origin/${pr.headRefName}`, { cwd: workspaceRoot, encoding: 'utf-8' }).trim();
+      const specPath = findSpec(workspaceRoot, issueNumber);
+      const planPath = findPlan(workspaceRoot, issueNumber);
+      console.error(`Project: ${issueNumber} (PR #${pr.number}, branch: ${pr.headRefName})`);
+      if (specPath) console.error(`Spec: ${specPath}`);
+      if (planPath) console.error(`Plan: ${planPath}`);
+      return buildImplQuery(workspaceRoot, specPath, planPath, options.planPhase, `${mergeBase}..origin/${pr.headRefName}`);
+    }
+
+    case 'pr': {
+      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      console.error(`PR: #${pr.number}`);
+      return buildPRQuery(pr.number);
+    }
+
+    case 'integration': {
+      const pr = findPRForIssue(workspaceRoot, issueNumber);
+      console.error(`PR: #${pr.number} (integration review)`);
+      return buildPRQuery(pr.number);
+    }
+
+    default:
+      throw new Error(`Unknown review type: ${type}\nValid types: spec, plan, impl, pr, phase, integration`);
+  }
+}
+
+/**
  * Main consult entry point
  */
 export async function consult(options: ConsultOptions): Promise<void> {
-  const { model: modelInput, subcommand, args, dryRun = false, reviewType, role: customRole, output: outputPath } = options;
+  const hasPrompt = !!options.prompt || !!options.promptFile;
+  const hasType = !!options.type;
 
-  // Resolve model alias
-  const model = MODEL_ALIASES[modelInput.toLowerCase()] || modelInput.toLowerCase();
+  // --- Input validation ---
 
-  // Validate model
+  // Mode conflict: --prompt/--prompt-file + --type
+  if (hasPrompt && hasType) {
+    throw new Error(
+      'Mode conflict: cannot use --prompt/--prompt-file with --type.\n' +
+      'Use --prompt or --prompt-file for general queries.\n' +
+      'Use --type (with optional --protocol) for protocol reviews.'
+    );
+  }
+
+  // --prompt + --prompt-file together
+  if (options.prompt && options.promptFile) {
+    throw new Error('Cannot use both --prompt and --prompt-file. Choose one.');
+  }
+
+  // --protocol without --type
+  if (options.protocol && !options.type) {
+    throw new Error('--protocol requires --type. Example: consult -m gemini --protocol spir --type spec');
+  }
+
+  // Neither mode specified
+  if (!hasPrompt && !hasType) {
+    throw new Error(
+      'No mode specified.\n' +
+      'General mode: consult -m <model> --prompt "question"\n' +
+      'Protocol mode: consult -m <model> --protocol <name> --type <type>\n' +
+      'Stats mode: consult stats'
+    );
+  }
+
+  // Validate --protocol and --type for path traversal
+  if (options.protocol && !isValidRoleName(options.protocol)) {
+    throw new Error(`Invalid protocol name: '${options.protocol}'. Only alphanumeric characters, hyphens, and underscores allowed.`);
+  }
+  if (options.type && !isValidRoleName(options.type)) {
+    throw new Error(`Invalid type name: '${options.type}'. Only alphanumeric characters, hyphens, and underscores allowed.`);
+  }
+
+  // --- Resolve model ---
+  const model = MODEL_ALIASES[options.model.toLowerCase()] || options.model.toLowerCase();
   if (!MODEL_CONFIGS[model] && !SDK_MODELS.includes(model)) {
     const validModels = [...Object.keys(MODEL_CONFIGS), ...SDK_MODELS, ...Object.keys(MODEL_ALIASES)];
-    throw new Error(`Unknown model: ${modelInput}\nValid models: ${validModels.join(', ')}`);
+    throw new Error(`Unknown model: ${options.model}\nValid models: ${validModels.join(', ')}`);
   }
 
-  // Validate review type if provided
-  if (reviewType && !VALID_REVIEW_TYPES.includes(reviewType)) {
-    throw new Error(`Invalid review type: ${reviewType}\nValid types: ${VALID_REVIEW_TYPES.join(', ')}`);
-  }
-
+  // --- Setup ---
   const workspaceRoot = findWorkspaceRoot();
   loadDotenv(workspaceRoot);
 
-  // Capture timestamp at invocation start (before subprocess/SDK)
   const timestamp = new Date().toISOString();
-
-  // Build metrics context with protocol/project defaults
   const metricsCtx: MetricsContext = {
     timestamp,
     model,
-    reviewType: reviewType ?? null,
-    subcommand,
+    reviewType: options.type ?? null,
+    subcommand: options.type ?? 'general',
     protocol: options.protocol ?? 'manual',
     projectId: options.projectId ?? null,
     workspacePath: workspaceRoot,
   };
 
-  console.error(`[${subcommand} review]`);
   console.error(`Model: ${model}`);
 
-  // Log custom role if specified
-  if (customRole) {
-    console.error(`Role: ${customRole}`);
-  }
-
   let query: string;
+  let role = loadRole(workspaceRoot);
 
-  switch (subcommand.toLowerCase()) {
-    case 'pr': {
-      if (args.length === 0) {
-        throw new Error('PR number required\nUsage: consult -m <model> pr <number>');
-      }
-      const prNumber = parseInt(args[0], 10);
-      if (isNaN(prNumber)) {
-        throw new Error(`Invalid PR number: ${args[0]}`);
-      }
-      query = buildPRQuery(prNumber, workspaceRoot);
-      break;
+  // --- Build query based on mode ---
+  if (hasType) {
+    // Protocol mode
+    const type = options.type!;
+
+    // Load and append protocol prompt template
+    const promptTemplate = resolveProtocolPrompt(workspaceRoot, options.protocol, type);
+    role = role + '\n\n---\n\n' + promptTemplate;
+    console.error(`Review type: ${type}${options.protocol ? ` (protocol: ${options.protocol})` : ''}`);
+
+    // Determine context: builder (auto-detect) vs architect (--issue or not in builder)
+    const inBuilder = isBuilderContext() && !options.issue;
+
+    if (inBuilder) {
+      query = resolveBuilderQuery(workspaceRoot, type, options);
+    } else {
+      query = resolveArchitectQuery(workspaceRoot, type, options);
     }
-
-    case 'spec': {
-      if (args.length === 0) {
-        throw new Error('Spec number required\nUsage: consult -m <model> spec <number>');
+  } else {
+    // General mode
+    if (options.prompt) {
+      query = options.prompt;
+    } else {
+      const filePath = options.promptFile!;
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Prompt file not found: ${filePath}`);
       }
-      const specNumber = parseInt(args[0], 10);
-      if (isNaN(specNumber)) {
-        throw new Error(`Invalid spec number: ${args[0]}`);
-      }
-      const specPath = findSpec(workspaceRoot, specNumber);
-      if (!specPath) {
-        throw new Error(`Spec ${specNumber} not found`);
-      }
-      const planPath = findPlan(workspaceRoot, specNumber);
-      query = buildSpecQuery(specPath, planPath);
-      console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      break;
+      query = fs.readFileSync(filePath, 'utf-8');
     }
-
-    case 'plan': {
-      if (args.length === 0) {
-        throw new Error('Plan number required\nUsage: consult -m <model> plan <number>');
-      }
-      const planNumber = parseInt(args[0], 10);
-      if (isNaN(planNumber)) {
-        throw new Error(`Invalid plan number: ${args[0]}`);
-      }
-      const planPath = findPlan(workspaceRoot, planNumber);
-      if (!planPath) {
-        throw new Error(`Plan ${planNumber} not found`);
-      }
-      const specPath = findSpec(workspaceRoot, planNumber);
-      query = buildPlanQuery(planPath, specPath);
-      console.error(`Plan: ${planPath}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      break;
-    }
-
-    case 'general': {
-      if (args.length === 0) {
-        throw new Error('Query required\nUsage: consult -m <model> general "<query>"');
-      }
-      query = args.join(' ');
-      break;
-    }
-
-    case 'impl': {
-      if (args.length === 0) {
-        throw new Error('Project number required\nUsage: consult -m <model> impl <number>');
-      }
-      const implNumber = parseInt(args[0], 10);
-      if (isNaN(implNumber)) {
-        throw new Error(`Invalid project number: ${args[0]}`);
-      }
-      const specPath = findSpec(workspaceRoot, implNumber);
-      const planPath = findPlan(workspaceRoot, implNumber);
-      query = buildImplQuery(implNumber, workspaceRoot, options.planPhase);
-      console.error(`Project: ${implNumber}`);
-      if (specPath) console.error(`Spec: ${specPath}`);
-      if (planPath) console.error(`Plan: ${planPath}`);
-      if (options.planPhase) console.error(`Plan phase: ${options.planPhase}`);
-      break;
-    }
-
-    default:
-      throw new Error(`Unknown subcommand: ${subcommand}\nValid subcommands: pr, spec, plan, impl, general`);
   }
 
   // Prepend iteration context if provided (for stateful reviews)
@@ -1111,6 +1275,11 @@ export async function consult(options: ConsultOptions): Promise<void> {
     } catch {
       console.error(chalk.yellow(`Warning: Could not read context file: ${options.context}`));
     }
+  }
+
+  // Add file access instruction for Gemini
+  if (model === 'gemini') {
+    query += '\n\nYou have file access. Read files directly from disk to review code.';
   }
 
   // Show the query/prompt being sent
@@ -1125,7 +1294,7 @@ export async function consult(options: ConsultOptions): Promise<void> {
   console.error('='.repeat(60));
   console.error('');
 
-  await runConsultation(model, query, workspaceRoot, dryRun, reviewType, customRole, outputPath, metricsCtx);
+  await runConsultation(model, query, workspaceRoot, role, options.output, metricsCtx);
 }
 
 // Exported for testing

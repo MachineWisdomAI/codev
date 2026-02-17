@@ -126,20 +126,23 @@ Multi-agent consultation. Used by both humans and agents—**mostly agents** dur
 
 | Command | Description |
 |---------|-------------|
-| `consult --model <model> spec <id>` | Review a specification |
-| `consult --model <model> plan <id>` | Review an implementation plan |
-| `consult --model <model> pr <id>` | Review a pull request |
-| `consult --model <model> general "<query>"` | General consultation |
+| `consult -m <model> --prompt "text"` | General consultation |
+| `consult -m <model> --protocol spir --type spec` | Review a specification |
+| `consult -m <model> --protocol spir --type plan` | Review an implementation plan |
+| `consult -m <model> --protocol spir --type pr` | Review a pull request |
+| `consult stats` | View consultation statistics |
 
 **Models**: `gemini` (alias: `pro`), `codex` (alias: `gpt`), `claude` (alias: `opus`)
 
-**Review Types** (via `--type`):
+**Review Types** (via `--type` with `--protocol`):
 | Type | Use Case |
 |------|----------|
-| `spec-review` | Review spec completeness and clarity |
-| `plan-review` | Review plan coverage and feasibility |
-| `impl-review` | Review implementation quality (Builder use) |
-| `integration-review` | Review architectural fit (Architect use) |
+| `spec` | Review spec completeness and clarity |
+| `plan` | Review plan coverage and feasibility |
+| `impl` | Review implementation quality (Builder use) |
+| `pr` | Review pull request before merge |
+| `phase` | Phase-scoped review (Builder use) |
+| `integration` | Review architectural fit (Architect use) |
 
 ---
 
