@@ -55,7 +55,7 @@ Every tagged release has corresponding release notes:
 | v2.0.3 | docs/releases/v2.0.3-hagia-sophia.md |
 | v2.0.6 | docs/releases/v2.0.6.md (CREATED Phase 1) |
 
-Note: No v2.0.4, v2.0.5, or v2.0.7 tags exist. CHANGELOG includes v2.0.7 (Unreleased) section.
+Note: No v2.0.4, v2.0.5, or v2.0.7 tags exist. CHANGELOG includes v2.0.7 (Unreleased) section. Many patch tags (v1.4.1, v1.4.2, v1.5.5–v1.5.28, v1.6.1–v1.6.2, v2.0.0-rc.*) are iterative releases without dedicated release notes — this is a pre-existing gap, not a regression from this audit.
 
 ## 4. Obsolete Files Report
 
@@ -128,4 +128,12 @@ No files recommended for deletion — all either have deprecation banners or hav
 - `codev-skeleton/DEPENDENCIES.md` — @google/gemini-cli (was @anthropic-ai), af ports cleanup (was ./codev/bin/agent-farm)
 - `codev-skeleton/builders.md` — Updated to reflect SQLite/Tower tracking
 - `codev-skeleton/templates/cheatsheet.md` — Removed misplaced `af tower` from codev table
-- `MANIFESTO.md` — af spawn→positional, af start→af dash start
+- `MANIFESTO.md` — af spawn→positional, af start→af dash start, SPIDER→SPIR
+
+### Phase 4: Final Verification (1 commit)
+- `codev/roles/architect.md` — af spawn→positional, projectlist.md→GitHub Issues, tmux send-keys→terminal
+- `codev/roles/builder.md` — af spawn→positional
+- `codev/resources/arch.md` — assert_spider_protocol→assert_spir_protocol
+- `codev/projects/386-documentation-audit/386-final-verification.md` — This report
+
+**Deprecated files treated as read-only exceptions**: INSTALL.md, MIGRATION-1.0.md (both have deprecation banners added in Phase 1)

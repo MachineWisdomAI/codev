@@ -1492,7 +1492,7 @@ The `af`, `consult`, and `codev` commands are installed globally via `npm instal
 - `install_from_local()` - Installs Codev from local skeleton
 - `create_claude_md()` - Creates CLAUDE.md with specified content
 - `assert_codev_structure()` - Validates directory structure
-- `assert_spider_protocol()` - Validates SPIR protocol files
+- `assert_spir_protocol()` - Validates SPIR protocol files
 - `file_contains()` - Checks file for literal string match
 
 **Agent Installation Logic**:
