@@ -51,6 +51,32 @@ session registered with the Tower (so it appears in the dashboard), and lets
 porch pick up from whatever phase the builder was in. Works with all spawn
 modes: positional issue number, `--task`, `--protocol`, `--worktree`.
 
+## Cron (Scheduled Tasks)
+
+Cron tasks are YAML files in `.af-cron/` at the project root. Tower loads them automatically.
+
+```bash
+af cron list               # List all cron tasks
+af cron status <name>      # Check status of a specific task
+af cron run <name>         # Run a task immediately
+af cron enable <name>      # Enable a disabled task
+af cron disable <name>     # Disable a task
+```
+
+There is NO `af cron add` — create YAML files in `.af-cron/` directly. Example:
+
+```yaml
+# .af-cron/ci-health.yaml
+name: CI Health Check
+schedule: "*/30 * * * *"
+enabled: true
+command: gh run list --limit 5 --json status,conclusion --jq '...'
+condition: "output != '0'"
+message: "CI Alert: ${output} recent failure(s)"
+target: architect
+timeout: 30
+```
+
 ## Utility
 
 ```bash
