@@ -157,103 +157,12 @@ test.describe('Bug #2: Fonts', () => {
   });
 });
 
-test.describe('Bug #3: Layout matches legacy dashboard', () => {
-  test('info header with description and doc links', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for React dashboard state to load - projects-info only renders after state is fetched
-    const infoHeader = page.locator('.projects-info');
-    await expect(infoHeader).toBeVisible({ timeout: 15_000 });
+// Bug #3 tests removed (Spec 425): These tested a legacy dashboard layout
+// (.projects-info, .dashboard-header, .section-tabs, .section-files, .section-projects)
+// that no longer exists in the current React UI (replaced by SplitPane + WorkView).
+// The one layout test that remains valid is the split-pane test below.
 
-    // Should have title
-    await expect(infoHeader.locator('h1')).toContainText('Agent Farm Dashboard');
-
-    // Should have doc links
-    await expect(infoHeader.locator('a:has-text("README")')).toBeVisible();
-    await expect(infoHeader.locator('a:has-text("Discord")')).toBeVisible();
-  });
-
-  test('two-column layout: TABS on left, FILES on right', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load before checking layout
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    const dashHeader = page.locator('.dashboard-header');
-    await expect(dashHeader).toBeVisible({ timeout: 10_000 });
-
-    // Both sections within dashboard-header (side by side)
-    const tabsSection = dashHeader.locator('.section-tabs');
-    const filesSection = dashHeader.locator('.section-files');
-    await expect(tabsSection).toBeVisible();
-    await expect(filesSection).toBeVisible();
-
-    // Verify they're side by side (flexbox row) — tabs left of files
-    const tabsBox = await tabsSection.boundingBox();
-    const filesBox = await filesSection.boundingBox();
-    expect(tabsBox).not.toBeNull();
-    expect(filesBox).not.toBeNull();
-    expect(tabsBox!.x).toBeLessThan(filesBox!.x);
-  });
-
-  test('TABS section has collapsible header', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    const tabsHeader = page.locator('.section-tabs .dashboard-section-header');
-    await expect(tabsHeader).toBeVisible({ timeout: 10_000 });
-    await expect(tabsHeader).toContainText('Tabs');
-
-    // Collapse icon present
-    await expect(tabsHeader.locator('.collapse-icon')).toBeVisible();
-  });
-
-  test('TABS section lists architect entry', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load - architect tab only shows if state.architect exists
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    const architectItem = page.locator('.dashboard-tab-item:has-text("Architect")');
-    await expect(architectItem).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('FILES section shows file tree', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    const filesSection = page.locator('.section-files');
-    await expect(filesSection).toBeVisible({ timeout: 10_000 });
-
-    // Section content should be visible (section is expanded by default)
-    const sectionContent = filesSection.locator('.dashboard-section-content');
-    await expect(sectionContent).toBeVisible({ timeout: 5_000 });
-
-    // Note: The /api/files endpoint is not implemented in Tower yet.
-    // The FileTree component will show loading or error state.
-    // For now, just verify the section structure exists.
-    // TODO: Enable this check when /api/files is implemented
-    // const fileTree = sectionContent.locator('.file-tree');
-    // await expect(fileTree).toBeVisible({ timeout: 15_000 });
-    // const fileNode = fileTree.locator('.file-node').first();
-    // await expect(fileNode).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('PROJECTS section below TABS+FILES', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    const projectsSection = page.locator('.section-projects');
-    await expect(projectsSection).toBeVisible({ timeout: 10_000 });
-
-    // Projects should be below the dashboard-header
-    const headerBox = await page.locator('.dashboard-header').boundingBox();
-    const projectsBox = await projectsSection.boundingBox();
-    expect(headerBox).not.toBeNull();
-    expect(projectsBox).not.toBeNull();
-    expect(projectsBox!.y).toBeGreaterThan(headerBox!.y);
-  });
-
+test.describe('Dashboard layout', () => {
   test('split pane layout: left panel (architect) + right panel (tabs)', async ({ page }) => {
     await page.goto(DASH_URL);
     // Wait for React app to mount
@@ -275,52 +184,5 @@ test.describe('Bug #3: Layout matches legacy dashboard', () => {
     // Tab bar in right pane
     const tabBar = page.locator('.tab-bar');
     await expect(tabBar).toBeVisible();
-
-    // Dashboard tab should be active by default
-    const dashboardTab = page.locator('.tab-active:has-text("Dashboard")');
-    await expect(dashboardTab).toBeVisible();
-  });
-
-  test('sections are collapsible', async ({ page }) => {
-    await page.goto(DASH_URL);
-    // Wait for state to load
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    // Find TABS section header and click to collapse
-    const tabsSection = page.locator('.section-tabs');
-    const tabsHeader = tabsSection.locator('.dashboard-section-header');
-    await expect(tabsHeader).toBeVisible({ timeout: 10_000 });
-
-    // Content should be visible initially
-    const tabsContent = tabsSection.locator('.dashboard-section-content');
-    await expect(tabsContent).toBeVisible();
-
-    // Click to collapse
-    await tabsHeader.click();
-
-    // Content should now be hidden
-    await expect(tabsContent).not.toBeVisible();
-
-    // Click again to expand
-    await tabsHeader.click();
-    await expect(tabsContent).toBeVisible();
-  });
-});
-
-test.describe('Bug #3 via Tower Proxy', () => {
-  test('layout works through tower proxy', async ({ page }) => {
-    const encoded = toBase64URL(WORKSPACE_PATH);
-    await page.goto(`${TOWER_URL}/workspace/${encoded}/`);
-    // Wait for state to load
-    await page.locator('.projects-info').waitFor({ state: 'visible', timeout: 15_000 });
-
-    // Two-column layout should exist through proxy
-    const tabsSection = page.locator('.section-tabs');
-    const filesSection = page.locator('.section-files');
-    const projectsSection = page.locator('.section-projects');
-
-    await expect(tabsSection).toBeVisible({ timeout: 10_000 });
-    await expect(filesSection).toBeVisible();
-    await expect(projectsSection).toBeVisible();
   });
 });
