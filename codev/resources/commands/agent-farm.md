@@ -265,7 +265,10 @@ af send [builder] [message] [options]
 ```
 
 **Arguments:**
-- `builder` - Builder ID (e.g., `0042`)
+- `builder` - Target terminal. Can be:
+  - Builder ID: `0042`
+  - Named target: `architect`
+  - **Cross-workspace**: `workspace:target` (e.g., `marketmaker:architect`, `codev-public:0042`)
 - `message` - Message to send
 
 **Options:**
@@ -281,12 +284,19 @@ Sends text to a builder's terminal. Useful for:
 - Providing guidance when builder is blocked
 - Interrupting long-running processes
 - Sending instructions or context
+- Communicating across workspaces (e.g., notifying another project's architect)
 
 **Examples:**
 
 ```bash
-# Send message to builder
+# Send message to builder in current workspace
 af send 0042 "Focus on the auth module first"
+
+# Send to architect in current workspace
+af send architect "PR #42 has been merged"
+
+# Send to another workspace's architect (cross-workspace)
+af send marketmaker:architect "R4 report updated with cost analysis"
 
 # Interrupt and send new instructions
 af send 0042 --interrupt "Stop that. Try a different approach."
