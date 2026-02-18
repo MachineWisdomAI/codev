@@ -542,15 +542,15 @@ This dual-source strategy (SQLite + live shellper processes) ensures sessions su
 | `GET` | `/api/events` | SSE stream for push notifications |
 | `POST` | `/api/notify` | Broadcast notification to SSE clients |
 
-**Project-scoped APIs (via Tower proxy):**
+**Workspace-scoped APIs (via Tower proxy):**
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/workspace/:enc/` | Serve React dashboard for project |
-| `GET` | `/workspace/:enc/api/state` | Get project state (architect, builders, shells) |
-| `POST` | `/workspace/:enc/api/tabs/shell` | Create shell terminal for project |
+| `GET` | `/workspace/:enc/` | Serve React dashboard for workspace |
+| `GET` | `/workspace/:enc/api/state` | Get workspace state (architect, builders, shells) |
+| `POST` | `/workspace/:enc/api/tabs/shell` | Create shell terminal for workspace |
 | `DELETE` | `/workspace/:enc/api/tabs/:id` | Close a tab |
-| `POST` | `/workspace/:enc/api/stop` | Stop all terminals for project |
+| `POST` | `/workspace/:enc/api/stop` | Stop all terminals for workspace |
 | `WS` | `/workspace/:enc/ws/terminal/:id` | WebSocket terminal connection |
 
 **Note**: `:enc` is the workspace path encoded as Base64URL (RFC 4648). Example: `/Users/me/project` → `L1VzZXJzL21lL3Byb2plY3Q`
@@ -845,7 +845,7 @@ const CONFIG = {
 | `servers/tower-utils.ts` | Rate limiting, path normalization, MIME types, static file serving, `buildArchitectArgs()` (Spec 0105 Phase 1) |
 | `servers/tower-types.ts` | Shared TypeScript interfaces: `TowerContext`, `WorkspaceTerminals`, `SSEClient`, `InstanceStatus`, `DbTerminalSession` (Spec 0105) |
 | `servers/tower-tunnel.ts` | Cloud tunnel client lifecycle, config file watching, metadata refresh (Spec 0097 / 0105 Phase 2) |
-| `servers/open-server.ts` | File annotation viewer server |
+| `servers/open-server.ts` | File annotation viewer server (removed in Spec 0092) |
 
 **Note**: As of Spec 0090 Phase 4, `dashboard-server.ts` has been removed. Tower manages everything directly. As of Spec 0105, the monolithic tower-server.ts was decomposed into the focused modules listed above.
 
@@ -2159,7 +2159,7 @@ This section captures architectural decisions and patterns from the full history
 
 #### Architecture Consolidation (Spec 0005, Spec 0008)
 
-> **Note**: The current TypeScript CLI, configuration system, and port registry are documented in [Agent Farm Internals](#agent-farm-internals) and [Key Design Decisions](#key-design-decisions) above. This entry captures migration history.
+> **Note**: The current TypeScript CLI and configuration system are documented in [Agent Farm Internals](#agent-farm-internals) and [Key Design Decisions](#key-design-decisions) above. This entry captures migration history.
 
 - **TypeScript migration** (Spec 0005): The CLI was migrated from a 650+ line bash script to TypeScript using Commander.js. State was initially persisted as JSON at `.agent-farm/state.json` (later migrated to SQLite in Spec 0031).
 
