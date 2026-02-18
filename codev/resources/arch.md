@@ -813,8 +813,6 @@ const CONFIG = {
 ### Testing Framework
 - **Vitest**: Unit and integration tests (`packages/codev/src/__tests__/`)
 - **Playwright**: E2E browser tests (`packages/codev/tests/e2e/`)
-- **bats-assert**: Assertion helpers for test validation
-- **bats-file**: File system assertion helpers
 - **Vitest**: TypeScript unit testing for packages/codev
 
 ### External Tools (Required)
@@ -923,8 +921,7 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── tower-websocket.ts  # WebSocket upgrade routing, WS↔PTY frame bridging
 │   │   │   │   ├── tower-utils.ts      # Rate limiting, path utils, MIME types, buildArchitectArgs()
 │   │   │   │   ├── tower-types.ts      # Shared TypeScript interfaces
-│   │   │   │   ├── tower-tunnel.ts     # Cloud tunnel client lifecycle
-│   │   │   │   └── open-server.ts      # File annotation viewer
+│   │   │   │   └── tower-tunnel.ts     # Cloud tunnel client lifecycle
 │   │   │   ├── db/                     # SQLite database layer
 │   │   │   │   ├── index.ts            # Database operations
 │   │   │   │   ├── schema.ts           # Table definitions
@@ -1251,6 +1248,143 @@ npx playwright test          # E2E browser tests
 ```
 
 See `codev/resources/testing-guide.md` for Playwright patterns and Tower regression prevention.
+
+### 5. Porch (Protocol Orchestrator)
+
+**Location**: `packages/codev/src/commands/porch/`
+
+**Purpose**: Porch is a stateless planner that drives SPIR, TICK, and BUGFIX protocols via a state machine. It does NOT spawn subprocesses or call LLM APIs — it reads state, decides the next action, and emits JSON task definitions that the Builder executes.
+
+#### The next/done Loop
+
+The canonical builder loop:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│ porch next   │────→│ Builder runs │────→│ porch done   │
+│ (emit tasks) │     │ tasks        │     │ (validate +  │
+│              │←────│              │←────│  advance)    │
+└─────────────┘     └──────────────┘     └─────────────┘
+       ↕ gate_pending → STOP, wait for human approval
+       ↕ complete → done
+```
+
+- **`porch next`** — Reads `status.yaml` + filesystem, returns a `PorchNextResponse` with status (`tasks`, `gate_pending`, `complete`, `error`) and an array of `PorchTask` objects (subject, description, sequential flag). No side effects except reading state.
+- **`porch done`** — Signals task completion, runs checks (npm test/build), records reviews, advances state machine.
+- **`porch run`** — Loops `next` → execute → `done` until complete or gate-blocked. Used by strict-mode builders.
+- **`porch status`** — Shows current state and prescriptive next steps.
+- **`porch approve <id> <gate>`** — Human-only gate approval.
+
+#### State: `status.yaml`
+
+State lives in `codev/projects/<id>-<name>/status.yaml` (atomic writes via tmp + fsync + rename).
+
+Key fields:
+- `phase` — Current protocol phase (specify, plan, implement, review)
+- `plan_phases` / `current_plan_phase` — For phased protocols, tracks per-plan-phase progress
+- `gates` — `Record<gate_name, {status: pending|approved, requested_at?, approved_at?}>`
+- `iteration` — Current build-verify iteration (1-based)
+- `build_complete` — Has the build finished this iteration?
+- `history` — Audit trail of all iterations with review results
+
+Review artifacts live alongside as `<id>-<phase>-iter<N>-<model>.txt`.
+
+#### Gate Mechanics
+
+Gates are human approval checkpoints between phases:
+
+1. Phase build-verify completes with reviewer approvals
+2. Gate status transitions: `undefined` → `pending` (with `requested_at`)
+3. `porch next` detects pending gate → returns `gate_pending` status → Builder **stops and waits**
+4. Human runs `porch approve <id> <gate-name>` → status becomes `approved` (with `approved_at`)
+5. Next `porch next` call detects approved gate → advances to next phase
+
+**Pre-approved artifacts**: Specs/plans with YAML frontmatter (`approved: <date>`, `validated: [models]`) auto-approve the corresponding gate, skipping build-verify for that phase.
+
+#### Build-Verify Cycle
+
+For most phases, porch runs an iterative build-verify loop:
+
+1. Emit build task (write spec, implement code, etc.)
+2. Run checks (npm test, npm build — defined per-phase in protocol.json)
+3. Run 3-way consultation (parallel `consult` commands with `--output` flags)
+4. Parse verdicts via `verdict.ts` (scans backward for `VERDICT:` line; defaults to `REQUEST_CHANGES` if not found)
+5. If all approve → advance. If not → increment iteration, emit rebuttal/fix task
+
+#### Builder / Enforcer / Worker Layering
+
+Three layers exist because each addresses a concrete failure mode:
+
+| Layer | Component | Why it exists |
+|-------|-----------|---------------|
+| **Builder** | Claude (in worktree) | Porch was a terrible conversational interface — the Builder provides human-visible progress |
+| **Enforcer** | Porch (state machine) | Claude drifts without deterministic constraints — implements everything in one shot, skips reviews |
+| **Worker** | `claude --print` / SDK | `--print` mode was crippled (no tools, silent failures) — needed proper tool execution |
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `porch/next.ts` | Pure planner — reads state, emits JSON tasks |
+| `porch/state.ts` | State management (read/write status.yaml) |
+| `porch/protocol.ts` | Protocol loading and phase navigation |
+| `porch/verdict.ts` | Review verdict parsing |
+| `porch/plan.ts` | Plan phase extraction and advancement |
+| `porch/index.ts` | CLI commands (status, init, approve) |
+| `porch/types.ts` | Type definitions (ProjectState, PorchTask, etc.) |
+
+### 6. Tower Startup Sequence
+
+The startup ordering is critical — race conditions have caused real bugs when subsystems initialize in the wrong order.
+
+**Canonical boot order** (from `tower-server.ts`):
+
+| Step | Operation | Why this order |
+|------|-----------|----------------|
+| 1 | HTTP server binds to `localhost:port` | Must be listening before anything registers routes |
+| 2 | SessionManager init + stale socket cleanup | Prepares shellper infrastructure |
+| 3 | `initTerminals()` | Terminal management module ready |
+| 4 | `startSendBuffer()` | Typing-aware message delivery ready |
+| 5 | **`reconcileTerminalSessions()`** | **MUST run before step 7** — reconnects shellper sessions from previous run |
+| 6 | `killOrphanedShellpers()` | **MUST run after step 5** — avoids killing sessions that were just reconnected |
+| 7 | `initInstances()` | Enables workspace API handlers — triggers dashboard polling |
+| 8 | `initCron()` | Scheduler starts after instances ready |
+| 9 | `initTunnel()` | Cloud tunnel connects last |
+| 10 | WebSocket upgrade handler installed | Terminal connections accepted |
+
+**Known ordering bugs**:
+- **Bugfix #274**: `initInstances()` before `reconcileTerminalSessions()` allowed dashboard polls to race with reconciliation, corrupting shellper sessions
+- **Bugfix #341**: Killing orphaned shellpers before reconciliation killed sessions that were about to be reconnected
+
+**Defense in depth**: During startup, `getTerminalsForWorkspace()` skips on-the-fly shellper reconnection (via `_reconciling` guard) to prevent races through alternate code paths.
+
+### 7. Message Delivery (`af send`)
+
+**Location**: `servers/send-buffer.ts`, `commands/send.ts`, `terminal/pty-session.ts`
+
+Messages sent via `af send` are not injected immediately — they pass through a **typing-aware send buffer** that prevents message injection while the user is actively typing.
+
+#### How it works
+
+1. **User types** in terminal → WebSocket `data` event → `PtySession.recordUserInput()` updates `lastInputAt` timestamp
+2. **`af send` message arrives** → Tower buffers it via `SendBuffer.enqueue()`
+3. **Every 500ms**, `SendBuffer.flush()` checks each buffered session:
+   - If `session.isUserIdle(3000ms)` → deliver all buffered messages
+   - Else if any message age ≥ 60 seconds → deliver regardless (max buffer age)
+   - Otherwise, keep buffering
+4. **`--interrupt` option** → Sends Ctrl+C first, bypasses buffer entirely
+
+#### Constants
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| Idle threshold | 3,000ms | User must be idle this long before delivery |
+| Max buffer age | 60,000ms | Messages delivered regardless after this time |
+| Flush interval | 500ms | How often the buffer checks for delivery |
+
+#### Address Resolution
+
+`af send` resolves addresses via Tower API with tail-matching: `"0109"` matches `"builder-spir-0109"`. Supports `--all` for broadcast, `--file` for file attachments (48KB max), and `--raw` to skip structured formatting.
 
 ## Installation Architecture
 
