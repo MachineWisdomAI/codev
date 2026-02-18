@@ -270,10 +270,18 @@ describe('PtySession + ShellperClient integration', () => {
       // Process exits
       mockClient.simulateExit(0);
       expect(exitSpy).not.toHaveBeenCalled();
+      expect(session.status).toBe('exited'); // exitCode is set initially
 
       // Process restarts — new data arrives before timeout
       vi.advanceTimersByTime(2000); // 2s restart delay
       mockClient.simulateData('new session started\r\n');
+
+      // exitCode should be cleared — session is running again
+      expect(session.status).toBe('running');
+
+      // Write should work after restart
+      session.write('test input');
+      expect(mockClient.writeData).toContain('test input');
 
       // Advance past the 10s cleanup timeout
       vi.advanceTimersByTime(10_000);

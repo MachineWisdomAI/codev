@@ -49,6 +49,8 @@ export class PtySession extends EventEmitter {
   private _shellperBacked = false;
   private _shellperSessionId: string | null = null;
   private _restartOnExit = false;
+  private _restartCleanupTimeout: ReturnType<typeof setTimeout> | null = null;
+  private _restartCancelFn: (() => void) | null = null;
   private shellperPid = -1;
   private cols: number;
   private rows: number;
@@ -138,21 +140,35 @@ export class PtySession extends EventEmitter {
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
       if (this._restartOnExit) {
+        // Clear any pending restart state from a previous exit (crash loop guard)
+        if (this._restartCleanupTimeout) {
+          clearTimeout(this._restartCleanupTimeout);
+          if (this._restartCancelFn) {
+            client.removeListener('data', this._restartCancelFn);
+          }
+        }
         // Process will auto-restart via SessionManager — keep WebSocket clients
         // connected and don't emit 'exit' so Tower doesn't clear references.
         this.onPtyData('\r\n\x1b[90m[Process exited — restarting...]\x1b[0m\r\n');
         // Wait for the process to restart. If new data arrives (process restarted),
         // cancel the cleanup timer. If no data within 10s (e.g. max restarts
         // exceeded), fall through to normal exit cleanup.
-        const cleanupTimeout = setTimeout(() => {
+        this._restartCleanupTimeout = setTimeout(() => {
           client.removeListener('data', cancelCleanup);
+          this._restartCleanupTimeout = null;
+          this._restartCancelFn = null;
           this.emit('exit', exitInfo.code, exitInfo.signal);
           this.cleanupShellper();
         }, 10_000);
         const cancelCleanup = () => {
-          clearTimeout(cleanupTimeout);
+          clearTimeout(this._restartCleanupTimeout!);
           client.removeListener('data', cancelCleanup);
+          this._restartCleanupTimeout = null;
+          this._restartCancelFn = null;
+          // Process restarted — reset exitCode so write/resize work again
+          this.exitCode = undefined;
         };
+        this._restartCancelFn = cancelCleanup;
         client.on('data', cancelCleanup);
         return;
       }
