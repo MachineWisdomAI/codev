@@ -49,10 +49,24 @@ export function setupCliEnv(): CliEnv {
 
 /**
  * Clean up the test environment.
+ * Retries on ENOTEMPTY — macOS race where subprocesses haven't fully released
+ * file handles by the time rmSync runs.
  */
 export function teardownCliEnv(env: CliEnv): void {
-  if (env.dir && existsSync(env.dir)) {
-    rmSync(env.dir, { recursive: true, force: true });
+  if (!env.dir || !existsSync(env.dir)) return;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      rmSync(env.dir, { recursive: true, force: true });
+      return;
+    } catch (err: any) {
+      if (err.code === 'ENOTEMPTY' && attempt < 2) {
+        // Wait briefly for subprocesses to release handles
+        execFileSync('sleep', ['0.5']);
+        continue;
+      }
+      // Last attempt or different error — ignore cleanup failures
+    }
   }
 }
 
