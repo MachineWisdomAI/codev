@@ -2672,6 +2672,753 @@ E2E tests use real AI interactions (~40 min runtime, ~$4/run). Vitest config (`v
 
 Evaluation of splitting the codebase into three packages: codev (project management), agentfarm (terminal orchestration), porch (protocol engine). Code dependency flow is unidirectional: Codev -> AgentFarm -> Porch (no circular dependencies). Recommended phased approach: extract porch first as it has the cleanest boundaries. (Spec 0082)
 
+### Porch Evolution & Platform Modernization (Specs 0083-0096)
+
+#### Protocol-Agnostic Spawn System (Spec 0083)
+
+The `af spawn` command was refactored to decouple input types from protocols, making the system extensible without hardcoding protocol-specific logic. (Spec 0083)
+
+**Three Orthogonal Concerns**:
+```
+Input Type (what to build from)  x  Mode (who orchestrates)  x  Protocol (what workflow)
+```
+
+- **`--use-protocol <name>`** flag: Overrides default protocol for any input type. Distinct from `--protocol <name>` which is an input type (protocol-only mode). (Spec 0083)
+- **Protocol resolution precedence**: (1) Explicit `--use-protocol` flag, (2) Spec file `**Protocol**: <name>` header, (3) Protocol `default_for` in protocol.json, (4) Hardcoded fallbacks (spir for specs, bugfix for issues). (Spec 0083)
+- **Protocol definition extensions in protocol.json**: Added `input` (type, required, default_for), `hooks` (pre-spawn collision-check, comment-on-issue), and `defaults` (mode) sections. (Spec 0083)
+- **Protocol prompt templates**: Each protocol can provide `protocols/{name}/builder-prompt.md` with mustache-style variable substitution. Falls back to generic prompt construction if no template exists. (Spec 0083)
+
+#### Porch Agent SDK Integration (Spec 0086)
+
+**Builder/Enforcer/Worker Three-Layer Architecture** (Spec 0086):
+
+```
+       [ HUMAN ]
+           |  (natural conversation)
++------------------------------+
+|  BUILDER  (Interactive Claude)|  Claude Code in tmux
+|  Calls porch, relays results |
++------------------------------+
+           |
+           |  porch run <id> --single-phase
+           v
++------------------------------+
+|  ENFORCER  (Porch)           |  Deterministic Node.js state machine
+|  Enforces phases, reviews,   |
+|  gates, iterations           |
++------------------------------+
+      /              \
+     / BUILD          \ VERIFY
+    v                  v
++-----------+    +-------------+
+| WORKER    |    | CONSULT CLI |
+| (AgentSDK)|    | (Reviewer)  |
++-----------+    +-------------+
+```
+
+Each layer exists to solve a specific failure mode: (Spec 0086)
+- **Builder**: Porch was a terrible conversational interface; humans need Claude's understanding to interact naturally.
+- **Enforcer**: Claude drifts when given autonomy -- skips reviews, bypasses gates, implements everything in one shot.
+- **Worker**: `claude --print` was crippled -- no tools, no file editing, stateless, silent 0-byte failures.
+
+Key changes in Spec 0086:
+- `buildWithSDK()` in `claude.ts` replaced `claude --print` subprocess with Anthropic Agent SDK `query()` -- programmatic, in-process, full tool access (Read, Edit, Bash, Glob, Grep).
+- `--single-phase` flag: Builder stays in the loop between phases, receives structured `__PORCH_RESULT__` JSON with phase, status, gate, verdicts, artifact.
+- `repl.ts` and `signals.ts` removed -- the Builder (interactive Claude) is the interface, Agent SDK provides structured completion instead of XML signals.
+
+#### Porch Timeout, Termination, and Retries (Spec 0087)
+
+Added reliability mechanisms to porch's build loop (Spec 0087):
+
+| Mechanism | Configuration | Purpose |
+|-----------|---------------|---------|
+| Build timeout | `BUILD_TIMEOUT_MS` = 15 min | Prevents indefinite hang on Agent SDK stream stall |
+| Build retry | `BUILD_MAX_RETRIES` = 3, backoff [5s, 15s, 30s] | Recovers from transient API failures |
+| Circuit breaker | `CIRCUIT_BREAKER_THRESHOLD` = 5 consecutive failures | Halts with exit code 2 after persistent failures |
+| AWAITING_INPUT | Detected via signal scan of worker output | Writes to status.yaml, exits code 3, resumes on next `porch run` |
+
+#### Porch Build Counter (Spec 0089)
+
+Added `PORCH_BUILD_COUNTER_KEY` constant (`'porch.total_builds'`) in `packages/codev/src/commands/porch/build-counter.ts` for standardized build counting across sessions. (Spec 0089)
+
+#### Terminal Session Persistence (Spec 0090 TICK-001)
+
+Added `terminal_sessions` table to `global.db` with migration v3 for terminal session persistence across Tower restarts. (Spec 0090 TICK-001)
+
+Key design decisions:
+- **Destructive reconciliation**: `reconcileTerminalSessions()` kills orphaned tmux sessions and deletes all stale DB rows on startup, since surviving PTY processes are effectively zombies that cannot be re-attached.
+- **Path normalization**: `normalizeProjectPath()` helper ensures consistent save/delete/query operations. Double delete on both normalized and raw paths handles inconsistencies.
+- **Race condition guard**: `saveTerminalSession()` checks if project is still in `projectTerminals` Map before saving, preventing zombie rows.
+
+#### Terminal File Links and File Browser (Spec 0092)
+
+**Port Consolidation** (Spec 0092): Eliminated `open-server.ts` and moved file viewing through Tower API endpoints, freeing ports 4250-4269.
+
+New Tower endpoints (Spec 0092):
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/project/:enc/api/tabs/file` | Create file tab, returns tab ID |
+| `GET` | `/project/:enc/api/file/:id` | Get file content with language detection |
+| `GET` | `/project/:enc/api/file/:id/raw` | Get raw file (images, video) |
+| `POST` | `/project/:enc/api/file/:id/save` | Save file changes |
+| `GET` | `/project/:enc/api/git/status` | Git status (porcelain format, max 50 files) |
+| `GET` | `/project/:enc/api/files/recent` | Recently opened file tabs |
+
+**Terminal File Links** (Spec 0092): `@xterm/addon-web-links` integrated into Terminal.tsx with custom regex detection for file paths (absolute, relative, with line:column numbers). `looksLikeFilePath()` heuristic distinguishes files from URLs/domains. Click handler opens file in dashboard tab with line scrolling.
+
+New dashboard files (Spec 0092):
+| File | Purpose |
+|------|---------|
+| `dashboard/src/components/FileViewer.tsx` | File viewer with text (line numbers + editing), image, and video support |
+| `dashboard/src/lib/filePaths.ts` | Path regex and parsing utilities |
+
+**FileTree Enhancement** (Spec 0092):
+- Git status indicators (A/M/?) with color coding and 30-second periodic refresh
+- Search autocomplete box with fuzzy matching on file paths
+- Recent files section showing recently opened file tabs
+- View mode toggle between Recent and Tree views
+
+#### SPIDER to SPIR Rename (Spec 0093)
+
+The SPIDER protocol was renamed to SPIR (Specify, Plan, Implement, Review) across the entire codebase. (Spec 0093)
+
+- ~728 references to "SPIDER" across ~224 files were updated
+- Directory rename: `codev-skeleton/protocols/spider/` and `codev/protocols/spider/` to `spir/`
+- `protocol.json` uses `"name": "spir"` with `"alias": "spider"` for backward compatibility
+- Branch naming convention updated: `spir/XXXX-feature-name/phase-name`
+- Both `--use-protocol spider` (alias) and `--use-protocol spir` (new) work
+
+#### Tower Mobile Compaction (Spec 0094)
+
+CSS-only compaction of the Tower overview page (`templates/tower.html`) for mobile viewports (<=600px). (Spec 0094)
+
+Changes:
+- Share button hidden on mobile (pointless when already on phone)
+- Project name + status + Restart/Stop on one line (flexbox row with wrap)
+- Project path row hidden on mobile
+- Port items (Overview, Architect, shells) compacted to horizontal rows
+- `.new-shell-row` semantic class replaces fragile inline style targeting
+- Recent projects: name + time + Start inline, path hidden
+- Section spacing reduced
+- All buttons remain tappable (min 36px touch targets, `@media (pointer: coarse)` still sets 44px)
+
+#### Porch as Planner (Spec 0095)
+
+**Architectural transformation**: Porch changed from an orchestrator (spawning Claude via Agent SDK in a while loop) to a pure planner (reading state and emitting structured JSON task definitions). (Spec 0095)
+
+**New command**: `porch next <id>` replaces `porch run`. Outputs structured `PorchNextResponse` JSON:
+
+```typescript
+interface PorchNextResponse {
+  status: 'tasks' | 'gate_pending' | 'complete' | 'error';
+  phase: string;
+  iteration: number;
+  plan_phase?: string;
+  tasks?: PorchTask[];
+  gate?: string;
+  error?: string;
+  summary?: string;
+}
+
+interface PorchTask {
+  subject: string;
+  activeForm: string;
+  description: string;
+  sequential?: boolean;
+}
+```
+
+**`done()` / `next()` separation** (Spec 0095):
+- `porch done` handles completion signaling (running checks, setting `build_complete`)
+- `porch next` handles planning only (reads state, emits tasks)
+- Builder loop: `porch next` -> execute tasks -> `porch done` -> `porch next` -> ...
+
+**Filesystem-as-truth** (Spec 0095): `porch next` infers completion from artifacts on disk rather than explicit signals. Review files exist = consultation completed. Verdicts parsed from review files. This makes the system crash-recoverable and idempotent.
+
+**Deleted modules** (Spec 0095):
+- `run.ts` (1052 lines) -- orchestrator loop
+- `claude.ts` (135 lines) -- Agent SDK wrapper
+- `@anthropic-ai/claude-agent-sdk` dependency removed
+
+**New modules** (Spec 0095):
+- `next.ts` (338 lines) -- core `next()` planning function
+- `verdict.ts` (62 lines) -- extracted `parseVerdict()` and `allApprove()`
+
+Net result: -1155 lines.
+
+#### Test Infrastructure Improvements (Spec 0096)
+
+**Unified test pipeline** replacing fragmented multi-framework setup. (Spec 0096)
+
+**Framework changes**:
+- BATS retired entirely (156 files, ~20,000 lines deleted including vendored libraries)
+- All CLI integration tests migrated to Vitest (`src/__tests__/cli/*.e2e.test.ts`)
+- `*.e2e.test.ts` naming convention for server-spawning tests, excluded from default `vitest.config.ts`
+- Separate `vitest.cli.config.ts` with appropriate timeouts (30s vs 20min for porch e2e)
+
+**CI pipeline** (`.github/workflows/test.yml`):
+
+| Job | What it runs | When |
+|-----|-------------|------|
+| Unit Tests | `npx vitest run --coverage` | Every PR, push to main |
+| Tower Integration | `vitest.e2e.config.ts` (excluding porch e2e) | Every PR, push to main |
+| CLI Integration | `npx vitest run src/__tests__/cli/` | Every PR, push to main |
+| Dashboard Tests | Playwright with auto-started tower | Every PR, push to main |
+
+**Coverage**: `@vitest/coverage-v8` with thresholds of 62% lines / 55% branches (calibrated from actual baseline of 62.31% / 56.42%).
+
+**Playwright automation**: `webServer` config in `playwright.config.ts` auto-starts tower on port 4100. `reuseExistingServer: true` for local coexistence with dev tower.
+
+**Post-release verification**: `scripts/verify-install.mjs` replaces BATS install tests -- `npm pack` -> `npm install -g` -> verify binaries.
+
+### Cloud, Messaging & Session Management (Specs 0097-0106)
+
+#### Cloud Tunnel Client (Spec 0097)
+
+The Cloud Tunnel Client replaces cloudflared with a built-in HTTP/2 role-reversal tunnel that connects the Tower to codevos.ai. The tunnel uses the `ws` library for WebSocket transport with JSON message authentication. (Spec 0097)
+
+**Architecture**:
+- Tower is the H2 *server* (not client), so it cannot initiate outbound H2 requests to codevos.ai
+- WebSocket transport: Tower connects to codevos.ai via WebSocket (`ws` library + `createWebSocketStream()`), authenticating with JSON messages over the WebSocket matching the codevos.ai server protocol
+- codevos.ai proxies HTTP requests and WebSocket upgrades through the tunnel to `localhost:4100`
+- SSRF prevention: tunnel ONLY proxies to `localhost:4100`. The `/api/tunnel/*` path prefix is blocked before proxying. `isBlockedPath()` percent-decodes and normalizes the path (via `decodeURIComponent` + `new URL().pathname`) before checking prefixes, preventing bypass via `%2F`, `%2f`, `%61` encoding, and `..` dot segments
+
+**Resilience**:
+- Exponential backoff with jitter: 1s initial, 60s cap for transient failures
+- Rate limiting: 60s first retry, escalates to 5-minute intervals on `rate_limited` responses
+- Circuit breaker: stops retrying on authentication failures (HTTP 401/403)
+- Auto-reconnect after network disruption or machine sleep/wake
+
+**Registration**:
+- `af tower register`: generates token via codevos.ai API, user pastes token. Cloud config stored in `~/.agent-farm/cloud.json` with enforced `0600` permissions (uses `chmodSync` after `writeFileSync` because Node only applies `mode` on file creation)
+- `af tower deregister`: removes registration and stops tunnel connection
+- `af tower status`: extended with cloud registration info
+- `CODEVOS_URL` env var overrides default `https://codevos.ai` for local/staging instances
+- `-p, --port` CLI option on register/deregister for custom-port towers (Spec 0097)
+
+**Dashboard**: `CloudStatus` component shows tunnel connection state. Uses root-relative paths (`/api/tunnel/status`, etc.) instead of `apiUrl()` because tunnel endpoints are tower-level, not project-scoped. (Spec 0097)
+
+#### Port Registry Removal (Spec 0098)
+
+The per-project port allocation system (port blocks 4200-4299, 4300-4399, etc.) was removed in Spec 0098. Since Spec 0090 (Tower Single Daemon), the Tower at port 4100 is the only HTTP server -- per-project port blocks were allocated in SQLite but nothing listened on them. (Spec 0098)
+
+**Changes**:
+- `port-registry.ts` deleted (220 lines)
+- All references to `dashboardPort`, `architectPort`, `builderPortRange`, `utilPortRange` removed
+- Builder/UtilTerminal types no longer carry `port`/`pid` fields
+- `--remote` flag removed from `af start`
+- `{PORT}` in builder role resolves to 4100 (Tower port)
+- `af consult` routes to Tower at 4100, not dead per-project port
+- `af status` no longer shows per-project port numbers
+- Project discovery replaced: `getKnownProjectPaths()` now uses `terminal_sessions` table (persistent) combined with `projectTerminals` in-memory cache (current session), replacing `loadPortAllocations()` (Spec 0098)
+
+**Migration**: Migration v2 made a no-op (instead of deleted) to preserve version numbering for existing installations. Five places in `tower-server.ts` hardcode `port: 0` to preserve the JSON API shape for backward compatibility. (Spec 0098)
+
+#### Tower Codebase Hygiene (Spec 0099)
+
+Post-migration cleanup addressing naming, dead code, state management, and error handling. Key architectural changes: (Spec 0099)
+
+- **Module extractions**: `gate-status.ts` (reads porch gate status from filesystem), `file-tabs.ts` (SQLite persistence for file tabs with dependency injection), `session.ts` (shared session naming with `getBuilderSessionName()`)
+- **File tab persistence**: `file_tabs` SQLite table with write-through pattern. File tabs survive Tower restart via SQLite rehydration on startup
+- **Error handling**: Tower error responses are structured JSON with `console.error` logging. Two conventions exist: terminal routes use `{ error: 'CODE', message: '...' }` while project/file routes use `{ error: message }`
+- **Removed**: `orphan-handler.ts` deleted, `port`/`pid` fields removed from Builder/UtilTerminal types
+- All user-facing messages reference Tower (not dashboard-server). `shell.ts`, `open.ts` use `TowerClient` with auth headers. `attach.ts` generates correct Tower URLs.
+
+#### Clickable File Paths in Terminal (Spec 0101)
+
+Wired existing `FILE_PATH_REGEX` / `parseFilePath` utilities into xterm.js via a custom `ILinkProvider` with persistent decorations. (Spec 0101)
+
+**Architecture**:
+- `FilePathLinkProvider` (`dashboard/src/lib/filePathLinkProvider.ts`): Custom `ILinkProvider` implementation with platform-aware modifier detection (Cmd+Click on macOS, Ctrl+Click on others via `navigator.platform`)
+- `FilePathDecorationManager`: Uses xterm.js `registerDecoration` with `IMarker` for persistent dotted underline overlays that survive scroll and re-render. Dual approach: `ILink.decorations` for hover color change, `registerDecoration` for persistent visual indicators
+- Server-side path resolution: `POST /api/tabs/file` endpoint uses `terminalId` to resolve cwd-relative paths. `PtySession` exposes a `cwd` getter for the current working directory
+- Symlink-safe containment: Uses `startsWith(base + path.sep)` pattern (not bare `startsWith(base)`) plus `realpathSync` for symlink resolution
+- Pattern recognition: relative, absolute, dot-relative, parent-relative, with line number, with line+column, VS Code style (Spec 0101)
+
+#### Porch CWD/Worktree Awareness (Spec 0102)
+
+Automatic project ID detection from current working directory when running inside a builder worktree. (Spec 0102)
+
+**Architecture**:
+- `detectProjectIdFromCwd()` in `state.ts`: Extracts project ID from CWD path using regex matching against `.builders/` worktree patterns. Handles both numeric IDs (`0073`) and named patterns (`bugfix-228`). Uses `path.resolve()` + forward-slash normalization for cross-platform safety
+- `resolveProjectId()` in `state.ts`: Testable function encapsulating the full resolution priority chain: explicit arg > CWD detection > filesystem scan > error
+- Integration: `getProjectId()` in `index.ts` delegates to `resolveProjectId()`. Numeric ID argument is now optional for all porch commands when invoked from within `.builders/<id>/` directories
+- Detection works from subdirectories (e.g., `.builders/0073/src/commands/`)
+
+#### Claude Agent SDK for Consultation (Spec 0103)
+
+Replaced Claude CLI subprocess delegation in `consult` with the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`). (Spec 0103)
+
+**Architecture**:
+- `@anthropic-ai/claude-agent-sdk` added as a hard dependency (not optional -- essential for consultation, avoids dynamic import complexity)
+- `runClaudeConsultation()` function using `query()` async iterator. Intercepts claude model in `runConsultation()` before CLI path
+- Claude has tool-using capabilities (Read, Glob, Grep) during reviews via SDK `allowedTools` parameter
+- `CLAUDECODE` env var stripping: Iterates over `process.env` entries and excludes `CLAUDECODE` to prevent nesting guard from blocking Claude in builder contexts
+- `SDK_MODELS` constant separates SDK-based models from CLI-based models in `MODEL_CONFIGS`
+- Tool use blocks logged to stderr with `[Tool: name: detail]` format
+- `doctor.ts` updated: Claude removed from `AI_DEPENDENCIES`, replaced with `verifyClaudeViaSDK()` for auth verification
+
+#### Spawn Command Decomposition (Spec 0105 Phase 7)
+
+`spawn.ts` (1,405 lines) decomposed into 3 focused files: (Spec 0105)
+
+| Module | Lines | Responsibility |
+|--------|-------|---------------|
+| `spawn-roles.ts` | 343 | Template rendering, prompt building, protocol/mode resolution |
+| `spawn-worktree.ts` | 404 | Git worktree creation, GitHub integration, collision detection, session management |
+| `spawn.ts` | 570 | Orchestrator: mode-specific spawn handlers |
+
+#### Porch Check Normalization Bug (Spec 0106)
+
+`normalizeProtocol()` merges all phases' checks into a flat `Record<string, CheckDef>`, so if the review phase defines a `"tests"` check, it overrides the implement phase's version. Phase-scoped check definitions would prevent override collisions. (Spec 0106)
+
+### Cloud UX, Messaging & Terminal Enhancements (Specs 0107-0118)
+
+#### Tower Cloud Connect (OAuth UI) (Spec 0107)
+
+Tower now supports in-browser OAuth registration for Codev Cloud, replacing the CLI-only `af tower register` flow. (Spec 0107)
+
+**New modules**:
+- `lib/nonce-store.ts` -- In-memory nonce store with 5-minute TTL and single-use semantics for OAuth state management. Module-level singleton pattern matching `tower-tunnel.ts`. (Spec 0107)
+- `lib/token-exchange.ts` -- Extracted `redeemToken()` (POST to cloud server, 30s timeout, redirect-following) from `tower-cloud.ts` into a shared module usable by both CLI and tunnel endpoints. (Spec 0107)
+- `lib/device-name.ts` -- Device name normalization (trim, lowercase, spaces/underscores to hyphens, strip invalid chars) and validation (1-63 chars, alphanumeric + hyphens, start/end with letter/digit). (Spec 0107)
+
+**Enhanced tunnel endpoints** (in `tower-tunnel.ts`):
+- `POST /api/tunnel/connect` -- Now dual-purpose: with `{ name, serverUrl }` body initiates OAuth (creates nonce, returns `authUrl`); without body performs smart reconnect using existing credentials. (Spec 0107)
+- `GET /api/tunnel/connect/callback` -- OAuth callback handler with nonce validation, token exchange, credential writing, and HTML success/error pages. Route ordering is critical: `connect/callback` must be checked before `connect`. (Spec 0107)
+- `POST /api/tunnel/disconnect` -- Full cleanup: read config first, disconnect tunnel, server-side deregister (best-effort DELETE), delete local credentials last. Order matters. (Spec 0107)
+- `GET /api/tunnel/status` -- Now includes `hostname` field for UI device name defaults. (Spec 0107)
+
+**CLI rename**: `af tower register` renamed to `af tower connect`; `af tower deregister` renamed to `af tower disconnect`. Old names preserved as hidden aliases via `towerCmd.addCommand(cmd, { hidden: true })` (not `.alias()` which shows in help output). (Spec 0107)
+
+**Default cloud URL**: Changed from `https://codevos.ai` to `https://cloud.codevos.ai`. (Spec 0107)
+
+#### Porch Gate Notifications (Spec 0108)
+
+Porch now sends direct `af send architect` notifications via `execFile` when gates transition to pending, replacing the polling-based gate watcher. (Spec 0108)
+
+**New module**: `commands/porch/notify.ts` -- `notifyArchitect(projectId, gateName, worktreeDir)` function. Fire-and-forget: `execFile` with 10s timeout, errors logged to stderr but never thrown. Called at the two gate-transition points in `next.ts` (max-iterations and post-consultation), NOT at the re-request path (which detects already-pending gates). (Spec 0108)
+
+**Removed**: `gate-watcher.ts` (active poller) and its tests. **Preserved**: `gate-status.ts` (passive status reader) still used by dashboard API in `tower-terminals.ts` and `tower-instances.ts`. (Spec 0108)
+
+#### Tunnel Heartbeat (Spec 0109)
+
+`TunnelClient` now implements WebSocket ping/pong heartbeat for dead connection detection. (Spec 0109)
+
+- Sends `ws.ping()` every 30s (`PING_INTERVAL_MS`), declares dead if no pong within 10s (`PONG_TIMEOUT_MS`)
+- On timeout: transitions to `disconnected`, increments `consecutiveFailures`, triggers existing reconnection logic (exponential backoff, circuit breaker)
+- `startHeartbeat(ws)` is idempotent -- calls `stopHeartbeat()` first, tracks ws instance via `heartbeatWs` property to prevent duplicate listeners
+- `stopHeartbeat()` clears both timers AND removes pong listener from tracked ws via `removeAllListeners('pong')`
+- Stale WebSocket guard: pong timeout checks `ws === this.ws` before triggering reconnect, preventing cross-connection interference
+- `ws.ping()` errors caught -- falls through to arm pong timeout (defensive improvement over early-return, caught by Codex review)
+- Integration points: `startHeartbeat()` after `setState('connected')` in `startH2Server()`; `stopHeartbeat()` in both `cleanup()` and `disconnect()`
+- All implementation in `tunnel-client.ts` -- no server-side changes. (Spec 0109)
+
+#### Messaging Infrastructure (Spec 0110)
+
+Standardized agent naming, cross-project messaging via `POST /api/send`, and a WebSocket message bus (`/ws/messages`). (Spec 0110)
+
+**New modules**:
+- `utils/agent-names.ts` -- Agent name generation (`builder-{protocol}-{id}` format, leading zeros stripped), parsing, and case-insensitive resolution with tail-match backward compatibility (bare `0109` resolves to `builder-spir-109`). (Spec 0110)
+- `servers/tower-messages.ts` -- Address resolution (`resolveTarget()` with `[project:]agent` parsing, workspace basename matching, ambiguity detection returning 409), subscriber management for WebSocket message bus, and `broadcastMessage()`. (Spec 0110)
+- `utils/message-format.ts` -- Extracted `formatArchitectMessage()` and `formatBuilderMessage()` from `send.ts` into shared utility. (Spec 0110)
+
+**POST /api/send endpoint** (in `tower-routes.ts`):
+- Body: `{ to, message, from?, fromWorkspace?, workspace?, options? }`
+- Resolution: `to` parsed via `parseAddress()`, resolved against workspace terminals with exact > tail match priority
+- Error codes: 400 (INVALID_PARAMS), 404 (NOT_FOUND), 409 (AMBIGUOUS -- multiple workspace basenames or multiple agent tail matches)
+- After writing to terminal, broadcasts structured `MessageFrame` to all `/ws/messages` subscribers
+- `fromWorkspace` identifies sender's workspace (for `from.project` in broadcast), distinct from `workspace` (target resolution context). (Spec 0110)
+
+**WebSocket /ws/messages** (in `tower-websocket.ts`):
+- Subscribers receive structured JSON `MessageFrame` with timestamp, from (project + agent), to (project + agent), content, metadata
+- Optional `?project=` query param filters messages to specific workspace
+- Cleanup on close/error events. (Spec 0110)
+
+**Builder naming convention**: `builder-{protocol}-{id}` (e.g., `builder-spir-109`, `builder-bugfix-42`). Worktree paths: `.builders/{protocol}-{id}[-{slug}]/`. Branch names: `builder/{protocol}-{id}[-{slug}]`. All names lowercase, leading zeros stripped from numeric IDs. (Spec 0110)
+
+#### Dead Code Removal (Spec 0111)
+
+Vanilla JS dashboard (`templates/dashboard/`, 16 files, ~4600 LOC) deleted along with dead `clipboard.test.ts`. Replaced by React dashboard (Spec 0085). (Spec 0111)
+
+#### "Project" to "Workspace" Rename (Spec 0112)
+
+Systematic rename of all "project" identifiers meaning "repository/codebase" to "workspace" throughout Tower, Agent Farm, Dashboard, CLI, and HQ packages. (Spec 0112)
+
+**Key changes**:
+- `Config.projectRoot` -> `Config.workspaceRoot` (~39 files)
+- `findProjectRoot()` -> `findWorkspaceRoot()`
+- `ProjectTerminals` -> `WorkspaceTerminals`, `getProjectTerminals` -> `getWorkspaceTerminals`
+- URL paths `/project/` -> `/workspace/`, `/api/projects/` -> `/api/workspaces/`
+- `known_projects` table -> `known_workspaces` table
+- `project_path` column -> `workspace_path` in `terminal_sessions`, `file_tabs`, `known_workspaces`
+- Database migration v9 uses CREATE-INSERT-DROP pattern (matching v7/v8 style)
+- `codev-hq` wire protocol updated for connector consistency
+- Porch `projectId` and work-unit "project" terminology intentionally unchanged. (Spec 0112)
+
+#### Shellper Debug Logging (Spec 0113)
+
+Comprehensive diagnostic logging across the shellper process lifecycle. (Spec 0113)
+
+**Shellper-side** (`shellper-main.ts`, `shellper-process.ts`):
+- `logStderr(message)` -- EPIPE-safe timestamped stderr write helper (try/catch, silently ignores EPIPE)
+- Lifecycle events logged: startup (pid, command, socket), PTY spawn (pid, cols, rows), SIGTERM, PTY exit (code, signal), socket listen, connection accept/close, HELLO, WELCOME, SPAWN, protocol errors
+- `ShellperProcess` accepts `log: (msg: string) => void` callback as constructor parameter (dependency injection for testability). (Spec 0113)
+
+**Tower-side** (`session-manager.ts`):
+- `StderrBuffer` -- Ring buffer class (500 elements) with partial-line handling, truncation, and UTF-8 replacement for capturing shellper stderr output
+- `wireStderrCapture()` -- Attaches to child process stderr stream, fills StderrBuffer
+- `logStderrTail()` -- On session exit, logs last N lines of stderr to Tower logger with deduplication flag (`stderrTailLogged`) preventing double logging from both `exit` and `close` events
+- Optional `logger` callback in `SessionManagerConfig`, wired from Tower's `log()` utility
+- SessionManager lifecycle methods log: create (start, success with pid, failure), reconnect (attempt + specific failure reason for each of 4 return-null paths), restart (count/delay, max exceeded). (Spec 0113)
+
+**Tower event logging** (`tower-instances.ts`, `tower-terminals.ts`):
+- Exit code and signal propagated through `PtySession` exit event to Tower-level logging. (Spec 0113)
+
+#### Consultation Metrics (Spec 0115)
+
+Every `consult` invocation now records timing, token usage, cost, and protocol context to `~/.codev/metrics.db`. (Spec 0115)
+
+**New modules**:
+- `commands/consult/metrics.ts` -- `MetricsDB` class wrapping SQLite (`better-sqlite3`, WAL mode, busy_timeout=5000). Single `consultation_metrics` table with 15 columns. `record()` never throws (try/catch with stderr warning). `query()` and `summary()` with SQL aggregation (COUNT, SUM, AVG, GROUP BY) for breakdowns by model, review_type, protocol. (Spec 0115)
+- `commands/consult/usage-extractor.ts` -- Token/cost extraction: Claude (SDK `total_cost_usd` and usage fields), Gemini (JSON `stats.models.*.tokens`), Codex (JSONL `turn.completed` events, per-field completeness tracking). Static pricing constants for Gemini and Codex. All parsing wrapped in try/catch returning null on failure. (Spec 0115)
+- `commands/consult/stats.ts` -- `consult stats` subcommand with summary tables, `--last N`, `--json`, `--model`, `--days`, `--protocol`, `--project-id` filters. (Spec 0115)
+
+**Integration**: `consult/index.ts` pipes stdout unconditionally, adds `--output-format json` for Gemini and `--json` for Codex to get structured token data. Porch consultation templates in `next.ts` include `--protocol` and `--project-id` flags. (Spec 0115)
+
+#### Shellper Resource Leakage Prevention (Spec 0116)
+
+Addresses accumulating Unix sockets and orphaned OS processes during long Tower sessions and E2E test suites. (Spec 0116)
+
+**Periodic cleanup**: `cleanupStaleSockets()` runs on a configurable interval (`SHELLPER_CLEANUP_INTERVAL_MS`, default 60s, min 1s) in Tower runtime. Interval cleared during graceful shutdown via `clearInterval`. (Spec 0116)
+
+**Defensive creation**: `SessionManager.createSession()` first catch block now calls `child.kill('SIGKILL')` to prevent orphaned shellper processes when `readShellperInfo()` fails. (Spec 0116)
+
+**Test socket isolation**: `SHELLPER_SOCKET_DIR` env var support for isolated test socket directories. Uses `/tmp/` instead of `os.tmpdir()` to avoid macOS `sun_path` 104-byte limit. (Spec 0116)
+
+**Shared test utilities**: Extracted `startTower`, `stopServer`, port helpers from 6 duplicated E2E files into `tower-test-utils.ts` with `extraEnv` parameter. `cleanupAllTerminals()` added to every E2E test's `afterAll`. (Spec 0116)
+
+#### Session Creation Consolidation (Spec 0117)
+
+`defaultSessionOptions()` factory function in `terminal/index.ts` replaces 7 duplicated session creation sites across 5 files. (Spec 0117)
+
+- `SessionDefaults` interface: `cols`, `rows`, `restartOnExit`, plus optional `restartDelay`, `maxRestarts`, `restartResetAfter`
+- Accepts `Partial<SessionDefaults>` overrides via spread
+- Call sites: `tower-routes.ts` (2), `tower-instances.ts` (1), `spawn-worktree.ts` (1), `pty-manager.ts` (2), `session-manager.ts` (1)
+- `DEFAULT_COLS` and `DEFAULT_ROWS` constants remain exported for `shellper-process.ts` class member defaults. (Spec 0117)
+
+#### Shellper Multi-Client Connections (Spec 0118)
+
+Shellper now supports multiple simultaneous connections, enabling `af attach` alongside Tower. (Spec 0118)
+
+**Protocol extension**: `HelloMessage` extended with required `clientType: 'tower' | 'terminal'` field. (Spec 0118)
+
+**Multi-client model** (`shellper-process.ts`):
+- `connections: Map<string, ConnectionEntry>` replaces `currentConnection: net.Socket`
+- `broadcast()` method sends DATA and EXIT frames to all connected clients
+- Tower replacement: new tower connection destroys previous tower connection only; terminal connections always coexist
+- Access control: SIGNAL and SPAWN restricted to tower connections (terminal connections silently ignored); DATA and RESIZE from any client
+- Backpressure: `socket.write()` returning `false` removes client from map immediately (aggressive but correct -- prevents slow clients degrading broadcast)
+- Pre-HELLO frame gating: non-HELLO frames ignored until handshake completes (prevents unauthenticated PTY access)
+- `pendingSockets` set tracks pre-HELLO connections for clean shutdown. (Spec 0118)
+
+**af attach** (`commands/attach.ts`):
+- Direct Unix-socket connection to shellper via `ShellperClient` with `clientType: 'terminal'`
+- Raw terminal mode (no line buffering, no echo), SIGWINCH -> RESIZE frames, Ctrl-C passthrough, Ctrl-\ (0x1c) detach key
+- Socket discovery: primary lookup from SQLite `terminal_sessions` table (workspace-scoped), fallback to scanning `~/.codev/run/shellper-*.sock`
+- Terminal state restored on disconnect via process exit handler. (Spec 0118)
+
+### Project Management, Reviews & Workflow (Specs 0119-0127, 0325, 0350)
+
+#### Consult CLI Architecture (Spec 0325)
+
+The `consult` CLI has three modes: **general** (ad-hoc prompts), **protocol-based** (structured reviews), and **stats** (metrics). (Spec 0325)
+
+**Mode routing** (in precedence order): (Spec 0325)
+1. If first arg is `stats` -> stats mode
+2. If `--type` is present -> protocol mode
+3. If `--prompt` or `--prompt-file` is present -> general mode
+4. None -> error with usage help
+
+**Protocol-owned prompt templates**: Each protocol owns its review prompts in a `consult-types/` subdirectory rather than using shared top-level files. Resolution: `codev/protocols/<protocol>/consult-types/<type>-review.md`. Only `integration-review.md` remains shared in `codev/consult-types/`. (Spec 0325)
+
+| Protocol | Owned Prompts |
+|----------|---------------|
+| `spir` | spec-review, plan-review, impl-review, phase-review, pr-review |
+| `bugfix` | impl-review, pr-review |
+| `tick` | spec-review, plan-review, impl-review, pr-review |
+| `maintain` | impl-review, pr-review |
+
+**Context resolution** differs by environment: (Spec 0325)
+- **Builder worktree** (detected via `/.builders/` in cwd): auto-detects project ID from porch state, resolves spec/plan via glob, impl via git diff from merge-base, PR via `gh pr list --head <branch>`, phase via `git show HEAD`
+- **Architect context**: requires `--issue <N>` flag, resolves artifacts via glob and `gh pr list --search`
+
+**PR reviews** receive the full PR diff (via `gh pr diff`) in the prompt plus local filesystem access for surrounding context. No temporary worktrees are created. (Spec 0325)
+
+**All three models get file access**: Claude via Agent SDK tools, Codex via read-only sandbox, Gemini via `--yolo` mode with cwd set to the correct worktree. (Spec 0325)
+
+**Porch command generation** (in `next.ts`): format changed from positional subcommands (`consult --model gemini spec 42`) to flag-based (`consult -m gemini --protocol spir --type spec`). `verify.type` values in protocol.json changed from `spec-review` to `spec`, `plan-review` to `plan`, `impl-review` to `impl`, `pr-ready` to `pr`. (Spec 0325)
+
+#### Codex SDK Integration (Spec 0120)
+
+Codex consultations use `@openai/codex-sdk` instead of spawning the `codex` CLI as a subprocess. This mirrors the existing Claude Agent SDK pattern. (Spec 0120)
+
+- `runCodexConsultation()` in `consult/index.ts` uses `Codex` class with `thread.runStreamed()` for typed streaming events
+- Text captured from `item.completed` events with `item.type === 'agent_message'`
+- Usage data (tokens, cost) extracted from `turn.completed` structured events
+- System prompt passed via `experimental_instructions_file` SDK config (requires temp file, cleaned up in `finally` block)
+- Sandbox mode via `config: { sandbox: 'read-only' }`
+- Cost computation uses local `CODEX_PRICING` constant; each SDK-based model owns its own cost logic
+- Gemini remains subprocess-based (no SDK available)
+
+#### Rebuttal-Based Review Advancement (Spec 0121)
+
+Porch's review iteration loop replaced with a **build-verify-rebuttal** flow: (Spec 0121)
+
+1. Builder creates artifact
+2. Porch runs 3-way consultation (unchanged)
+3. If all approve: advance immediately (unchanged)
+4. If any request changes: porch emits "write rebuttal" task
+5. Builder writes rebuttal file -> porch advances immediately (no second consultation)
+
+Rebuttal files follow naming pattern: `codev/projects/<id>-<name>/<id>-<phase>-iter<N>-rebuttals.md`. The rebuttal replaces the iteration loop entirely -- `max_iterations` stays at 1, iteration counter is not incremented for rebuttals. The safety valve is unreachable and was removed. (Spec 0121)
+
+#### Tower Shellper Reconnect Enhancement (Spec 0122)
+
+**Bounded concurrency for reconnection probes**: The sequential `for...of` loop in `reconcileTerminalSessions()` was refactored into batched `Promise.allSettled` with a concurrency limit of 5. This prevents slow startup when many dead shellper sessions exist (e.g., 10 dead sessions with 2s timeout each would take 20s sequentially vs ~4s batched). (Spec 0122)
+
+#### Codebase Deduplication (Spec 0123)
+
+Architectural refactoring of ~190 net LOC removal through centralization of bypassed abstractions: (Spec 0123)
+
+- **TowerClient completeness**: Added `signalTunnel()`, `getTunnelStatus()`, `getStatus()`, `sendNotification()` methods. Extended `createTerminal()` options to include `persistent`, `workspacePath`, `type`, `roleId`. Eliminated 4 files that bypassed TowerClient with raw `fetch()`.
+- **Centralized constants**: `AGENT_FARM_DIR` exported from single location. `DEFAULT_CLOUD_URL` centralized in `cloud-config.ts`. `DEFAULT_DISK_LOG_MAX_BYTES` exported from `terminal/index.ts`. `DEFAULT_TOWER_PORT` no longer defined outside `tower-client.ts`.
+- **Deduplication**: `createPtySession()` deleted (callers use `TowerClient.createTerminal()`). `prompt()`/`confirm()` imported from `cli-prompts.ts`. `isPortAvailable()` extracted from `shell.ts`. `escapeHtml()`/`readBody()` imported from `server-utils.ts`. `getTypeColor()` extracted to `utils/display.ts`. `encodeWorkspacePath`/`decodeWorkspacePath` imported in server modules instead of inlining base64url.
+- **Shared utility**: `logSpawnSuccess()` helper in `spawn.ts` replaces 6 copy-pasted success blocks.
+- **Intentionally skipped**: db/ logger bypass (db module runs in Tower process where CLI logger formatting may corrupt log files).
+
+#### Test Suite Consolidation (Spec 0124)
+
+Test suite reduced from 1,495 tests (76 files) to 1,368 tests (73 files) -- net reduction of 127 tests and 11 test files with zero coverage loss. (Spec 0124)
+
+Removals organized into four categories:
+1. Obsolete bugfix regression files (6 files) -- bugs already covered by unit tests
+2. Terminal/session test consolidation -- `pty-session.test.ts` merged into `session-manager.test.ts`, `pty-manager.test.ts` reduced
+3. Tunnel test consolidation -- `tunnel-client.integration.test.ts` merged into `tunnel-client.test.ts`
+4. Trivial test removal -- type-check tests, string operation tests, lookup table tests, singleton pattern tests
+
+#### Project Management Architecture (Spec 0126)
+
+**GitHub Issues as project registry**: GitHub Issues replaced `projectlist.md` as the project tracking mechanism. (Spec 0126)
+
+- Issue number is the universal identifier for spec/plan/review files, branches, and worktrees
+- Status is **derived from what exists** (filesystem + Tower state), not manually tracked:
+  - Conceived = open issue, no spec file
+  - Specified = open issue + `codev/specs/<N>-*.md` exists
+  - Implementing = active builder worktree
+  - Committed = open PR referencing issue
+  - Integrated = issue closed
+- No label churn for status tracking; labels only for type (feature/bug) and priority
+
+**Shared GitHub utility**: `packages/codev/src/lib/github.ts` provides `fetchGitHubIssue()`, `fetchPRList()`, `fetchIssueList()`, `parseLinkedIssue()`, `parseLabelDefaults()`. (Spec 0126)
+
+**`getProjectSummary()` replacement**: Three-tier fallback -- GitHub issue title (primary), spec file heading (fallback), status.yaml title (last resort). Only used in strict mode (porch). (Spec 0126)
+
+**Spawn CLI rework**: `af spawn <N> --protocol <proto>` -- positional arg replaces `-p`/`--issue` flags. `--protocol` is required (no auto-detection). `--amends <N>` for TICK amendments. `--resume` reads protocol from existing worktree. Legacy zero-padded spec matching via `stripLeadingZeros()`. (Spec 0126)
+
+**Tower `/api/overview` endpoint**: Aggregates builder state (from filesystem + porch status.yaml), cached PR list (from `gh pr list`, 60s TTL), and cached backlog (from `gh issue list` cross-referenced with `codev/specs/` glob and `.builders/`). `POST /api/overview/refresh` for manual cache invalidation. Degraded mode when `gh` unavailable: builders shown, PR/backlog empty with error field. (Spec 0126)
+
+**`OverviewCache` class**: In-memory cache layer in `packages/codev/src/agent-farm/servers/overview.ts` with 60s TTL for GitHub data. (Spec 0126)
+
+**Dashboard Work view**: Replaces StatusPanel with three sections -- Active Builders (from Tower state + status.yaml), Pending PRs (from cached `gh pr list`), Backlog & Open Bugs (from cached `gh issue list` cross-referenced with filesystem). Collapsible file panel at bottom. `+ Shell` button in header. (Spec 0126)
+
+**New dashboard components** (Spec 0126):
+- `WorkView.tsx` -- main Work tab component
+- `BuilderCard.tsx` -- builder card with phase/gate indicators
+- `PRList.tsx` -- pending PR list with review status
+- `BacklogList.tsx` -- backlog grouped by readiness (ready to start vs. conceived)
+- `useOverview.ts` -- hook for `/api/overview` polling
+
+**Scaffold changes**: `codev init`/`adopt` no longer create `projectlist.md` or `projectlist-archive.md`. `codev doctor` checks `gh` CLI authentication. (Spec 0126)
+
+#### Tower Async Request Handlers (Spec 0127)
+
+Three `execSync` calls in Tower HTTP request handlers converted to `util.promisify(child_process.exec)`: (Spec 0127)
+- `handleWorkspaceGitStatus()` -- `git status --porcelain` (5s timeout, hot path polled by dashboard)
+- `handleCreateWorkspace()` -- `codev init --yes` (60s timeout, cold path)
+- `launchInstance()` -- `npx codev adopt --yes` (30s timeout, cold path)
+
+This prevents the Node.js event loop from blocking during subprocess execution, keeping terminal WebSocket traffic and dashboard polling responsive.
+
+#### Tip of the Day (Spec 0350)
+
+Frontend-only feature: `TipBanner` component in the dashboard Work view. (Spec 0350)
+
+- `TipBanner.tsx` -- self-contained component with no props, reads localStorage directly
+- `tips.ts` -- static array of 51 tips covering af, porch, consult, workflow, dashboard, and protocol categories
+- Daily rotation via `tips[dayOfYear % tips.length]` using local time
+- Arrow navigation with wraparound, dismiss via localStorage keyed by `tip-dismissed-YYYY-MM-DD`
+- Inline code span rendering: backtick-delimited text split and wrapped in `<code>` elements
+- Positioned in WorkView between error area and first section
+
+### Operational Features & Quality (Specs 0364, 0376, 0386, 0395, 0399, 0403, Bugfixes)
+
+#### Dashboard UI -- Terminal Floating Controls (Spec 0364)
+
+Terminal windows include floating controls for manual PTY resync and navigation. A `TerminalControls` component renders two small icon buttons (refresh and scroll-to-bottom) in the top-right corner of every terminal window (architect, builder, shell).
+
+- **Refresh button**: Calls `fitAddon.fit()` to recalculate dimensions from the container, then sends a `resize` control message to the PTY backend (guarded by `ws.readyState === WebSocket.OPEN`)
+- **Scroll-to-bottom button**: Calls `terminal.scrollToBottom()` on the xterm instance
+- **Focus preservation**: Uses `onPointerDown` with `preventDefault()` and `tabIndex={-1}` (same pattern as `VirtualKeyboard.tsx`) to prevent stealing focus from the terminal
+- **Positioning**: Absolutely positioned inside the terminal's parent flex-column div with `position: relative`. Cannot be rendered inside the `containerRef` div because xterm.js takes ownership of that element's DOM. `right: 20px` offset accounts for the xterm virtual scrollbar width.
+- **Mobile support**: 32px minimum tap targets, `touch-action: manipulation` to prevent double-tap zoom, `:active` feedback for touch
+
+**Key files**:
+- `dashboard/src/components/Terminal.tsx` -- `TerminalControls` component defined and integrated
+- `dashboard/src/index.css` -- CSS styles for `.terminal-controls` and `.terminal-control-btn`
+
+#### af cron -- Tower-Resident Scheduled Task Scheduler (Spec 399)
+
+Tower includes a lightweight cron scheduler that loads workspace-defined task definitions from `.af-cron/*.yaml` and executes them on schedule, delivering results via the existing `af send` pipeline.
+
+**Design decision: Tower-resident over system cron.** System cron was rejected because: (1) system cron runs with minimal env lacking user PATH and tokens, causing silent failures; (2) every YAML change requires `af cron install` sync; (3) system cron keeps firing when Tower is down, producing zombie executions. Tower already runs interval-based patterns (rate limit cleanup, shellper cleanup), so the scheduler follows the same model -- zero setup, inherits Tower's full environment, auto-detects YAML changes on each 60-second tick, and stops when Tower stops.
+
+**Architecture**:
+```
+Tower Server
++-- existing intervals (rate limit, shellper cleanup)
++-- CronScheduler (tower-cron.ts)
+    +-- loads task definitions from .af-cron/ per workspace (js-yaml)
+    +-- tracks last-run timestamps in global.db (cron_tasks table)
+    +-- executes tasks async via child_process.exec (non-blocking)
+    +-- evaluates condition against command output (new Function)
+    +-- sends results via shared send pipeline (format + write + broadcast)
+```
+
+**Task definition format** (`.af-cron/*.yaml`):
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Human-readable task name |
+| `schedule` | yes | Standard 5-field cron expression or shortcut (`@hourly`, `@daily`, `@startup`) |
+| `enabled` | no | Default `true` |
+| `command` | yes | Shell command to execute |
+| `condition` | no | JS expression against `output` string; truthy = notify |
+| `message` | yes | Message template with `${output}` substitution |
+| `target` | no | Default `architect` |
+| `timeout` | no | Default 30 seconds |
+| `cwd` | no | Default workspace root |
+
+**SQLite schema** (migration v10 on global.db):
+```sql
+CREATE TABLE cron_tasks (
+  id TEXT PRIMARY KEY,
+  workspace_path TEXT NOT NULL,
+  task_name TEXT NOT NULL,
+  last_run INTEGER,
+  last_result TEXT,
+  last_output TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(workspace_path, task_name)
+);
+```
+
+**Cron parser** (`tower-cron-parser.ts`): Minimal ~80-line parser supporting `*`, `*/N`, fixed values, and comma-separated lists. No external dependencies. Shortcuts: `@hourly` = `0 * * * *`, `@daily` = `0 9 * * *` (9am, not midnight), `@startup` = runs once at Tower init.
+
+**Execution model**: 60-second tick interval. Each tick reads `.af-cron/*.yaml` from all known workspaces (no caching -- changes picked up within 60s). Tasks execute via async `child_process.exec` with timeout. `@startup` tasks always run once per Tower start, ignoring `last_run`. Output truncated to 4KB before storing in SQLite.
+
+**Tower API routes**:
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/cron/tasks` | List tasks (optional `?workspace=` filter) |
+| `GET` | `/api/cron/tasks/:name/status` | Task status and last run info |
+| `POST` | `/api/cron/tasks/:name/run` | Manually trigger a task |
+| `POST` | `/api/cron/tasks/:name/enable` | Enable a disabled task |
+| `POST` | `/api/cron/tasks/:name/disable` | Disable a task |
+
+**CLI commands**: `af cron list [--all]`, `af cron status`, `af cron run <name>`, `af cron enable <name>`, `af cron disable <name>`.
+
+**Lifecycle**: `initCron()` called in Tower's `server.listen` callback (after `initInstances()`). `shutdownCron()` called in `gracefulShutdown()` (before `shutdownInstances()`).
+
+**Key files**:
+| File | Purpose |
+|------|---------|
+| `servers/tower-cron.ts` | Scheduler module: YAML loading, async execution, condition evaluation, message delivery, SQLite state tracking (~400 lines) |
+| `servers/tower-cron-parser.ts` | Minimal cron expression parser (~80 lines) |
+| `commands/cron.ts` | CLI handler for `af cron` subcommands |
+
+#### af send Typing Awareness -- Send Buffer (Spec 403)
+
+The `af send` message delivery system includes typing awareness to prevent message injection while the architect is composing input. When a user is actively typing, incoming messages are buffered and delivered after an idle period.
+
+**Approach**: Idle detection was selected over queue-until-submit. Rationale: (1) simpler implementation (timestamp + timer vs. state machine + Enter detection); (2) universal -- works with any terminal application, not just Claude Code; (3) no edge cases with editors where Enter means newline, not "done typing."
+
+**Input tracking** (`pty-session.ts`):
+- `_lastInputAt: number` -- epoch timestamp of last user keystroke
+- `recordUserInput()` -- called on every `data` frame from WebSocket (in both `pty-manager.ts` and `tower-websocket.ts`)
+- `isUserIdle(thresholdMs)` -- returns `true` when `Date.now() - _lastInputAt >= thresholdMs`
+- Control messages (resize, ping) do NOT update `lastInputAt` -- only actual data input counts
+
+**Send buffer** (`send-buffer.ts`):
+- `SendBuffer` class with per-session FIFO queue
+- `idleThresholdMs`: default 3000ms (3 seconds of no keystrokes)
+- `maxBufferAgeMs`: default 60000ms (force delivery after 60 seconds regardless of typing state)
+- 500ms flush interval checks all buffered sessions
+- Messages delivered in order when user becomes idle
+- Dead session messages discarded with warning log
+- `interrupt: true` option bypasses buffering entirely (for `--interrupt` flag)
+- Force flush on graceful shutdown ensures no message loss
+
+**API response change**: `af send` now returns `{ ok: true, terminalId, resolvedTo, deferred: boolean }` -- the `deferred` field indicates whether the message was buffered or delivered immediately.
+
+**Lifecycle**: `startSendBuffer()` called after `initTerminals()` in Tower startup. `stopSendBuffer()` called in `gracefulShutdown()`.
+
+**Key files**:
+| File | Purpose |
+|------|---------|
+| `terminal/pty-session.ts` | Added `_lastInputAt`, `recordUserInput()`, `isUserIdle()` |
+| `servers/send-buffer.ts` | `SendBuffer` class with per-session queuing and flush timer |
+| `servers/tower-routes.ts` | Modified `handleSend` to check idle state and defer/deliver |
+| `servers/tower-websocket.ts` | Added `recordUserInput()` calls on data frames |
+| `servers/tower-server.ts` | Wired `startSendBuffer()`/`stopSendBuffer()` lifecycle |
+
+#### Bugfix #274 -- Tower Startup Race Condition
+
+A race condition in Tower's startup sequence caused architect terminal sessions to be permanently lost during `af tower stop && af tower start`. Root cause: `initInstances()` was called BEFORE `reconcileTerminalSessions()`, allowing dashboard polls to trigger on-the-fly shellper reconnection that raced with the reconciliation process, corrupting sessions.
+
+**Fix (two layers)**:
+1. **Startup reorder** (`tower-server.ts`): `reconcileTerminalSessions()` now runs BEFORE `initInstances()`. Since `getInstances()` returns `[]` when `_deps` is null, no dashboard poll can trigger `getTerminalsForProject()` during reconciliation.
+2. **Reconciling guard** (`tower-terminals.ts`): Added `_reconciling` flag that blocks on-the-fly shellper reconnection in `getTerminalsForProject()` while `reconcileTerminalSessions()` is running. Closes a secondary race path through `/project/<path>/api/state` (identified by Codex during CMAP review).
+
+#### Bugfix #324 -- Shellper Pipe-Based Stdio Dependency
+
+Shellper processes were dying during Tower restarts because of a pipe-based stdio dependency. The shellper's stderr was piped to Tower via `stdio: ['ignore', 'pipe', 'pipe']`. When Tower exited, the broken pipe caused unhandled EPIPE errors that crashed the shellper.
+
+**Fix (two parts)**:
+1. **Primary** (`session-manager.ts`): Redirect shellper stderr to a log file (`socketPath.replace('.sock', '.log')`) instead of a pipe. File FDs have no parent dependency.
+2. **Defense-in-depth** (`shellper-main.ts`): Add `stream.on('error', () => {})` handlers on `process.stdout` and `process.stderr` at startup.
+
+**Key insight**: `detached: true` and `child.unref()` are necessary but not sufficient for process independence -- any pipe-based stdio creates a lifecycle dependency between parent and child processes. Use file FDs or `'ignore'` for truly independent children.
+
+#### SPIR Review Phase -- Mandatory arch.md and lessons-learned.md Updates (Spec 395)
+
+As of Spec 395, the SPIR review phase prompt and review template instruct builders to update `arch.md` and `lessons-learned.md` as part of every SPIR review, with porch enforcement via `protocol.json` checks (`review_has_arch_updates`, `review_has_lessons_updates`). TICK protocol is excluded since TICKs are small fixes unlikely to have architectural implications.
+
+#### Development Analysis Infrastructure (Spec 0376)
+
+Spec 0376 establishes the pattern for periodic development analysis: a pure documentation task that synthesizes data from review files, GitHub PRs/issues, git history, consult stats, and porch project state into a comprehensive analysis document. Output at `codev/resources/development-analysis-2026-02-17.md` covers autonomous builder performance, porch effectiveness, multi-agent review value, system throughput, and cost analysis.
+
+**Research agent pattern**: Spawning a subagent to read all review files in parallel and return structured data is a reusable approach for future analyses.
+
+#### Documentation Audit Tier System (Spec 386)
+
+Spec 386 establishes a three-tier documentation audit framework for keeping all project documentation current:
+
+- **Tier 1 (Public-facing)**: README.md, CHANGELOG.md, CLAUDE.md/AGENTS.md, docs/*.md, release notes
+- **Tier 2 (Developer reference)**: codev/resources/*.md, command references
+- **Tier 3 (Skeleton templates)**: codev-skeleton/ files shipped to other projects
+
+**Key rule**: Historical release notes are read-only -- stale reference cleanup applies only to instructional/current documentation, not historical records.
+
 ## Recent Infrastructure Changes
 
 See [CHANGELOG.md](../../CHANGELOG.md) for detailed version history including:
