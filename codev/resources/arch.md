@@ -3381,7 +3381,7 @@ The `af send` message delivery system includes typing awareness to prevent messa
 | `servers/tower-websocket.ts` | Added `recordUserInput()` calls on data frames |
 | `servers/tower-server.ts` | Wired `startSendBuffer()`/`stopSendBuffer()` lifecycle |
 
-#### Bugfix #274 -- Tower Startup Race Condition
+#### Bugfix #274 -- Tower Startup Race Condition (Bugfix 274)
 
 A race condition in Tower's startup sequence caused architect terminal sessions to be permanently lost during `af tower stop && af tower start`. Root cause: `initInstances()` was called BEFORE `reconcileTerminalSessions()`, allowing dashboard polls to trigger on-the-fly shellper reconnection that raced with the reconciliation process, corrupting sessions.
 
@@ -3389,7 +3389,7 @@ A race condition in Tower's startup sequence caused architect terminal sessions 
 1. **Startup reorder** (`tower-server.ts`): `reconcileTerminalSessions()` now runs BEFORE `initInstances()`. Since `getInstances()` returns `[]` when `_deps` is null, no dashboard poll can trigger `getTerminalsForProject()` during reconciliation.
 2. **Reconciling guard** (`tower-terminals.ts`): Added `_reconciling` flag that blocks on-the-fly shellper reconnection in `getTerminalsForProject()` while `reconcileTerminalSessions()` is running. Closes a secondary race path through `/project/<path>/api/state` (identified by Codex during CMAP review).
 
-#### Bugfix #324 -- Shellper Pipe-Based Stdio Dependency
+#### Bugfix #324 -- Shellper Pipe-Based Stdio Dependency (Bugfix 324)
 
 Shellper processes were dying during Tower restarts because of a pipe-based stdio dependency. The shellper's stderr was piped to Tower via `stdio: ['ignore', 'pipe', 'pipe']`. When Tower exited, the broken pipe caused unhandled EPIPE errors that crashed the shellper.
 
