@@ -48,6 +48,7 @@ export class PtySession extends EventEmitter {
   private shellperClient: IShellperClient | null = null;
   private _shellperBacked = false;
   private _shellperSessionId: string | null = null;
+  private _restartOnExit = false;
   private shellperPid = -1;
   private cols: number;
   private rows: number;
@@ -136,6 +137,25 @@ export class PtySession extends EventEmitter {
     // Handle shellper exit (process inside shellper exited)
     client.on('exit', (exitInfo: { code: number; signal: string | null }) => {
       this.exitCode = exitInfo.code;
+      if (this._restartOnExit) {
+        // Process will auto-restart via SessionManager — keep WebSocket clients
+        // connected and don't emit 'exit' so Tower doesn't clear references.
+        this.onPtyData('\r\n\x1b[90m[Process exited — restarting...]\x1b[0m\r\n');
+        // Wait for the process to restart. If new data arrives (process restarted),
+        // cancel the cleanup timer. If no data within 10s (e.g. max restarts
+        // exceeded), fall through to normal exit cleanup.
+        const cleanupTimeout = setTimeout(() => {
+          client.removeListener('data', cancelCleanup);
+          this.emit('exit', exitInfo.code, exitInfo.signal);
+          this.cleanupShellper();
+        }, 10_000);
+        const cancelCleanup = () => {
+          clearTimeout(cleanupTimeout);
+          client.removeListener('data', cancelCleanup);
+        };
+        client.on('data', cancelCleanup);
+        return;
+      }
       this.emit('exit', exitInfo.code, exitInfo.signal);
       // For shellper-backed sessions, cleanup closes disk log and clients
       // but doesn't clear the ring buffer (shellper may still have replay data)
@@ -161,6 +181,19 @@ export class PtySession extends EventEmitter {
   /** The SessionManager session ID for this shellper-backed session, or null. */
   get shellperSessionId(): string | null {
     return this._shellperSessionId;
+  }
+
+  /**
+   * Whether this session should suppress exit cleanup because the process
+   * will auto-restart via SessionManager. When true, the exit handler
+   * keeps WebSocket clients connected and does not emit 'exit'.
+   */
+  get restartOnExit(): boolean {
+    return this._restartOnExit;
+  }
+
+  set restartOnExit(value: boolean) {
+    this._restartOnExit = value;
   }
 
   /**
