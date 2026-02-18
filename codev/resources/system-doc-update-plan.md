@@ -64,9 +64,9 @@ git commit -m "[Spec 422] Refinement round N/4: <description>"
 
 | Document | Start | R1 | R2 | R3 | R4 |
 |----------|-------|----|----|----|-----|
-| arch.md | 3,352 | 1,516 | 1,650 | — | — |
-| lessons-learned.md | 413 | 372 | 368 | — | — |
-| **Total** | **3,765** | **1,888** | **2,018** | — | — |
+| arch.md | 3,352 | 1,516 | 1,650 | 1,651 | 1,646 |
+| lessons-learned.md | 413 | 372 | 368 | 363 | 357 |
+| **Total** | **3,765** | **1,888** | **2,018** | **2,014** | **2,003** |
 
 ## Process Notes
 

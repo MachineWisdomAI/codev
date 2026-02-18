@@ -32,7 +32,7 @@ For debugging common issues, start here:
 | **"Terminal not showing output"** | `tower-websocket.ts` → `handleTerminalWebSocket()` | PTY session exists, WebSocket connected, shellper alive |
 | **"Terminal not persistent"** | `tower-instances.ts` → `launchInstance()` | Check shellper spawn succeeded, dashboard shows `persistent` flag |
 | **"Workspace shows inactive"** | `tower-instances.ts` → `getInstances()` | Check `workspaceTerminals` Map has entry |
-| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `createBuilder()` | Worktree creation, shellper session, role injection |
+| **"Builder spawn fails"** | `packages/codev/src/agent-farm/commands/spawn.ts` → `upsertBuilder()` | Worktree creation, shellper session, role injection |
 | **"Gate not notifying architect"** | `commands/porch/notify.ts` → `notifyArchitect()` | porch sends `af send architect` directly at gate transitions (Spec 0108) |
 | **"Consult hangs/fails"** | `packages/codev/src/commands/consult/index.ts` | CLI availability (gemini/codex/claude), role file loading |
 | **"State inconsistency"** | `packages/codev/src/agent-farm/state.ts` | SQLite at `.agent-farm/state.db` |
@@ -70,6 +70,7 @@ tail -f ~/.agent-farm/tower.log
 | **Builder** | An AI agent working in an isolated git worktree on a single spec |
 | **Architect** | The human + primary AI orchestrating builders and reviewing work |
 | **Consultant** | An external AI model (Gemini, Codex, Claude) providing review/feedback |
+| **CMAP** | "Consult Multiple Agents in Parallel" — shorthand for running 3-way parallel consultation (Gemini + Codex + Claude) |
 | **Agent Farm** | Infrastructure for parallel AI-assisted development (dashboard, terminals, worktrees) |
 | **Protocol** | Defined workflow for a type of work (SPIR, TICK, BUGFIX, MAINTAIN, EXPERIMENT, RELEASE) |
 | **SPIR** | Multi-phase protocol: Specify → Plan → Implement → Review |
@@ -261,8 +262,8 @@ Each session has a unique name based on its purpose:
 
 | Session Type | Name Pattern | Example |
 |--------------|--------------|---------|
-| Architect | `af-architect-{port}` | `af-architect-4201` |
-| Builder | `builder-{project}-{id}` | `builder-codev-0003` |
+| Architect | `architect` | `architect` |
+| Builder | `builder-{protocol}-{id}` | `builder-spir-126` |
 | Shell | `shell-{id}` | `shell-U1A2B3C4` |
 | Utility | `af-shell-{id}` | `af-shell-U5D6E7F8` |
 
@@ -842,7 +843,7 @@ This is where the Codev project uses Codev to develop itself:
   - `specs/` - Feature specifications for Codev itself
   - `plans/` - Implementation plans for Codev features
   - `reviews/` - Lessons learned from Codev development
-  - `resources/` - Reference materials (this file, llms.txt, etc.)
+  - `resources/` - Reference materials (this file, testing-guide.md, lessons-learned.md, etc.)
   - `protocols/` - Working copies of protocols for development
   - `agents/` - Agent definitions (canonical location)
   - `roles/` - Role definitions for architect-builder pattern
@@ -936,8 +937,9 @@ codev/                                  # Project root (git repository)
 │   │   └── consult.js                  # consult command
 │   ├── skeleton/                       # Embedded codev-skeleton (built)
 │   ├── templates/                      # HTML templates
-│   │   ├── dashboard.html              # Split-pane dashboard
-│   │   └── annotate.html               # File annotation viewer
+│   │   ├── tower.html                  # Multi-project overview
+│   │   ├── open.html                   # File viewer with image support
+│   │   └── 3d-viewer.html             # STL/3MF 3D model viewer
 │   ├── dist/                           # Compiled JavaScript
 │   ├── package.json                    # npm package config
 │   └── tsconfig.json                   # TypeScript configuration
@@ -1114,7 +1116,7 @@ codev import https://github.com/owner/repo
 
 ### 3. Agent-Farm CLI (Orchestration Engine)
 
-**Location**: `agent-farm/`
+**Location**: `packages/codev/src/agent-farm/`
 
 **Purpose**: TypeScript-based multi-agent orchestration for the architect-builder pattern
 
@@ -1122,7 +1124,7 @@ codev import https://github.com/owner/repo
 - **Single canonical implementation** - All bash scripts deleted, TypeScript is the source of truth
 - **Thin wrapper invocation** - `af` command from npm package (installed globally)
 - **Project-scoped state** - `.agent-farm/state.db` (SQLite) tracks current session
-- **Global port registry** - `~/.agent-farm/global.db` (SQLite) prevents cross-project port conflicts
+- **Global registry** — `~/.agent-farm/global.db` (SQLite) tracks workspace registrations and session metadata across projects
 
 #### CLI Commands
 
@@ -1238,13 +1240,12 @@ The `af`, `consult`, and `codev` commands are installed globally via `npm instal
 **Location**:
 - Unit tests: `packages/codev/src/__tests__/`
 - E2E tests: `packages/codev/tests/e2e/`
-- Config: `packages/codev/vitest.config.ts`, `packages/codev/vitest.unit.config.ts`
+- Config: `packages/codev/vitest.config.ts`, `packages/codev/vitest.cli.config.ts`, `packages/codev/vitest.e2e.config.ts`
 
 **Running Tests**:
 ```bash
 cd packages/codev
 npm test                     # All Vitest tests
-npm run test:unit            # Unit tests only
 npx playwright test          # E2E browser tests
 ```
 
@@ -1471,7 +1472,7 @@ Messages sent via `af send` are not injected immediately — they pass through a
 
 #### Consult Architecture
 
-The `consult` command (`packages/codev/src/commands/consult/index.ts`, ~750 lines) is a **CLI delegation layer** — it does NOT call LLM APIs directly. Instead, it spawns external CLI tools as subprocesses:
+The `consult` command (`packages/codev/src/commands/consult/index.ts`) is a **CLI delegation layer** — it does NOT call LLM APIs directly. Instead, it spawns external CLI tools as subprocesses:
 
 ```
 consult -m gemini spec 42
@@ -1525,12 +1526,6 @@ consult -m claude spec 42
 - **Type safety** - TypeScript catches errors at compile time
 - **Rich features** - Easier to implement complex features (port registry, state locking)
 - **Thin wrapper pattern** - Bash wrappers just call `node agent-farm/dist/index.js`
-
-**What was deleted**:
-- `codev/bin/architect` (713-line bash script)
-- `codev-skeleton/bin/architect` (duplicate)
-- `agent-farm/templates/` (now uses codev/templates/)
-- `codev/builders.md` (legacy state file)
 
 ### 8. Global Registry for Multi-Workspace Support
 **Decision**: Use `~/.agent-farm/global.db` (SQLite) for cross-workspace coordination
@@ -1617,7 +1612,7 @@ try {
 **Pattern**: SQLite for all structured state.
 
 - `.agent-farm/state.db` - Builder/util state (local, per-project)
-- `~/.agent-farm/global.db` - Global port registry (cross-project)
+- `~/.agent-farm/global.db` - Global workspace/session registry (cross-project)
 - `codev/projects/<id>/status.yaml` - Active project state (managed by porch)
 - GitHub Issues - Project tracking (source of truth, Spec 0126)
 
@@ -1648,4 +1643,4 @@ See [MAINTAIN protocol](../protocols/maintain/protocol.md) for codebase hygiene 
 
 **Last Updated**: 2026-02-18
 **Version**: v2.0.0-rc.54 (Pre-release)
-**Changes**: Refinement round 3/4 -- polish pass. See CHANGELOG.md for version history.
+**Changes**: Refinement round 4/4 -- final fresh-eyes pass. See CHANGELOG.md for version history.
