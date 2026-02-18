@@ -43,9 +43,9 @@ export function App() {
   // Set document title with workspace name (no emoji - favicon provides the icon)
   useEffect(() => {
     if (state?.workspaceName) {
-      document.title = `${state.workspaceName} Agent Farm`;
+      document.title = `${state.workspaceName} dashboard`;
     } else {
-      document.title = 'Agent Farm';
+      document.title = 'dashboard';
     }
   }, [state?.workspaceName]);
 
@@ -166,12 +166,9 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1 className="app-title">Agent Farm</h1>
-        <div className="header-meta">
-          <span className="builder-count">
-            {state?.builders?.length ?? 0} builder(s)
-          </span>
-        </div>
+        <h1 className="app-title">
+          {state?.workspaceName ? `${state.workspaceName} dashboard` : 'dashboard'}
+        </h1>
       </header>
       <div className="app-body">
         <SplitPane
@@ -191,11 +188,6 @@ export function App() {
           }
         />
       </div>
-      <footer className="status-bar">
-        <span>{state?.builders?.length ?? 0} builders</span>
-        <span>{state?.utils?.length ?? 0} shells</span>
-        <span>{state?.annotations?.length ?? 0} files</span>
-      </footer>
     </div>
   );
 }
