@@ -302,6 +302,39 @@ export async function runAgentFarm(args: string[]): Promise<void> {
       }
     });
 
+  // Bench command - consultation benchmarking
+  program
+    .command('bench')
+    .description('Run consultation benchmarks across engines')
+    .option('-i, --iterations <n>', 'Number of benchmark iterations (default: 1)', '1')
+    .option('-s, --sequential', 'Run engines sequentially instead of in parallel')
+    .option('--prompt <text>', 'Custom consultation prompt')
+    .option('--timeout <seconds>', 'Per-engine timeout in seconds (default: 300)', '300')
+    .action(async (options) => {
+      const { bench } = await import('./commands/bench.js');
+      try {
+        const iterations = parseInt(options.iterations, 10);
+        const timeout = parseInt(options.timeout, 10);
+        if (isNaN(iterations) || iterations < 1) {
+          logger.error('--iterations must be a positive integer');
+          process.exit(1);
+        }
+        if (isNaN(timeout) || timeout < 1) {
+          logger.error('--timeout must be a positive integer');
+          process.exit(1);
+        }
+        await bench({
+          iterations,
+          sequential: !!options.sequential,
+          prompt: options.prompt || 'Please analyze the codev codebase and give me a list of potential impactful improvements.',
+          timeout,
+        });
+      } catch (error) {
+        logger.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
   // Database commands
   const dbCmd = program
     .command('db')
