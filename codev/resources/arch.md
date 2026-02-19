@@ -914,7 +914,8 @@ codev/                                  # Project root (git repository)
 │   │   │   │   ├── util.ts             # Utility shell
 │   │   │   │   ├── open.ts             # File annotation viewer
 │   │   │   │   ├── send.ts             # Send message to builder
-│   │   │   │   └── rename.ts           # Rename builder/util
+│   │   │   │   ├── rename.ts           # Rename builder/util
+│   │   │   │   └── bench.ts            # Consultation benchmarking (af bench)
 │   │   │   ├── servers/                # Web servers (Spec 0105 decomposition)
 │   │   │   │   ├── tower-server.ts     # Orchestrator: HTTP/WS server creation, subsystem init, shutdown
 │   │   │   │   ├── tower-routes.ts     # HTTP route handlers (~30 routes)
