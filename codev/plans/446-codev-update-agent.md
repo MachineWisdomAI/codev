@@ -73,22 +73,50 @@ Note: `conflicts` changes from `string[]` to object arrays to match the JSON sch
 ```typescript
 const log = agent ? console.error.bind(console) : console.log.bind(console);
 ```
-Replace all `console.log` calls in the function with `log()`.
+Replace all `console.log` calls in `update()` with `log()`. **Note**: The scaffold utilities (`copyConsultTypes`, `copySkills`, `copyRoles`) and template utilities do NOT contain `console.log` calls — they return results only. The `log()` helper only needs to replace calls within `update()` itself.
 
-4. After calling `copyConsultTypes()`, `copySkills()`, `copyRoles()`, append their `copied` results to `result.newFiles` with full relative paths:
+4. Move `result` initialization **before** the scaffold utility calls (currently at line 111, move to before line 79). This allows scaffold results to be appended to `result.newFiles` immediately.
+
+5. After calling `copyConsultTypes()`, `copySkills()`, `copyRoles()` (inside the `if (!dryRun)` block), append their `copied` results to `result.newFiles` with full relative paths:
    - `copyConsultTypes().copied` → prefix each with `codev/consult-types/`
    - `copySkills().copied` → prefix each with `.claude/skills/` and append `/`
    - `copyRoles().copied` → prefix each with `codev/roles/`
+   **Note**: These scaffold calls remain inside `if (!dryRun)`, so in dry-run mode, scaffold files are NOT reported (per spec limitation).
 
-5. In the hash-based loop, when a conflict is found, push an object `{ file, codevNew, reason }` instead of a plain string. Same for root conflicts.
+6. In the hash-based loop, when a conflict is found, push an object `{ file, codevNew, reason }` instead of a plain string. Same for root conflicts.
 
-6. At the end, instead of spawning Claude when `agent` is true, skip the spawn.
+7. **Update the interactive Claude spawn code** (lines 285-288) to handle the new object structure. The `allConflicts` array construction must change from:
+```typescript
+// OLD (breaks with object conflicts):
+const allConflicts = [
+  ...result.conflicts.map(f => `codev/${f}`),
+  ...result.rootConflicts,
+];
+```
+to:
+```typescript
+// NEW:
+const allConflicts = [
+  ...result.conflicts.map(c => `codev/${c.file}`),
+  ...result.rootConflicts.map(c => c.file),
+];
+```
+This preserves the existing interactive merge behavior for non-agent mode.
 
-7. Wrap the entire function body in a try/catch. On error:
+8. At the end, instead of spawning Claude when `agent` is true, skip the spawn.
+
+9. Wrap the entire function body in a try/catch. On error:
    - If `agent`, set `result.error = error.message` and return the result
    - If not `agent`, re-throw (preserving existing behavior)
 
-8. Change return type from `Promise<void>` to `Promise<UpdateResult>`.
+10. Change return type from `Promise<void>` to `Promise<UpdateResult>`.
+
+11. The dry-run early `return;` (line 282) must become `return result;` to match the new return type.
+
+12. **Error handling split**: Errors are handled at TWO levels:
+    - **`update()` level** (Phase 1 step 9): Catches errors during file processing and populates `result.error`. Returns partial result.
+    - **CLI level** (Phase 2 step 4): Catches errors that occur before `update()` returns (e.g., "No codev/ directory found"). Emits error JSON.
+    This is intentional — `update()` catches what it can and returns a result; the CLI catches the rest.
 
 #### Acceptance Criteria
 - [ ] `update({ agent: true })` returns `UpdateResult` with all file categories populated
@@ -263,6 +291,16 @@ Add new test suite `describe('agent mode')` with:
     - `JSON.parse()` succeeds
     - Required fields present
 
+11. **Version in commit message**: Run `update({ agent: true })`:
+    - `instructions.commit` contains actual version string, not `vX.Y.Z`
+
+12. **First-ever update (no hash store)**: Create project with codev/ but no `.update-hashes.json`:
+    - `update({ agent: true })` completes without error
+    - Files still categorized correctly
+
+13. **Dry-run scaffold limitation**: Run `update({ agent: true, dryRun: true })`:
+    - `newFiles` does NOT include scaffold utility files (they're skipped in dry-run)
+
 #### Acceptance Criteria
 - [ ] All tests pass
 - [ ] `npm run build` succeeds
@@ -289,6 +327,7 @@ Phase 1 (refactor update) ──→ Phase 2 (CLI integration) ──→ Phase 3 
 
 ## Documentation Updates Required
 - [ ] codev skill file (`.claude/skills/codev/`) — add `--agent` flag to update command docs
+- [ ] CLI reference (`codev/resources/commands/codev.md`) — add `--agent` flag documentation
 
 ## Approval
 - [ ] Technical Lead Review
