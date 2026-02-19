@@ -60,7 +60,7 @@ A first-class `af bench` subcommand that:
 - [ ] Results saved to timestamped file in `codev/resources/bench-results/`
 - [ ] Host info (hostname, CPU, RAM) included in output
 - [ ] `af bench --help` shows usage information
-- [ ] All tests pass with >90% coverage
+- [ ] All tests pass with >90% coverage of the new `bench.ts` module
 - [ ] Existing `af` CLI commands unaffected
 
 ## Constraints
@@ -122,7 +122,10 @@ af bench [options]
 Options:
   -i, --iterations <n>    Number of benchmark iterations (default: 1)
   -s, --sequential        Run engines sequentially instead of in parallel
-  --prompt <text>         Custom consultation prompt
+  --prompt <text>         Custom consultation prompt (default: "Please analyze
+                          the codev codebase and give me a list of potential
+                          impactful improvements.")
+  --timeout <seconds>     Per-engine timeout in seconds (default: 300)
   -h, --help              Show help
 ```
 
@@ -192,10 +195,19 @@ Individual engine outputs saved to: `{engine}-run{iteration}-{timestamp}.txt`
 
 ## Error Handling
 
-- If an engine fails (non-zero exit or timeout), record it as `FAILED` in the table and continue with remaining engines/iterations
+- If an engine fails (non-zero exit), record it as `FAILED` in the table and continue with remaining engines/iterations
+- If an engine exceeds the `--timeout` value (default 300s), kill it and record as `TIMEOUT` — continue with remaining engines/iterations
 - If all engines fail in an iteration, still record the iteration and continue
 - If `consult` is not found on PATH, fail immediately with a clear error message
 - Engine failures should not affect other engines running in parallel
+- `FAILED` and `TIMEOUT` results are excluded from summary statistics (avg/min/max/stddev)
+- If `--iterations` is 0 or negative, fail with a clear error message
+- The results directory (`codev/resources/bench-results/`) is created automatically if it doesn't exist
+
+### Statistics Definitions
+- **stddev**: Sample standard deviation (N-1 denominator) — used because iterations are a sample, not the full population
+- **Precision**: All times formatted to 1 decimal place (e.g., `12.3s`)
+- **Timing**: Uses `performance.now()` for high-precision elapsed time measurement
 
 ## Open Questions
 
@@ -249,10 +261,18 @@ Individual engine outputs saved to: `{engine}-run{iteration}-{timestamp}.txt`
 | `consult` not on PATH | Low | High | Fail fast with clear error message |
 
 ## Expert Consultation
-<!-- Consultation will be run after spec is written -->
+**Date**: 2026-02-19
+**Models Consulted**: Gemini, Codex (GPT), Claude
+**Sections Updated**:
+- **CLI Interface**: Added `--timeout` option and explicit default prompt (Gemini, Claude)
+- **Error Handling**: Added timeout policy, FAILED exclusion from stats, stddev definition, precision spec (Codex)
+- **Success Criteria**: Clarified coverage scope to `bench.ts` module (Claude, Codex)
+- **Statistics Definitions**: New subsection defining stddev type, precision, timing method (Codex)
+
+Verdicts: Gemini APPROVE (HIGH), Codex REQUEST_CHANGES (MEDIUM) — addressed, Claude APPROVE (HIGH)
 
 ## Approval
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete
 
 ## Notes
 - This is the first project using the ASPIR protocol (autonomous SPIR — no spec/plan approval gates)
