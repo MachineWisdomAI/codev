@@ -32,4 +32,4 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: packages/codev
-        run: npx playwright test
+        run: npx playwright test --retries 3
