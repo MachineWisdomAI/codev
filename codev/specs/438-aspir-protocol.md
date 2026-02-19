@@ -32,6 +32,8 @@ There is no way to run SPIR without these gates today. Builders must either use 
 - **TICK** is lightweight (amend existing specs) but cannot be used for greenfield work
 - **BUGFIX** is minimal (investigate → fix → PR) with no consultations
 - **EXPERIMENT** is for research spikes, not feature implementation
+- **MAINTAIN** is for codebase hygiene and documentation sync
+- **RELEASE** manages the release process
 - There is no protocol that combines SPIR's full discipline with autonomous execution
 
 ## Desired State
@@ -53,16 +55,32 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 
 ## Success Criteria
 
+### Protocol Definition
+- [ ] ASPIR protocol directory exists at `codev-skeleton/protocols/aspir/` (template for other projects)
+- [ ] ASPIR protocol directory exists at `codev/protocols/aspir/` (our instance)
+- [ ] `protocol.json` has `"name": "aspir"`, no `alias`, `"version": "1.0.0"`
+- [ ] `protocol.json` has no `gate` property on the `specify` phase
+- [ ] `protocol.json` has no `gate` property on the `plan` phase
+- [ ] `protocol.json` retains `"gate": "pr"` on the `review` phase
+- [ ] All phases, checks, and verify blocks are identical to SPIR (except gate removal)
+
+### Runtime Behavior
 - [ ] `af spawn N --protocol aspir` spawns a builder that follows the ASPIR protocol
 - [ ] Builder proceeds from Specify → Plan without stopping at a `spec-approval` gate
 - [ ] Builder proceeds from Plan → Implement without stopping at a `plan-approval` gate
 - [ ] Builder still stops at the `pr` gate after the Review phase
-- [ ] All 3-way consultations still run at every phase (spec, plan, impl, pr)
+- [ ] All 3-way consultations run: spec verification (specify phase), plan verification (plan phase), impl verification (implement phase), pr verification (review phase)
 - [ ] All checks still run (build, tests, PR exists, review sections)
-- [ ] Protocol appears in `codev/protocols/aspir/` directory
-- [ ] ASPIR documented in CLAUDE.md/AGENTS.md protocol selection guide
+
+### Documentation
+- [ ] `protocol.md` in ASPIR directory documents the protocol and when to use it
+- [ ] ASPIR added to "Protocol Selection Guide" section in `CLAUDE.md` (root) and `AGENTS.md` (root)
+- [ ] ASPIR added to "Available Protocols" section in `codev-skeleton/CLAUDE.md` and `codev-skeleton/AGENTS.md`
+
+### Guardrails
 - [ ] No changes to SPIR protocol files (ASPIR is additive only)
 - [ ] No changes to porch source code (protocol definition drives behavior)
+- [ ] No changes to `protocol-schema.json`
 
 ## Constraints
 
@@ -78,14 +96,52 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 - The `pr` gate must be preserved — autonomous spec/plan does not mean autonomous merge
 
 ## Assumptions
-- Porch correctly auto-transitions phases when no `gate` property is present (this is the existing behavior for phases without gates, e.g., `implement` → `review`)
+- Porch correctly auto-transitions phases when no `gate` property is present. Evidence: the `implement` phase in SPIR has no `gate` and uses `transition.on_all_phases_complete` to move to `review`. Source: `getPhaseGate()` in `packages/codev/src/commands/porch/state.ts` returns `null` for phases without a `gate` property, and `next.ts` auto-advances when gate is null.
 - The `consult` CLI and consultation models remain available
 - The protocol directory structure and discovery mechanism remain unchanged
 
 ## Solution Approaches
 
 ### Approach 1: Full Copy with Gate Removal (Recommended)
-**Description**: Copy the entire SPIR directory to `aspir/`, then modify only `protocol.json` (remove the two gates) and `protocol.md` (update documentation). All other files (prompts, templates, consult-types, builder-prompt) are identical copies.
+**Description**: Copy each SPIR directory to its respective ASPIR location, then modify `protocol.json` and `protocol.md`. Each SPIR location is copied from its own source — they have different structures.
+
+**Files to create in `codev-skeleton/protocols/aspir/`** (copied from `codev-skeleton/protocols/spir/`):
+- `protocol.json` — **modified**: remove gates, update name/version/description
+- `protocol.md` — **modified**: ASPIR-specific documentation
+- `builder-prompt.md` — copied as-is
+- `prompts/specify.md` — copied as-is
+- `prompts/plan.md` — copied as-is
+- `prompts/implement.md` — copied as-is
+- `prompts/review.md` — copied as-is
+- `consult-types/spec-review.md` — copied as-is
+- `consult-types/plan-review.md` — copied as-is
+- `consult-types/impl-review.md` — copied as-is
+- `consult-types/pr-review.md` — copied as-is
+- `templates/spec.md` — copied as-is
+- `templates/plan.md` — copied as-is
+- `templates/review.md` — copied as-is
+
+**Files to create in `codev/protocols/aspir/`** (copied from `codev/protocols/spir/`):
+- `protocol.json` — **modified**: remove gates, update name/version/description (note: this copy has codev-specific check commands that differ from skeleton)
+- `protocol.md` — **modified**: ASPIR-specific documentation
+- `consult-types/spec-review.md` — copied as-is
+- `consult-types/plan-review.md` — copied as-is
+- `consult-types/impl-review.md` — copied as-is
+- `consult-types/pr-review.md` — copied as-is
+- `templates/spec.md` — copied as-is
+- `templates/review.md` — copied as-is
+
+Note: `codev/protocols/spir/` does not have `builder-prompt.md`, `prompts/`, or `templates/plan.md` — those only exist in the skeleton.
+
+**`protocol.json` modifications** (both copies):
+- `"name"`: `"spir"` → `"aspir"`
+- `"alias"`: remove entirely (ASPIR needs no alias)
+- `"version"`: `"2.2.0"` → `"1.0.0"`
+- `"description"`: update to reference ASPIR
+- `specify` phase: remove `"gate": "spec-approval"` property
+- `plan` phase: remove `"gate": "plan-approval"` property
+- `review` phase: keep `"gate": "pr"` unchanged
+- All other fields: unchanged
 
 **Pros**:
 - Self-contained — no dependencies between protocol directories
@@ -158,7 +214,7 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 ### Functional Tests
 1. **Happy path**: `af spawn N --protocol aspir` succeeds and builder runs through Specify → Plan → Implement → Review without stopping at spec-approval or plan-approval gates
 2. **PR gate preserved**: Builder stops at the `pr` gate after Review phase and waits for human approval
-3. **Consultations run**: All four 3-way consultations (spec, plan, impl, pr) execute during the protocol
+3. **Consultations run**: All 3-way consultations execute — one per phase: spec verification (specify), plan verification (plan), impl verification (implement), pr verification (review)
 4. **Checks enforced**: Build checks, test checks, and PR existence checks all run
 5. **Protocol discovery**: `porch status` shows "aspir" as the protocol name
 
@@ -174,9 +230,25 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 ## Risks and Mitigation
 | Risk | Probability | Impact | Mitigation Strategy |
 |------|------------|--------|-------------------|
-| ASPIR prompts drift from SPIR over time | Medium | Low | Document in review; consider MAINTAIN task |
+| ASPIR prompts/templates drift from SPIR over time | Medium | Low | Document in review; consider MAINTAIN task |
+| codev-specific protocol.json checks drift from SPIR (test exclusions, cwd paths) | Medium | Low | These change with test infrastructure; document drift risk in review |
 | Architect uses ASPIR for high-risk work inappropriately | Low | Medium | Document usage guidelines clearly in protocol.md |
 | Porch has undocumented behavior requiring gates | Low | High | Test thoroughly; the `implement` phase already has no gate |
+
+## Expert Consultation
+
+**Date**: 2026-02-19
+**Models Consulted**: Codex (GPT-5.2), Claude
+**Verdicts**: Codex: REQUEST_CHANGES (MEDIUM confidence), Claude: APPROVE (HIGH confidence)
+
+**Changes incorporated from consultation feedback**:
+- Added complete file checklist for both `codev-skeleton/` and `codev/` directories with explicit per-file copy/modify annotations (Codex, Claude)
+- Made protocol.json field changes (name, alias, version, description) formal requirements in Success Criteria instead of just open questions (Claude)
+- Added MAINTAIN and RELEASE to Current State protocol inventory for completeness (Claude)
+- Cited source evidence for gateless auto-transition assumption (`getPhaseGate()` in state.ts, `next.ts` auto-advance) (Codex)
+- Clarified consultation phase names to match SPIR's actual verify types: spec, plan, impl, pr (Codex)
+- Added codev-specific protocol.json drift risk to Risks table (Claude)
+- Split Success Criteria into Protocol Definition / Runtime Behavior / Documentation / Guardrails sections (Codex)
 
 ## Notes
 
