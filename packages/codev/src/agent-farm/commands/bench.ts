@@ -94,6 +94,7 @@ export function runEngine(
     });
 
     const outStream = createWriteStream(outputFile);
+    outStream.on('error', () => { /* ignore write-after-end from lingering pipe data */ });
     proc.stdout?.pipe(outStream);
     proc.stderr?.pipe(outStream);
 
@@ -101,6 +102,8 @@ export function runEngine(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      proc.stdout?.unpipe(outStream);
+      proc.stderr?.unpipe(outStream);
       outStream.end();
       resolve(result);
     };

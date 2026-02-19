@@ -309,12 +309,12 @@ export async function runAgentFarm(args: string[]): Promise<void> {
     .option('-i, --iterations <n>', 'Number of benchmark iterations (default: 1)', '1')
     .option('-s, --sequential', 'Run engines sequentially instead of in parallel')
     .option('--prompt <text>', 'Custom consultation prompt')
-    .option('--timeout <seconds>', 'Per-engine timeout in seconds (default: 300)', '300')
+    .option('--timeout <seconds>', 'Per-engine timeout in seconds (default: 300)')
     .action(async (options) => {
       const { bench, DEFAULT_PROMPT, DEFAULT_TIMEOUT } = await import('./commands/bench.js');
       try {
         const iterations = parseInt(options.iterations, 10);
-        const timeout = parseInt(options.timeout, 10);
+        const timeout = options.timeout ? parseInt(options.timeout, 10) : DEFAULT_TIMEOUT;
         if (isNaN(iterations) || iterations < 1) {
           logger.error('--iterations must be a positive integer');
           process.exit(1);
