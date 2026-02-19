@@ -170,7 +170,119 @@ describe('porch done — verification enforcement', () => {
   });
 
   // --------------------------------------------------------------------------
-  // Test 3: porch done sets build_complete before gate check
+  // Test 3: porch done skips checks when gate was recently approved (#432)
+  // --------------------------------------------------------------------------
+
+  it('skips checks when gate was approved within 60 seconds', async () => {
+    // Protocol with checks AND a gate on the same phase
+    const protocolWithChecks = {
+      name: 'test-checks',
+      version: '1.0.0',
+      phases: [
+        {
+          id: 'investigate',
+          name: 'Investigate',
+          checks: {
+            build: { command: 'echo build-ok' },
+          },
+          gate: 'pr',
+          next: null,
+        },
+      ],
+    };
+    setupProtocol(testDir, 'test-checks', protocolWithChecks);
+
+    const state = makeState({
+      protocol: 'test-checks',
+      phase: 'investigate',
+      gates: {
+        'pr': { status: 'approved', approved_at: new Date().toISOString() },
+      },
+    });
+    setupState(testDir, state);
+
+    await done(testDir, '0001');
+
+    const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    // Should skip checks, not run them
+    expect(output).toContain('Checks skipped');
+    expect(output).not.toContain('RUNNING CHECKS');
+  });
+
+  it('runs checks when gate was approved more than 60 seconds ago', async () => {
+    const protocolWithChecks = {
+      name: 'test-checks',
+      version: '1.0.0',
+      phases: [
+        {
+          id: 'investigate',
+          name: 'Investigate',
+          checks: {
+            build: { command: 'echo build-ok' },
+          },
+          gate: 'pr',
+          next: null,
+        },
+      ],
+    };
+    setupProtocol(testDir, 'test-checks', protocolWithChecks);
+
+    // Approved 120 seconds ago — should NOT skip
+    const oldApproval = new Date(Date.now() - 120_000).toISOString();
+    const state = makeState({
+      protocol: 'test-checks',
+      phase: 'investigate',
+      gates: {
+        'pr': { status: 'approved', approved_at: oldApproval },
+      },
+    });
+    setupState(testDir, state);
+
+    await done(testDir, '0001');
+
+    const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    // Should run checks normally
+    expect(output).toContain('RUNNING CHECKS');
+    expect(output).not.toContain('Checks skipped');
+  });
+
+  it('runs checks when gate is not approved', async () => {
+    const protocolWithChecks = {
+      name: 'test-checks',
+      version: '1.0.0',
+      phases: [
+        {
+          id: 'investigate',
+          name: 'Investigate',
+          checks: {
+            build: { command: 'echo build-ok' },
+          },
+          gate: 'pr',
+          next: null,
+        },
+      ],
+    };
+    setupProtocol(testDir, 'test-checks', protocolWithChecks);
+
+    const state = makeState({
+      protocol: 'test-checks',
+      phase: 'investigate',
+      gates: {
+        'pr': { status: 'pending' },
+      },
+    });
+    setupState(testDir, state);
+
+    await done(testDir, '0001');
+
+    const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    // Should run checks (gate not approved yet)
+    expect(output).toContain('RUNNING CHECKS');
+    expect(output).not.toContain('Checks skipped');
+  });
+
+  // --------------------------------------------------------------------------
+  // Test 4: porch done sets build_complete before gate check
   // --------------------------------------------------------------------------
 
   it('sets build_complete before checking gate (gate pending, build_complete false)', async () => {
