@@ -632,6 +632,165 @@ describe('Spawn Command', () => {
     });
   });
 
+  describe('no-spec spawn (Spec 444)', () => {
+    // Re-implement the spec-file requirement logic from spawnSpec()
+    interface ProtocolInput {
+      type: string;
+      required: boolean;
+    }
+    interface ProtocolDef {
+      input?: ProtocolInput;
+    }
+
+    /**
+     * Determines if spawn should proceed without a spec file.
+     * Returns null if spawn should proceed, or an error message if it should fail.
+     */
+    function checkSpecRequirement(
+      specFileExists: boolean,
+      protocolDef: ProtocolDef | null,
+      hasAmends: boolean,
+    ): string | null {
+      if (specFileExists) return null; // spec exists, always proceed
+
+      // No spec file — check if protocol allows it
+      if (protocolDef?.input?.required === false && !hasAmends) {
+        return null; // protocol allows no-spec spawn
+      }
+      return 'Spec not found';
+    }
+
+    /**
+     * Determines naming source.
+     * Returns 'github' if GitHub issue title should be used, 'spec' for spec filename.
+     */
+    function resolveNamingSource(
+      specFileExists: boolean,
+      ghIssueAvailable: boolean,
+    ): 'github' | 'spec' {
+      if (ghIssueAvailable) return 'github';
+      if (specFileExists) return 'spec';
+      throw new Error('No naming source available');
+    }
+
+    /**
+     * Derives specName for worktree/branch naming.
+     */
+    function deriveSpecName(
+      strippedId: string,
+      ghIssueTitle: string | null,
+      specFileName: string | null,
+    ): string {
+      if (ghIssueTitle) {
+        return `${strippedId}-${slugify(ghIssueTitle)}`;
+      }
+      if (specFileName) {
+        return specFileName; // already includes ID prefix
+      }
+      throw new Error('No naming source');
+    }
+
+    /**
+     * Derives the actual spec name for file references (template context).
+     * Uses the actual spec file on disk when available, otherwise falls back
+     * to the GitHub-derived name (for the path where Specify phase will create it).
+     */
+    function deriveActualSpecName(
+      specFileName: string | null,
+      derivedSpecName: string,
+    ): string {
+      return specFileName ?? derivedSpecName;
+    }
+
+    describe('spec-file requirement check', () => {
+      it('allows no-spec spawn when input.required is false and no amends', () => {
+        const protocol: ProtocolDef = { input: { type: 'spec', required: false } };
+        expect(checkSpecRequirement(false, protocol, false)).toBeNull();
+      });
+
+      it('rejects no-spec spawn when input.required is true', () => {
+        const protocol: ProtocolDef = { input: { type: 'spec', required: true } };
+        expect(checkSpecRequirement(false, protocol, false)).toBe('Spec not found');
+      });
+
+      it('rejects no-spec spawn when protocol definition is null', () => {
+        expect(checkSpecRequirement(false, null, false)).toBe('Spec not found');
+      });
+
+      it('rejects no-spec spawn when amends is set (TICK protection)', () => {
+        // TICK also has input.required: false, but amends must have a spec
+        const protocol: ProtocolDef = { input: { type: 'spec', required: false } };
+        expect(checkSpecRequirement(false, protocol, true)).toBe('Spec not found');
+      });
+
+      it('allows spawn when spec file exists regardless of input.required', () => {
+        const protocol: ProtocolDef = { input: { type: 'spec', required: true } };
+        expect(checkSpecRequirement(true, protocol, false)).toBeNull();
+      });
+    });
+
+    describe('naming source resolution', () => {
+      it('prefers GitHub issue title when available', () => {
+        expect(resolveNamingSource(true, true)).toBe('github');
+      });
+
+      it('falls back to spec filename when GitHub unavailable', () => {
+        expect(resolveNamingSource(true, false)).toBe('spec');
+      });
+
+      it('uses GitHub when no spec file exists', () => {
+        expect(resolveNamingSource(false, true)).toBe('github');
+      });
+
+      it('throws when neither spec nor GitHub available', () => {
+        expect(() => resolveNamingSource(false, false)).toThrow('No naming source');
+      });
+    });
+
+    describe('specName derivation', () => {
+      it('uses slugified GitHub title for naming when available', () => {
+        const result = deriveSpecName('444', 'af spawn should not require a pre-existing spec file', null);
+        // slugify truncates to 30 chars; trailing hyphen may remain after truncation
+        expect(result).toBe(`444-${slugify('af spawn should not require a pre-existing spec file')}`);
+      });
+
+      it('uses spec filename when GitHub unavailable', () => {
+        const result = deriveSpecName('444', null, '444-spawn-improvements');
+        expect(result).toBe('444-spawn-improvements');
+      });
+
+      it('prefers GitHub title over spec filename', () => {
+        const result = deriveSpecName('444', 'Better Title', '444-old-name');
+        expect(result).toBe('444-better-title');
+      });
+    });
+
+    describe('file reference naming (actualSpecName)', () => {
+      it('uses actual spec filename when spec exists (even with GitHub title)', () => {
+        const result = deriveActualSpecName('444-spawn-improvements', '444-af-spawn-should-not');
+        expect(result).toBe('444-spawn-improvements');
+      });
+
+      it('uses derived name when no spec file exists', () => {
+        const result = deriveActualSpecName(null, '444-af-spawn-should-not');
+        expect(result).toBe('444-af-spawn-should-not');
+      });
+    });
+
+    describe('worktree naming with GitHub title', () => {
+      it('constructs correct worktree name from GitHub issue title', () => {
+        const issueTitle = 'af spawn should not require a pre-existing spec file';
+        const strippedId = '444';
+        const slug = slugify(issueTitle);
+        const specName = `${strippedId}-${slug}`;
+        const specSlug = specName.replace(/^[0-9]+-/, '');
+        const worktreeName = `aspir-${strippedId}-${specSlug}`;
+        expect(worktreeName).toBe(`aspir-444-${slug}`);
+        expect(worktreeName.length).toBeLessThanOrEqual(50); // reasonable length
+      });
+    });
+  });
+
   describe('TICK --amends spec resolution logic', () => {
     it('TICK with --amends resolves spec by amends number, not issue number', () => {
       // For: af spawn 320 --protocol tick --amends 315
