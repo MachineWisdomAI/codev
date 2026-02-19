@@ -42,6 +42,7 @@ export interface TemplateContext {
     body: string;
   };
   task_text?: string;
+  spec_missing?: boolean;
 }
 
 /**

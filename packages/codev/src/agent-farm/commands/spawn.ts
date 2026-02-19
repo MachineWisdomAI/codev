@@ -245,7 +245,11 @@ function inferProtocolFromWorktree(config: Config, issueNumber: number): string 
 async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
   const issueNumber = options.issueNumber!;
   const projectId = String(issueNumber);
+  const strippedId = stripLeadingZeros(projectId);
   const protocol = await resolveIssueProtocol(options, config);
+
+  // Load protocol definition early — needed for input.required check
+  const protocolDef = loadProtocol(config, protocol);
 
   // For TICK amendments, resolve spec by the amends number (the original spec)
   const specLookupId = (protocol === 'tick' && options.amends)
@@ -254,25 +258,57 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   // Resolve spec file (supports legacy zero-padded IDs)
   const specFile = await findSpecFile(config.codevDir, specLookupId);
+
+  // When no spec file exists, check if the protocol allows spawning without one.
+  // TICK always requires a spec (enforced via options.amends, regardless of input.required).
   if (!specFile) {
-    fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
+    if (protocolDef?.input?.required === false && !options.amends) {
+      // Protocol allows no-spec spawn — will derive naming from GitHub issue title
+      logger.info('No spec file found. Protocol allows spawning without one (Specify phase will create it).');
+    } else {
+      fatal(`Spec not found for ${protocol === 'tick' ? `amends #${options.amends}` : `issue #${issueNumber}`}. Expected: codev/specs/${specLookupId}-*.md`);
+    }
   }
 
-  const specName = basename(specFile, '.md');
-  const strippedId = stripLeadingZeros(projectId);
+  // Fetch GitHub issue context.
+  // When no spec file exists, this is fatal (we need a project name).
+  // When spec file exists, this is non-fatal (spec filename is the fallback).
+  let ghIssue: Awaited<ReturnType<typeof fetchGitHubIssueNonFatal>> = null;
+  if (!specFile) {
+    // Fatal fetch — we need the issue title for naming
+    ghIssue = await fetchGitHubIssue(issueNumber);
+  } else {
+    ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
+  }
+
+  // Derive specName for naming.
+  // Priority: GitHub issue title > spec filename
+  let specName: string;
+  if (ghIssue) {
+    specName = `${strippedId}-${slugify(ghIssue.title)}`;
+  } else {
+    // No GitHub issue — fall back to spec filename (specFile must exist here)
+    specName = basename(specFile!, '.md');
+  }
+
   const builderId = buildAgentName('spec', projectId, protocol);
   const specSlug = specName.replace(/^[0-9]+-/, '');
   const worktreeName = `${protocol}-${strippedId}-${specSlug}`;
   const branchName = `builder/${worktreeName}`;
   const worktreePath = resolve(config.buildersDir, worktreeName);
 
+  // For file references (template context, plan lookup), use the actual spec filename
+  // when it exists. specName drives naming (worktree/branch/porch) but actual files
+  // on disk may have a different name (e.g., "444-spawn-improvements" vs "444-af-spawn-should-not").
+  const actualSpecName = specFile ? basename(specFile, '.md') : specName;
+
   // Check for corresponding plan file
-  const planFile = resolve(config.codevDir, 'plans', `${specName}.md`);
+  const planFile = resolve(config.codevDir, 'plans', `${actualSpecName}.md`);
   const hasPlan = existsSync(planFile);
 
   logger.header(`${options.resume ? 'Resuming' : 'Spawning'} Builder ${builderId} (${protocol})`);
   logger.kv('Issue', `#${issueNumber}`);
-  logger.kv('Spec', specFile);
+  logger.kv('Spec', specFile ?? '(will be created by Specify phase)');
   logger.kv('Branch', branchName);
   logger.kv('Worktree', worktreePath);
 
@@ -285,7 +321,6 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     await createWorktree(config, branchName, worktreePath);
   }
 
-  const protocolDef = loadProtocol(config, protocol);
   const mode = resolveMode(options, protocolDef);
 
   logger.kv('Protocol', protocol.toUpperCase());
@@ -293,26 +328,25 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
 
   // Pre-initialize porch so the builder doesn't need to figure out project ID
   if (!options.resume) {
-    const porchProjectName = specName.replace(new RegExp(`^0*${projectId}-`), '');
+    const porchProjectName = specSlug;
     await initPorchInWorktree(worktreePath, protocol, projectId, porchProjectName);
   }
 
-  // Fetch GitHub issue context (non-fatal, for enriching the builder prompt)
-  const ghIssue = await fetchGitHubIssueNonFatal(issueNumber);
   if (ghIssue) {
     logger.kv('GitHub Issue', `#${issueNumber}: ${ghIssue.title}`);
   }
 
-  const specRelPath = `codev/specs/${specName}.md`;
-  const planRelPath = `codev/plans/${specName}.md`;
+  const specRelPath = `codev/specs/${actualSpecName}.md`;
+  const planRelPath = `codev/plans/${actualSpecName}.md`;
   const templateContext: TemplateContext = {
     protocol_name: protocol.toUpperCase(), mode,
     mode_soft: mode === 'soft', mode_strict: mode === 'strict',
     project_id: projectId,
     input_description: `the feature specified in ${specRelPath}`,
-    spec: { path: specRelPath, name: specName },
+    spec: { path: specRelPath, name: actualSpecName },
+    spec_missing: !specFile,
   };
-  if (hasPlan) templateContext.plan = { path: planRelPath, name: specName };
+  if (hasPlan) templateContext.plan = { path: planRelPath, name: actualSpecName };
   if (ghIssue) {
     templateContext.issue = {
       number: issueNumber,
