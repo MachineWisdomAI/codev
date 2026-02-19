@@ -249,7 +249,6 @@ export async function bench(options: BenchOptions): Promise<void> {
   logger.kv('RAM', ram);
   lines.push(`RAM: ${ram}`);
   logger.kv('Engines', ENGINES.join(', '));
-  lines.push(`Engines: ${ENGINES.join(', ')}`);
   logger.kv('Mode', mode);
   lines.push(`Mode: ${mode}`);
   logger.kv('Iterations', iterations);
@@ -273,6 +272,7 @@ export async function bench(options: BenchOptions): Promise<void> {
 
     // Per-engine results
     const colWidths = [10, 10];
+    logger.row(['Engine', 'Time'], colWidths);
     for (const er of result.engines) {
       logger.row([er.engine, formatEngineTime(er)], colWidths);
       lines.push(`${er.engine}: ${formatEngineTime(er)}`);
