@@ -21,10 +21,12 @@ function TerminalControls({
   fitRef,
   wsRef,
   xtermRef,
+  connStatus,
 }: {
   fitRef: React.RefObject<FitAddon | null>;
   wsRef: React.RefObject<WebSocket | null>;
   xtermRef: React.RefObject<XTerm | null>;
+  connStatus: 'connected' | 'reconnecting' | 'disconnected';
 }) {
   const handleRefresh = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -74,6 +76,12 @@ function TerminalControls({
 
   return (
     <div className="terminal-controls">
+      {connStatus !== 'connected' && (
+        <span
+          className={`terminal-status-dot ${connStatus === 'reconnecting' ? 'terminal-status-reconnecting' : 'terminal-status-disconnected'}`}
+          title={connStatus === 'reconnecting' ? 'Reconnecting…' : 'Disconnected'}
+        />
+      )}
       <button
         className="terminal-control-btn"
         onPointerDown={handleRefresh}
@@ -379,19 +387,17 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsBase = `${wsProtocol}//${window.location.host}${wsPath}`;
 
-    // Reconnection state (Bugfix #442)
+    // Reconnection state (Bugfix #442, #451)
     const rc = {
       lastSeq: 0,
       attempts: 0,
-      rapidFailures: 0,
       timer: null as ReturnType<typeof setTimeout> | null,
       disposed: false,
       initialPhase: true,
       initialBuffer: '',
       flushTimer: null as ReturnType<typeof setTimeout> | null,
     };
-    const MAX_ATTEMPTS = 15;
-    const MAX_RAPID_FAILURES = 5;
+    const MAX_ATTEMPTS = 50;
     const BACKOFF_CAP_MS = 30_000;
 
     const filterDA = (text: string): string => {
@@ -406,7 +412,6 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
-      const createdAt = Date.now();
 
       // Reset DA filter state for this connection
       rc.initialPhase = true;
@@ -433,9 +438,8 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       };
 
       ws.onopen = () => {
-        // Reset reconnection counters on successful connect
+        // Reset reconnection counter on successful connect
         rc.attempts = 0;
-        rc.rapidFailures = 0;
         setConnStatus('connected');
         sendControl(ws, 'resize', { cols: term.cols, rows: term.rows });
       };
@@ -472,15 +476,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
       ws.onclose = () => {
         if (rc.disposed) return;
 
-        // Detect rapid failure (session likely gone): close within 2s of creation
-        const elapsed = Date.now() - createdAt;
-        if (elapsed < 2000) {
-          rc.rapidFailures++;
-        } else {
-          rc.rapidFailures = 0;
-        }
-
-        if (rc.rapidFailures >= MAX_RAPID_FAILURES || rc.attempts >= MAX_ATTEMPTS) {
+        if (rc.attempts >= MAX_ATTEMPTS) {
           setConnStatus('disconnected');
           term.write('\r\n\x1b[90m[Session ended — unable to reconnect]\x1b[0m\r\n');
           return;
@@ -636,13 +632,7 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
           backgroundColor: '#1a1a1a',
         }}
       />
-      {connStatus === 'reconnecting' && (
-        <div className="terminal-reconnecting-overlay">
-          <span className="terminal-reconnecting-spinner" />
-          Reconnecting…
-        </div>
-      )}
-      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} />
+      <TerminalControls fitRef={fitRef} wsRef={wsRef} xtermRef={xtermRef} connStatus={connStatus} />
       {isMobile && (
         <VirtualKeyboard wsRef={wsRef} modifierRef={modifierRef} />
       )}

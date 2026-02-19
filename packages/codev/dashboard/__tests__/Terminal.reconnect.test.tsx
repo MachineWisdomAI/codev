@@ -1,8 +1,8 @@
 /**
- * Tests for WebSocket auto-reconnection with session resumption (Bugfix #442).
+ * Tests for WebSocket auto-reconnection with session resumption (Bugfix #442, #451).
  *
- * Covers: exponential backoff, seq tracking, reconnecting overlay,
- * rapid failure detection (session gone), and max attempt limit.
+ * Covers: exponential backoff, seq tracking, status dot indicator,
+ * and max attempt limit (50 attempts with exponential backoff).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
@@ -171,50 +171,48 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
     expect(wsInstances[1].url).toContain('?resume=42');
   });
 
-  it('shows reconnecting overlay during reconnection', () => {
+  it('shows reconnecting status dot during reconnection', () => {
     const { container } = render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
 
-    // No overlay while connected
-    expect(container.querySelector('.terminal-reconnecting-overlay')).toBeNull();
+    // No status dot while connected
+    expect(container.querySelector('.terminal-status-dot')).toBeNull();
 
-    // Disconnect triggers overlay
+    // Disconnect triggers reconnecting dot
     act(() => { wsInstances[0].simulateClose(); });
-    expect(container.querySelector('.terminal-reconnecting-overlay')).not.toBeNull();
-    expect(container.querySelector('.terminal-reconnecting-overlay')!.textContent).toContain('Reconnecting');
+    const dot = container.querySelector('.terminal-status-dot');
+    expect(dot).not.toBeNull();
+    expect(dot!.classList.contains('terminal-status-reconnecting')).toBe(true);
   });
 
-  it('hides overlay on successful reconnection', () => {
+  it('hides status dot on successful reconnection', () => {
     const { container } = render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
     act(() => { wsInstances[0].simulateClose(); });
 
-    // Overlay is shown
-    expect(container.querySelector('.terminal-reconnecting-overlay')).not.toBeNull();
+    // Dot is shown
+    expect(container.querySelector('.terminal-status-dot')).not.toBeNull();
 
     // Reconnect
     act(() => { vi.advanceTimersByTime(1000); });
     act(() => { wsInstances[1].simulateOpen(); });
 
-    // Overlay is hidden
-    expect(container.querySelector('.terminal-reconnecting-overlay')).toBeNull();
+    // Dot is hidden
+    expect(container.querySelector('.terminal-status-dot')).toBeNull();
   });
 
   it('gives up after max attempts and shows session ended', () => {
     render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
 
-    // Advance so the first close isn't a rapid failure
     act(() => { vi.advanceTimersByTime(5000); });
     act(() => { wsInstances[0].simulateClose(); });
 
-    // Exhaust all 15 reconnection attempts — advance enough time for each timer
-    // to fire, then wait for the close to not be a rapid failure
-    for (let i = 0; i < 20; i++) {
+    // Exhaust all 50 reconnection attempts
+    for (let i = 0; i < 55; i++) {
       act(() => { vi.advanceTimersByTime(35_000); });
       const lastWs = wsInstances[wsInstances.length - 1];
       if (lastWs.readyState !== 3) {
-        // Not yet closed — simulate close with enough elapsed time
         act(() => { lastWs.simulateClose(); });
       }
     }
@@ -224,30 +222,48 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
     act(() => { vi.advanceTimersByTime(120_000); });
     expect(wsInstances).toHaveLength(countBefore);
 
-    // Should not exceed initial + MAX_ATTEMPTS reconnection attempts
-    expect(wsInstances.length).toBeLessThanOrEqual(1 + 15);
+    // Should not exceed initial + MAX_ATTEMPTS (50) reconnection attempts
+    expect(wsInstances.length).toBeLessThanOrEqual(1 + 50);
   });
 
-  it('detects rapid failures as session gone and stops reconnecting', () => {
+  it('keeps retrying after rapid connection failures (Bugfix #451)', () => {
     render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
 
-    // Advance some time so the first close isn't a rapid failure
     act(() => { vi.advanceTimersByTime(5000); });
     act(() => { wsInstances[0].simulateClose(); });
 
-    // 5 rapid failures: advance exactly to the timer, then close immediately
-    // (same tick = 0ms elapsed = rapid failure)
-    for (let i = 0; i < 5; i++) {
+    // Simulate 10 rapid failures (connection fails before OPEN) — should NOT give up
+    for (let i = 0; i < 10; i++) {
       const delay = Math.min(1000 * Math.pow(2, i), 30_000);
       act(() => { vi.advanceTimersByTime(delay); });
-      // Close immediately — same tick as creation means elapsed < 2000
       act(() => { wsInstances[wsInstances.length - 1].simulateClose(); });
     }
 
+    // Should still be retrying — next backoff timer creates another attempt
     const countBefore = wsInstances.length;
-    act(() => { vi.advanceTimersByTime(60_000); });
-    expect(wsInstances).toHaveLength(countBefore);
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect(wsInstances.length).toBeGreaterThan(countBefore);
+  });
+
+  it('shows disconnected status dot after max attempts', () => {
+    const { container } = render(<Terminal wsPath="/ws/terminal/t1" />);
+    act(() => { wsInstances[0].simulateOpen(); });
+    act(() => { vi.advanceTimersByTime(5000); });
+    act(() => { wsInstances[0].simulateClose(); });
+
+    // Exhaust all attempts
+    for (let i = 0; i < 55; i++) {
+      act(() => { vi.advanceTimersByTime(35_000); });
+      const lastWs = wsInstances[wsInstances.length - 1];
+      if (lastWs.readyState !== 3) {
+        act(() => { lastWs.simulateClose(); });
+      }
+    }
+
+    const dot = container.querySelector('.terminal-status-dot');
+    expect(dot).not.toBeNull();
+    expect(dot!.classList.contains('terminal-status-disconnected')).toBe(true);
   });
 
   it('resets attempt counter on successful reconnect', () => {
