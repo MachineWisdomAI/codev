@@ -55,7 +55,9 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 ```json
 {
   "version": "1.0",
+  "codevVersion": "1.7.0",
   "success": true,
+  "dryRun": false,
   "summary": {
     "new": 3,
     "updated": 5,
@@ -81,11 +83,29 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 }
 ```
 
+**Field definitions:**
+- `version`: JSON schema version (for future evolution). Always `"1.0"`.
+- `codevVersion`: The installed Codev package version (read from `version.ts` / `package.json`). Interpolated into `instructions.commit` message.
+- `success`: `true` if the command completed without errors. Always `true` on exit 0, `false` on exit 1. Unaffected by dry-run or conflict status.
+- `dryRun`: `true` if `--dry-run` was specified (no files were modified). `false` otherwise.
+- `summary.new`: Count of files that did not exist and were created (includes files from `copyConsultTypes`, `copySkills`, `copyRoles`, and the hash-based template loop).
+- `summary.updated`: Count of existing files that were overwritten (template changed, user did not modify — or `--force`).
+- `summary.conflicts`: Count of files where the user modified the original and a new template version exists. A `.codev-new` file was created for each.
+- `summary.skipped`: Count of files where the template has not changed since last update (content is identical).
+- `files.new`, `files.updated`, `files.skipped`: Flat arrays of relative file paths.
+- `files.conflicts`: Array of objects with `file`, `codevNew`, and `reason`.
+
+**Important**: Files added by `copyConsultTypes`, `copySkills`, and `copyRoles` (skipExisting mode) must be included in the `files.new` array and `summary.new` count. These scaffold utility results are tracked alongside hash-based template results.
+
 ### Combinability with Existing Flags
 
-- `--agent --dry-run`: Output the JSON describing what *would* change, without applying. The `success` field reflects that no changes were made.
-- `--agent --force`: Apply all updates forcefully (overwrite even user-modified files), then output JSON with no conflicts.
+- `--agent --dry-run`: Output JSON describing what *would* change, without applying. `success` is `true` (command ran without errors). `dryRun` is `true`.
+- `--agent --force`: Apply all updates forcefully (overwrite even user-modified files), output JSON with no conflicts. No `.codev-new` files created.
 - `--agent` alone: Apply updates with standard conflict detection, output JSON with any conflicts listed.
+
+### Error and Partial Failure Handling
+
+If a file write fails mid-run, the command fails with exit code 1. The JSON output (if any) will have `success: false` and an `error` field with the message. No atomicity guarantee — files written before the error remain on disk. This matches the current non-agent behavior.
 
 ## Stakeholders
 - **Primary Users**: AI agents (builders, maintenance agents, cron-based update workflows)
@@ -134,7 +154,7 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 - Easy to test — assert on the returned result object
 
 **Cons**:
-- Need to handle stderr output carefully (chalk vs. plain text in agent mode)
+- Need to handle stderr output carefully (chalk vs. plain text in agent mode). Mitigation: rely on chalk's built-in TTY auto-detection — when stdout is piped (as agents typically do), chalk automatically disables colors.
 
 **Estimated Complexity**: Low
 **Risk Level**: Low
@@ -181,11 +201,14 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 ### Functional Tests
 1. **Happy path (no conflicts)**: `--agent` outputs JSON with updated/new files, zero conflicts
 2. **Conflicts present**: `--agent` outputs JSON listing conflicts with `.codev-new` paths
-3. **Dry run**: `--agent --dry-run` outputs JSON describing changes without applying
-4. **Force mode**: `--agent --force` outputs JSON with all files updated, no conflicts
+3. **Dry run**: `--agent --dry-run` outputs JSON with `dryRun: true` and no files modified on disk
+4. **Force mode**: `--agent --force` outputs JSON with all files updated, no conflicts, no `.codev-new` files
 5. **Up to date**: `--agent` when no updates needed outputs JSON with all zeros
 6. **No codev directory**: `--agent` still throws error (non-zero exit)
-7. **Standard mode unchanged**: Running without `--agent` behaves identically to current behavior
+7. **Standard mode unchanged**: Running without `--agent` behaves identically to current behavior (interactive merge prompt still occurs on conflicts)
+8. **Scaffold utility files in JSON**: Files from `copyConsultTypes`, `copySkills`, `copyRoles` appear in `files.new`
+9. **Version in commit message**: `instructions.commit` contains actual Codev version, not placeholder
+10. **First-ever update (no hash store)**: `--agent` works correctly when `.update-hashes.json` doesn't exist
 
 ### Non-Functional Tests
 1. **JSON validity**: Output is valid JSON parseable by `JSON.parse()`
@@ -214,6 +237,17 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 - [ ] Product Owner Review
 - [ ] Stakeholder Sign-off
 - [ ] Expert AI Consultation Complete
+
+## Expert Consultation
+**Date**: 2026-02-19
+**Models Consulted**: Claude (Opus), GPT-5.2 Codex. Gemini timed out.
+**Sections Updated**:
+- **JSON Output Schema**: Added `codevVersion` field, `dryRun` boolean, and field definitions (Claude + Codex feedback)
+- **Field definitions**: Clarified `success`, `dryRun`, `summary.*` semantics (Claude + Codex feedback)
+- **Scaffold utility tracking**: Added explicit note that `copyConsultTypes`/`copySkills`/`copyRoles` results must be in JSON (Claude feedback)
+- **Error handling**: Added partial failure behavior section (Codex feedback)
+- **stderr colors**: Resolved chalk TTY auto-detection approach (Claude feedback)
+- **Test scenarios**: Added scaffold file tracking, version interpolation, first-ever update, regression tests (Claude + Codex feedback)
 
 ## Notes
 
