@@ -65,6 +65,7 @@ In `spawnSpec()` (currently lines 245-341):
    - Construct `specName` as `${projectId}-${slug}` (e.g., `444-af-spawn-should-not-require-a`)
    - The rest of the naming logic (`worktreeName`, `branchName`, `worktreePath`, `porchProjectName`) follows from `specName` as before
 4. Template context: when no spec file exists, set `spec.path` to the expected path (where the Specify phase will create it) and add a `spec_missing: true` flag
+5. The builder prompt template (`spawn-roles.ts` `buildPromptFromTemplate`) already renders the spec path — the `spec_missing` flag is available in the template context but does not require a template file change since the template already says "Read the specification at: {spec.path}" which will point to the correct expected path. The Specify phase prompt will create the file there.
 
 **Key code flow change:**
 
@@ -76,15 +77,19 @@ BEFORE:
 AFTER:
   specFile = findSpecFile(...)
   if (!specFile) {
-    if (protocolDef.input?.required === false) {
+    if (protocolDef.input?.required === false && !options.amends) {
       ghIssue = fetchGitHubIssue(issueNumber)  // fatal wrapper
       slug = slugify(ghIssue.title)
-      specName = `${projectId}-${slug}`
+      specName = `${strippedId}-${slug}`
     } else {
-      fatal(...)  // existing behavior
+      fatal(...)  // existing behavior (covers input.required: true AND TICK amends)
     }
   }
 ```
+
+**Additional changes in the no-spec path:**
+- Logger: `logger.kv('Spec', '(will be created by Specify phase)')` instead of logging null
+- Template context: set `spec_missing: true` to signal the builder prompt template
 
 #### Acceptance Criteria
 - [ ] `af spawn 444 --protocol aspir` succeeds without a spec file
@@ -119,8 +124,9 @@ Revert the single file change to `spawn.ts`. No database or state changes.
 After Phase 1, the no-spec path already uses GitHub issue title. In Phase 2, extend this to the spec-exists path:
 
 1. Move the GitHub issue fetch (`fetchGitHubIssueNonFatal`) earlier, before naming derivation
-2. When `ghIssue` is available: `slug = slugify(ghIssue.title)`, `specName = ${strippedId}-${slug}`
+2. When `ghIssue` is available: `slug = slugify(ghIssue.title)`, construct naming from `${strippedId}-${slug}`
 3. When `ghIssue` is not available: fall back to existing behavior (derive slug from spec filename)
+4. Note: the actual spec file on disk may have a different name — `specFile` is tracked separately for porch/template use
 4. The rest of the naming chain (`worktreeName`, `branchName`, `worktreePath`, `porchProjectName`) remains unchanged — it already derives from `specName`
 
 **Key change:**
@@ -175,6 +181,7 @@ New test cases:
 3. **No spec file, GitHub fetch fails**: Mock both to fail. Assert spawn calls `fatal()` with clear message.
 4. **Spec exists + GitHub available**: Assert naming uses GitHub issue title slug.
 5. **Spec exists + GitHub unavailable**: Assert naming falls back to spec filename slug.
+6. **TICK with missing amends spec**: Mock `findSpecFile` to return null for the amends spec, with `options.amends` set. Assert spawn calls `fatal()` even though TICK has `input.required: false`.
 
 #### Acceptance Criteria
 - [ ] All new tests pass
