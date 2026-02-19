@@ -60,7 +60,7 @@ When a protocol's `input.required` is `false` (or the protocol has a `specify` p
 - The builder prompt indicates no spec exists yet and the Specify phase will create it
 - Porch's Specify phase creates the spec as its first artifact
 
-When a spec file does exist (pre-written by the architect), behavior is unchanged — the spec filename drives naming as today.
+When a spec file does exist (pre-written by the architect), the spec file is still used by porch for its Specify phase (skip as pre-approved). However, naming is determined by GitHub issue title regardless of whether a spec exists — see §2 below.
 
 ### 2. GitHub issue title used for all protocol naming
 
@@ -77,7 +77,8 @@ This makes naming consistent across all protocols and produces more descriptive 
 - [ ] `af spawn 444 --protocol aspir` succeeds without a spec file when protocol has `input.required: false`
 - [ ] `af spawn 444 --protocol spir` succeeds without a spec file (same condition)
 - [ ] When no spec file exists, the worktree/branch/porch use the GitHub issue title slug
-- [ ] When a spec file exists, behavior is unchanged (backward compatible)
+- [ ] When a spec file exists, porch behavior is unchanged (spec is used as pre-approved artifact)
+- [ ] Naming uses GitHub issue title even when a spec file exists (naming behavior change)
 - [ ] `af spawn 444 --protocol tick --amends 30` still requires the amends spec file (TICK unchanged)
 - [ ] All existing tests pass
 - [ ] New unit tests cover the no-spec spawn path
@@ -86,13 +87,13 @@ This makes naming consistent across all protocols and produces more descriptive 
 ## Constraints
 ### Technical Constraints
 - Must not break `--resume` behavior (existing worktree lookup by pattern)
-- Must not break TICK protocol (always requires an existing spec)
+- Must not break TICK protocol (always requires an existing spec). Note: TICK's protocol.json also has `input.required: false`, but TICK's spec requirement is enforced via the separate `options.amends` code path in `spawnSpec()`, not via `input.required`. This distinction must be preserved.
 - The `slugify()` function already exists and produces filesystem-safe names (max 30 chars, lowercase, alphanumeric + hyphens)
 - Porch `initPorchInWorktree()` requires a project name — must be derivable without a spec file
 - GitHub issue fetching is already non-fatal for SPIR/ASPIR — needs to become fatal when it's the only source of project name
 
 ### Business Constraints
-- Backward compatibility: no behavioral change when spec files exist
+- Backward compatibility: porch behavior unchanged when spec files exist. Naming changes from spec-filename-derived to GitHub-issue-title-derived (intentional improvement, not a regression)
 
 ## Assumptions
 - The `gh` CLI is available and authenticated (already assumed for bugfix mode)
@@ -155,9 +156,11 @@ This makes naming consistent across all protocols and produces more descriptive 
 ### Functional Tests
 1. **No spec file, protocol with `input.required: false`**: Spawn succeeds, worktree named from GitHub issue title
 2. **No spec file, protocol with `input.required: true` (or TICK)**: Spawn fails with existing error message
-3. **Spec file exists**: Behavior unchanged — spec filename drives naming (or GitHub issue title if available)
-4. **No spec file, GitHub issue fetch fails**: Spawn fails with clear error message
-5. **Resume with no-spec spawn**: `--resume` finds the existing worktree by pattern
+3. **Spec file exists + GitHub available**: GitHub issue title drives naming; porch uses spec as pre-approved artifact
+4. **Spec file exists + GitHub unavailable**: Spec filename drives naming (fallback)
+5. **No spec file, GitHub issue fetch fails**: Spawn fails with clear error message
+6. **Resume with no-spec spawn**: `--resume` finds the existing worktree by issue number pattern (not slug)
+7. **GitHub issue title changes after spawn**: `--resume` still works because it matches on `{protocol}-{id}-*` pattern, not the slug
 
 ### Non-Functional Tests
 1. Existing spawn test suite passes without modification
