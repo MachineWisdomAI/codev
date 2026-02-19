@@ -215,21 +215,31 @@ export async function done(workspaceRoot: string, projectId: string): Promise<vo
   const protocol = loadProtocol(workspaceRoot, state.protocol);
   const checks = getPhaseChecks(protocol, state.phase);
 
-  // Run checks first
+  // Run checks first — but skip if the gate was just approved (approve already ran them)
   if (Object.keys(checks).length > 0) {
-    const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+    const gate = getPhaseGate(protocol, state.phase);
+    const gateStatus = gate ? state.gates[gate] : undefined;
+    const recentlyApproved = gateStatus?.status === 'approved' && gateStatus.approved_at &&
+      (Date.now() - new Date(gateStatus.approved_at).getTime()) < 60_000;
 
-    console.log('');
-    console.log(chalk.bold('RUNNING CHECKS...'));
-
-    const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
-    console.log(formatCheckResults(results));
-
-    if (!allChecksPassed(results)) {
+    if (recentlyApproved) {
       console.log('');
-      console.log(chalk.red('CHECKS FAILED. Cannot advance.'));
-      console.log(`\n  Fix the failures and try again.`);
-      process.exit(1);
+      console.log(chalk.dim('Checks skipped (gate approved <60s ago).'));
+    } else {
+      const checkEnv: CheckEnv = { PROJECT_ID: state.id, PROJECT_TITLE: resolveArtifactBaseName(workspaceRoot, state.id, state.title) };
+
+      console.log('');
+      console.log(chalk.bold('RUNNING CHECKS...'));
+
+      const results = await runPhaseChecks(checks, workspaceRoot, checkEnv);
+      console.log(formatCheckResults(results));
+
+      if (!allChecksPassed(results)) {
+        console.log('');
+        console.log(chalk.red('CHECKS FAILED. Cannot advance.'));
+        console.log(`\n  Fix the failures and try again.`);
+        process.exit(1);
+      }
     }
   }
 
