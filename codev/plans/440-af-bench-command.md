@@ -55,6 +55,10 @@ Three phases: core command with parallel/sequential execution, statistics and ou
 
 #### Implementation Details
 
+**Default prompt:** `"Please analyze the codev codebase and give me a list of potential impactful improvements."` (must match bench.sh exactly).
+
+**Project root resolution:** Use `process.cwd()` as the base for `codev/resources/bench-results/`. The `af` CLI is always invoked from the project root (same assumption as all other `af` commands).
+
 **`bench.ts` structure:**
 ```typescript
 interface BenchOptions {
@@ -146,15 +150,16 @@ function computeStats(times: number[]): { avg: number; min: number; max: number;
 - Return values in seconds, formatted to 1 decimal
 
 **Console output:**
-- Use `logger.header()` for "=== Consultation Benchmark ===" and "=== Summary ==="
-- Use `logger.kv()` for host info section
-- Use `logger.row()` with fixed column widths for timing tables
+- Use `console.log()` for banner lines (`=== Consultation Benchmark ===`, `=== Summary ===`) to match spec's exact format (not `logger.header()` which renders bold+underline)
+- Use `logger.kv()` for host info fields: Host, CPU, RAM, Engines, Mode, Iterations
+- Use `logger.row()` with fixed column widths for timing tables (Engine, Time columns)
 - Wall time shown only in parallel mode
 
 **File output:**
 - `mkdir -p` equivalent via `fs.mkdirSync(dir, { recursive: true })`
 - Timestamp format: `YYYYMMDD-HHMMSS`
-- Machine-readable format (key: value per line)
+- All individual engine outputs saved in the same `bench-results/` directory
+- Full field list in result file header: Host, CPU, RAM, Mode, Iterations, Prompt, Date
 - Write both to console (via logger) and to file simultaneously
 
 #### Acceptance Criteria
@@ -180,7 +185,7 @@ function computeStats(times: number[]): { avg: number; min: number; max: number;
 - Achieve >90% coverage of `bench.ts`
 
 #### Deliverables
-- [ ] `packages/codev/tests/unit/agent-farm/commands/bench.test.ts`
+- [ ] `packages/codev/src/agent-farm/commands/__tests__/bench.test.ts`
 - [ ] >90% coverage of `bench.ts`
 
 #### Implementation Details
@@ -206,6 +211,8 @@ function computeStats(times: number[]): { avg: number; min: number; max: number;
 11. Results file: correct path and content
 12. Invalid iterations: 0 and negative rejected
 13. `consult` not on PATH: clear error message
+14. All engines fail in all iterations: no stats computed, no division-by-zero
+15. Default prompt used when `--prompt` not specified
 
 #### Acceptance Criteria
 - [ ] All tests pass
