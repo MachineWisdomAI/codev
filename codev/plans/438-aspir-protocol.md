@@ -51,6 +51,7 @@ This follows Approach 1 (Full Copy with Gate Removal) from the spec — self-con
 - [ ] `codev-skeleton/protocols/aspir/consult-types/spec-review.md` — copied from SPIR
 - [ ] `codev-skeleton/protocols/aspir/consult-types/plan-review.md` — copied from SPIR
 - [ ] `codev-skeleton/protocols/aspir/consult-types/impl-review.md` — copied from SPIR
+- [ ] `codev-skeleton/protocols/aspir/consult-types/phase-review.md` — copied from SPIR
 - [ ] `codev-skeleton/protocols/aspir/consult-types/pr-review.md` — copied from SPIR
 - [ ] `codev-skeleton/protocols/aspir/templates/spec.md` — copied from SPIR
 - [ ] `codev-skeleton/protocols/aspir/templates/plan.md` — copied from SPIR
@@ -76,7 +77,7 @@ This follows Approach 1 (Full Copy with Gate Removal) from the spec — self-con
 - Document that the only difference is the removal of spec-approval and plan-approval gates
 
 #### Acceptance Criteria
-- [ ] Directory `codev-skeleton/protocols/aspir/` exists with all 14 files
+- [ ] Directory `codev-skeleton/protocols/aspir/` exists with all 15 files
 - [ ] `protocol.json` has `"name": "aspir"` and no alias
 - [ ] `protocol.json` specify phase has no `gate` property
 - [ ] `protocol.json` plan phase has no `gate` property
@@ -101,20 +102,22 @@ Delete the `codev-skeleton/protocols/aspir/` directory entirely.
 - [ ] `codev/protocols/aspir/consult-types/spec-review.md` — copied from SPIR
 - [ ] `codev/protocols/aspir/consult-types/plan-review.md` — copied from SPIR
 - [ ] `codev/protocols/aspir/consult-types/impl-review.md` — copied from SPIR
+- [ ] `codev/protocols/aspir/consult-types/phase-review.md` — copied from SPIR
 - [ ] `codev/protocols/aspir/consult-types/pr-review.md` — copied from SPIR
 - [ ] `codev/protocols/aspir/templates/spec.md` — copied from SPIR
+- [ ] `codev/protocols/aspir/templates/plan.md` — copied from SPIR
 - [ ] `codev/protocols/aspir/templates/review.md` — copied from SPIR
 
 #### Implementation Details
 
 **Key difference from Phase 1**: The `codev/protocols/spir/protocol.json` has codev-specific check commands (e.g., `cwd` options, test exclusion patterns) that differ from the generic skeleton version. Copy from `codev/protocols/spir/`, not from the skeleton.
 
-**Note**: `codev/protocols/spir/` does not have `builder-prompt.md`, `prompts/`, or `templates/plan.md` — these only exist in the skeleton. The instance directory is intentionally smaller.
+**Note**: `codev/protocols/spir/` does not have `builder-prompt.md` or `prompts/` — these only exist in the skeleton. The instance directory is intentionally smaller.
 
 **protocol.json changes**: Same metadata changes as Phase 1 (name, version, description, gate removal).
 
 #### Acceptance Criteria
-- [ ] Directory `codev/protocols/aspir/` exists with all 8 files
+- [ ] Directory `codev/protocols/aspir/` exists with all 10 files
 - [ ] `protocol.json` has codev-specific check commands (not the generic skeleton versions)
 - [ ] `protocol.json` specify and plan phases have no `gate` property
 - [ ] `protocol.json` review phase retains `"gate": "pr"`
@@ -135,8 +138,8 @@ Delete the `codev/protocols/aspir/` directory entirely.
 #### Deliverables
 - [ ] Root `CLAUDE.md` — add ASPIR to Protocol Selection Guide section
 - [ ] Root `AGENTS.md` — add ASPIR to Protocol Selection Guide section (same content)
-- [ ] `codev-skeleton/CLAUDE.md` — add ASPIR to Available Protocols section
-- [ ] `codev-skeleton/AGENTS.md` — add ASPIR to Available Protocols section (same content)
+- [ ] `codev-skeleton/templates/CLAUDE.md` — add ASPIR to Available Protocols section
+- [ ] `codev-skeleton/templates/AGENTS.md` — add ASPIR to Available Protocols section (same content)
 
 #### Implementation Details
 
@@ -152,7 +155,7 @@ Delete the `codev/protocols/aspir/` directory entirely.
 ASPIR is identical to SPIR except `spec-approval` and `plan-approval` gates are auto-approved. The PR gate remains.
 ```
 
-**Skeleton CLAUDE.md/AGENTS.md** — Add to the Available Protocols bullet list:
+**Skeleton `codev-skeleton/templates/CLAUDE.md` and `codev-skeleton/templates/AGENTS.md`** — Add to the Available Protocols bullet list:
 
 ```markdown
 - **ASPIR**: Autonomous SPIR (no approval gates) - `codev/protocols/aspir/protocol.md`
@@ -161,7 +164,7 @@ ASPIR is identical to SPIR except `spec-approval` and `plan-approval` gates are 
 #### Acceptance Criteria
 - [ ] All four doc files updated
 - [ ] CLAUDE.md and AGENTS.md have identical ASPIR content (they must stay in sync)
-- [ ] Skeleton CLAUDE.md and AGENTS.md have identical ASPIR content
+- [ ] Skeleton `codev-skeleton/templates/CLAUDE.md` and `codev-skeleton/templates/AGENTS.md` have identical ASPIR content
 
 #### Rollback Strategy
 Revert the doc changes via git.
@@ -184,8 +187,8 @@ Phase 1 and Phase 2 are independent of each other but both must complete before 
 | CLAUDE.md/AGENTS.md get out of sync | Medium | Low | Edit both in same commit |
 
 ## Validation Checkpoints
-1. **After Phase 1**: Verify `codev-skeleton/protocols/aspir/` has all 14 files, protocol.json is valid JSON with correct changes
-2. **After Phase 2**: Verify `codev/protocols/aspir/` has all 8 files, protocol.json has codev-specific checks
+1. **After Phase 1**: Verify `codev-skeleton/protocols/aspir/` has all 15 files, protocol.json is valid JSON with correct changes
+2. **After Phase 2**: Verify `codev/protocols/aspir/` has all 10 files, protocol.json has codev-specific checks
 3. **After Phase 3**: Verify all 4 doc files reference ASPIR consistently
 
 ## Notes

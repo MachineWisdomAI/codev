@@ -75,7 +75,7 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 ### Documentation
 - [ ] `protocol.md` in ASPIR directory documents the protocol and when to use it
 - [ ] ASPIR added to "Protocol Selection Guide" section in `CLAUDE.md` (root) and `AGENTS.md` (root)
-- [ ] ASPIR added to "Available Protocols" section in `codev-skeleton/CLAUDE.md` and `codev-skeleton/AGENTS.md`
+- [ ] ASPIR added to "Available Protocols" section in `codev-skeleton/templates/CLAUDE.md` and `codev-skeleton/templates/AGENTS.md`
 
 ### Guardrails
 - [ ] No changes to SPIR protocol files (ASPIR is additive only)
@@ -105,7 +105,7 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 ### Approach 1: Full Copy with Gate Removal (Recommended)
 **Description**: Copy each SPIR directory to its respective ASPIR location, then modify `protocol.json` and `protocol.md`. Each SPIR location is copied from its own source — they have different structures.
 
-**Files to create in `codev-skeleton/protocols/aspir/`** (copied from `codev-skeleton/protocols/spir/`):
+**Files to create in `codev-skeleton/protocols/aspir/`** (copied from `codev-skeleton/protocols/spir/`, 15 files):
 - `protocol.json` — **modified**: remove gates, update name/version/description
 - `protocol.md` — **modified**: ASPIR-specific documentation
 - `builder-prompt.md` — copied as-is
@@ -116,22 +116,25 @@ A new protocol called **ASPIR** (Autonomous SPIR) that:
 - `consult-types/spec-review.md` — copied as-is
 - `consult-types/plan-review.md` — copied as-is
 - `consult-types/impl-review.md` — copied as-is
+- `consult-types/phase-review.md` — copied as-is
 - `consult-types/pr-review.md` — copied as-is
 - `templates/spec.md` — copied as-is
 - `templates/plan.md` — copied as-is
 - `templates/review.md` — copied as-is
 
-**Files to create in `codev/protocols/aspir/`** (copied from `codev/protocols/spir/`):
+**Files to create in `codev/protocols/aspir/`** (copied from `codev/protocols/spir/`, 10 files):
 - `protocol.json` — **modified**: remove gates, update name/version/description (note: this copy has codev-specific check commands that differ from skeleton)
 - `protocol.md` — **modified**: ASPIR-specific documentation
 - `consult-types/spec-review.md` — copied as-is
 - `consult-types/plan-review.md` — copied as-is
 - `consult-types/impl-review.md` — copied as-is
+- `consult-types/phase-review.md` — copied as-is
 - `consult-types/pr-review.md` — copied as-is
 - `templates/spec.md` — copied as-is
+- `templates/plan.md` — copied as-is
 - `templates/review.md` — copied as-is
 
-Note: `codev/protocols/spir/` does not have `builder-prompt.md`, `prompts/`, or `templates/plan.md` — those only exist in the skeleton.
+Note: `codev/protocols/spir/` does not have `builder-prompt.md` or `prompts/` — those only exist in the skeleton.
 
 **`protocol.json` modifications** (both copies):
 - `"name"`: `"spir"` → `"aspir"`
@@ -201,6 +204,7 @@ Note: `codev/protocols/spir/` does not have `builder-prompt.md`, `prompts/`, or 
 
 ### Nice-to-Know (Optimization)
 - [ ] Should we add a `MAINTAIN` task to keep ASPIR prompts in sync with SPIR? → Out of scope for this spec; can be addressed later
+<!-- REVIEW(@architect): No -->
 
 ## Performance Requirements
 - Not applicable. This is a protocol definition, not runtime code.
