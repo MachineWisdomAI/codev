@@ -85,7 +85,7 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 
 **Field definitions:**
 - `version`: JSON schema version (for future evolution). Always `"1.0"`.
-- `codevVersion`: The installed Codev package version (read from `version.ts` / `package.json`). Interpolated into `instructions.commit` message.
+- `codevVersion`: The installed Codev package version. Canonical source: `version.ts` (which reads from `package.json` at build time). Interpolated into `instructions.commit` message.
 - `success`: `true` if the command completed without errors. Always `true` on exit 0, `false` on exit 1. Unaffected by dry-run or conflict status.
 - `dryRun`: `true` if `--dry-run` was specified (no files were modified). `false` otherwise.
 - `summary.new`: Count of files that did not exist and were created (includes files from `copyConsultTypes`, `copySkills`, `copyRoles`, and the hash-based template loop).
@@ -95,7 +95,9 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 - `files.new`, `files.updated`, `files.skipped`: Flat arrays of relative file paths.
 - `files.conflicts`: Array of objects with `file`, `codevNew`, and `reason`.
 
-**Important**: Files added by `copyConsultTypes`, `copySkills`, and `copyRoles` (skipExisting mode) must be included in the `files.new` array and `summary.new` count. These scaffold utility results are tracked alongside hash-based template results.
+**Important**: Files added by `copyConsultTypes`, `copySkills`, and `copyRoles` (skipExisting mode) must be included in the `files.new` array and `summary.new` count. These scaffold utility results are tracked alongside hash-based template results. Path format must be full relative paths from the project root: `"codev/consult-types/spec-review.md"`, `".claude/skills/keybindings-help/"`, `"codev/roles/architect.md"`. Files skipped by scaffold utilities (already exist) are **not** counted in `summary.skipped` — only hash-based template skips are tracked there.
+
+**stderr behavior**: In agent mode, progress messages go to stderr. In `--agent --dry-run`, stderr output is still emitted (showing what would change) — only file writes are suppressed.
 
 ### Combinability with Existing Flags
 
@@ -103,9 +105,36 @@ A new `--agent` flag transforms `codev update` into an agent-friendly, non-inter
 - `--agent --force`: Apply all updates forcefully (overwrite even user-modified files), output JSON with no conflicts. No `.codev-new` files created.
 - `--agent` alone: Apply updates with standard conflict detection, output JSON with any conflicts listed.
 
-### Error and Partial Failure Handling
+### Error Handling
 
-If a file write fails mid-run, the command fails with exit code 1. The JSON output (if any) will have `success: false` and an `error` field with the message. No atomicity guarantee — files written before the error remain on disk. This matches the current non-agent behavior.
+In `--agent` mode, errors MUST produce valid JSON on stdout before exiting with code 1:
+
+```json
+{
+  "version": "1.0",
+  "codevVersion": "1.7.0",
+  "success": false,
+  "dryRun": false,
+  "error": "EACCES: permission denied, open 'codev/protocols/spir.md'",
+  "summary": { "new": 0, "updated": 0, "conflicts": 0, "skipped": 0 },
+  "files": { "new": [], "updated": [], "skipped": [], "conflicts": [] },
+  "instructions": null
+}
+```
+
+No atomicity guarantee — files written before the error remain on disk. This matches the current non-agent behavior. The `error` field contains the error message string. `instructions` is `null` on error.
+
+### Scaffold Files and Dry-Run Limitation
+
+The scaffold utilities (`copyConsultTypes`, `copySkills`, `copyRoles`) are currently wrapped in `if (!dryRun)` blocks and do not support preview mode. In `--agent --dry-run`, scaffold file additions are **not reported** — only hash-based template changes are previewed. This is an accepted limitation. The `dryRun` field in the JSON output signals this to the consumer.
+
+### Legacy Cleanup Operations
+
+Legacy operations (removing `codev/bin/`, migrating `config.json → af-config.json`) are **not tracked** in the JSON output. These are one-off migration operations that affect a diminishing number of projects. They still execute in agent mode but are only logged to stderr.
+
+### `--force` Behavior for Identical Files
+
+When `--force` is specified, files where the template content is identical to the existing file are counted as `skipped` (not `updated`). The force flag affects conflict resolution — it overwrites user-modified files — but does not force-copy identical content.
 
 ## Stakeholders
 - **Primary Users**: AI agents (builders, maintenance agents, cron-based update workflows)
@@ -209,6 +238,7 @@ If a file write fails mid-run, the command fails with exit code 1. The JSON outp
 8. **Scaffold utility files in JSON**: Files from `copyConsultTypes`, `copySkills`, `copyRoles` appear in `files.new`
 9. **Version in commit message**: `instructions.commit` contains actual Codev version, not placeholder
 10. **First-ever update (no hash store)**: `--agent` works correctly when `.update-hashes.json` doesn't exist
+11. **Error produces valid JSON**: When a write fails, `--agent` emits JSON with `success: false` and `error` field on stdout
 
 ### Non-Functional Tests
 1. **JSON validity**: Output is valid JSON parseable by `JSON.parse()`
