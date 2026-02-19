@@ -339,6 +339,7 @@ async function spawnSpec(options: SpawnOptions, config: Config): Promise<void> {
     project_id: projectId,
     input_description: `the feature specified in ${specRelPath}`,
     spec: { path: specRelPath, name: specName },
+    spec_missing: !specFile,
   };
   if (hasPlan) templateContext.plan = { path: planRelPath, name: specName };
   if (ghIssue) {
