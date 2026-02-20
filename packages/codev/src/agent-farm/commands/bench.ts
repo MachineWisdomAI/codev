@@ -17,7 +17,7 @@ type Engine = (typeof ENGINES)[number];
 
 export const DEFAULT_PROMPT =
   'Please analyze the codev codebase and give me a list of potential impactful improvements.';
-export const DEFAULT_TIMEOUT = 300;
+export const DEFAULT_TIMEOUT = 900;
 
 export interface BenchOptions {
   iterations: number;
