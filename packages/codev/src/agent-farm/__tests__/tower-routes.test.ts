@@ -442,6 +442,19 @@ describe('tower-routes', () => {
       const parsed = JSON.parse(body());
       expect(parsed.hostname).toBeUndefined();
     });
+
+    it('returns undefined hostname when cloud config throws (Bugfix #470)', async () => {
+      mockReadCloudConfig.mockImplementation(() => { throw new Error('invalid JSON'); });
+
+      const encoded = Buffer.from('/test/workspace').toString('base64url');
+      const req = makeReq('GET', `/workspace/${encoded}/api/state`);
+      const { res, statusCode, body } = makeRes();
+      await handleRequest(req, res, makeCtx());
+
+      expect(statusCode()).toBe(200);
+      const parsed = JSON.parse(body());
+      expect(parsed.hostname).toBeUndefined();
+    });
   });
 
   // =========================================================================

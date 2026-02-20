@@ -1271,7 +1271,7 @@ async function handleWorkspaceState(
     annotations: [],
     workspaceName: path.basename(workspacePath),
     version,
-    hostname: readCloudConfig()?.tower_name,
+    hostname: (() => { try { return readCloudConfig()?.tower_name; } catch { return undefined; } })(),
   };
 
   // Add architect if exists
