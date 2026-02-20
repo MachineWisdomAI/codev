@@ -1,0 +1,82 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Error executing tool read_file: File not found.
+Based on my analysis of the codebase, here are the potential impactful improvements for Codev.
+
+### 1. Extensible AI Model Architecture (High Impact)
+Currently, the `consult` command (`packages/codev/src/commands/consult/index.ts`) has hardcoded logic for `gemini`, `claude`, and `codex`. This makes it difficult to add new models (like local LLMs via Ollama) or maintain existing ones.
+
+*   **Improvement**: Refactor `consult` to use a **Strategy Pattern** with a `ModelRunner` interface.
+*   **Action Plan**:
+    1.  Define a `ModelRunner` interface (e.g., `execute(query: string, context: Context): Promise<Result>`).
+    2.  Extract `GeminiRunner`, `ClaudeRunner`, and `CodexRunner` into separate files in `packages/codev/src/lib/models/`.
+    3.  Implement a `ModelRegistry` that loads these runners.
+    4.  Update `consult` command to look up the runner from the registry based on the `-m` flag.
+*   **Benefit**: Easier maintenance, better testing (mocking runners), and enables the "Configurable Models" improvement below.
+
+### 2. Configurable Models & Local LLM Support (High Impact)
+Users are currently restricted to the hardcoded list of models. Many developers want to use local models (DeepSeek, Llama 3) for privacy or cost reasons.
+
+*   **Improvement**: Allow defining custom models in a user configuration file.
+*   **Action Plan**:
+    1.  Introduce a configuration loader (e.g., `~/.codev/config.json` or `codev.config.json`).
+    2.  Allow users to define models with properties like `command`, `args`, `env`, and `outputFormat`.
+    3.  Create a `GenericRunner` that can execute these CLI-based model definitions.
+*   **Benefit**: Unlocks usage of any CLI-compatible LLM (Ollama, generic HTTP clients) without code changes.
+
+### 3. Context Provider Plugins (Medium Impact)
+The logic for gathering context (e.g., `git diff`, `gh pr view`) is hardcoded in `consult`. This tightly couples Codev to Git and GitHub.
+
+*   **Improvement**: Abstract context gathering into `ContextProvider` interfaces.
+*   **Action Plan**:
+    1.  Create `GitContextProvider` and `GitHubContextProvider`.
+    2.  Inject these providers into the prompt builders (`buildPRQuery`, etc.).
+*   **Benefit**: clearer code and sets the stage for supporting other VCS (GitLab, Bitbucket) or issue trackers (Jira, Linear).
+
+### 4. Interactive `doctor` Fixes (Medium Impact)
+The `doctor` command (`packages/codev/src/commands/doctor.ts`) identifies issues but forces the user to manually fix them.
+
+*   **Improvement**: Add an interactive `--fix` mode to `codev doctor`.
+*   **Action Plan**:
+    1.  Add a `fix()` method to the `Dependency` interface.
+    2.  For `npm` packages (like `@openai/codex`), implement automatic installation.
+    3.  For `gh` auth, shell out to `gh auth login`.
+*   **Benefit**: significantly smoother onboarding experience for new users.
+
+### 5. Fix SDK Resource Leaks (Technical Debt)
+The `consult` command relies on `process.exit(0)` to force-quit because AI SDKs (Claude, Codex) leave event loop handles open (Bugfix #341). This is a brittle workaround that prevents `consult` from being used programmatically or in long-running processes without side effects.
+
+*   **Improvement**: Properly manage SDK lifecycles.
+*   **Action Plan**:
+    1.  Isolate the SDK calls.
+    2.  Identify the lingering handles (likely active sockets or timers).
+    3.  Explicitly `destroy()` or `unref()` them after the response is received.
+*   **Benefit**: More stable CLI and enables better integration into the Agent Farm daemon.
+
+### 6. Dashboard Offline Mode (User Experience)
+The dashboard (`packages/codev/dashboard`) likely depends on the `tower` server being reachable. If the server crashes or is restarting, the UI probably freezes or blanks out.
+
+*   **Improvement**: Add a robust connection state handler in the Dashboard.
+*   **Action Plan**:
+    1.  Implement a visual indicator for "Disconnected - Retrying...".
+    2.  Cache the last known state in `localStorage` or memory to prevent the UI from flashing empty during brief disconnects.
+*   **Benefit**: Better user experience during development cycles where the server might restart.
+
+### 7. SQLite Build Requirements Check
+The project relies on `better-sqlite3`, which requires a native build chain (Python, C++ compiler). The `doctor` command checks for Node.js but not for these build prerequisites.
+
+*   **Improvement**: Add `python` and build tool checks to `doctor`.
+*   **Benefit**: Prevent confusing "gyp ERR!" installation failures for users on fresh environments.
+[gemini completed in 662.0s]

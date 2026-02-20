@@ -1,0 +1,24 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Below is a concise, evidence‑based list of potentially impactful improvements. I focused on `packages/codev` since that’s the runtime CLI/agent‑farm. If you want, I can deepen any item into a concrete proposal with scope and ROI.
+
+1. Add strict schema validation for `af-config.json` and user config. Right now it’s `JSON.parse` only, with no shape validation and missing‑env expansion becomes empty string, which can mask misconfigurations. Files: `packages/codev/src/agent-farm/utils/config.ts`.
+2. Centralize environment handling to avoid global `process.env` mutation. Multiple commands delete/restore env vars (e.g., `CLAUDECODE`), and many modules read env directly. This makes behavior hard to reason about and test; isolate env per subprocess and pass explicit `env` objects. Files: `packages/codev/src/commands/consult/index.ts`, `packages/codev/src/commands/doctor.ts`, `packages/codev/src/agent-farm/servers/*`, `packages/codev/src/terminal/pty-manager.ts`.
+3. Restore CI coverage for critical terminal integration tests. Several real‑shellper tests are skipped in CI, leaving session‑manager behavior unverified in automated runs. Suggest a dedicated CI job with proper OS permissions to run them. File: `packages/codev/src/terminal/__tests__/session-manager.test.ts`.
+4. Speed up build/test pipeline by removing repeated `npm install` in dashboard builds. `build:dashboard` runs `npm install` every time, which is costly and can destabilize reproducibility. Consider using workspace install once, or `npm ci` with a lockfile. File: `packages/codev/package.json`.
+5. Add structured logging with levels and timestamps. Current logger is console‑based without timestamps or log levels beyond `DEBUG`, and many server modules accept simple string loggers. This limits observability for long‑running services. File: `packages/codev/src/agent-farm/utils/logger.ts` and log call sites in `packages/codev/src/agent-farm/servers/*`.
+6. Introduce a small command runner abstraction for CLI. `src/cli.ts` repeats try/catch + `process.exit` per command. A wrapper that standardizes exit codes, error formatting, and optional stack traces (e.g. `--verbose`) would simplify maintenance and improve UX. File: `packages/codev/src/cli.ts`.
+7. Cache or avoid synchronous git calls on startup paths. `getMainRepoFromWorktree` calls `execSync` on every invocation; if called frequently, this can slow startup. Cache results or use a single resolution per process. File: `packages/codev/src/agent-farm/utils/config.ts`.
+8. Make terminal manager settings configurable. `TerminalManager` is instantiated with fixed defaults (max sessions, ring buffer size, reconnect timeout). Exposing these in user config would improve performance tuning for large installations. File: `packages/codev/src/agent-farm/servers/tower-terminals.ts`.
+
+If you want, I can prioritize these into a roadmap or drill into one area and draft a spec/plan.
+[codex completed in 127.0s]

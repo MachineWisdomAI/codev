@@ -1,0 +1,33 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a targeted, code‑referenced list of potential high‑impact improvements based on a quick scan of the repo and key hot‑spots in `packages/codev/src` (plus the TODO surfaced in E2E). I focused on security, stability, test coverage, and maintainability.
+
+1. Harden tower HTTP auth/CSRF/origin checks. `isRequestAllowed()` currently returns `true` unconditionally, relying on localhost binding. That’s a brittle boundary if remote access/tunnels are used. Add explicit origin/host validation and optional auth token checks. Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-server.ts`, `packages/codev/src/agent-farm/servers/tower-tunnel.ts`.
+
+2. Replace shell `exec` with `spawn`/`execFile` and strict args to eliminate shell injection surface and improve error handling. `execAsync` is used in tower routes for workspace init and git status. Even with input validation, this is a high‑value security/robustness improvement. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+3. Implement and re‑enable the `/api/tabs/file` E2E flow in the dashboard video test. The endpoint exists, but the E2E explicitly skips it. This leaves the file‑tab creation path untested in the highest‑level workflow. Files: `packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/commands/open.ts`.
+
+4. Add request schema validation per endpoint (runtime guard). `parseJsonBody()` returns `Record<string, unknown>` and handlers cast fields directly. A small zod/valibot layer for each route would catch malformed requests early and standardize error responses. Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+5. Improve tower daemon resilience around global exception handling. `tower-server.ts` exits the process on `uncaughtException`/`unhandledRejection`. Consider a configurable crash policy, structured crash logging, and optional “graceful degrade” for non‑fatal errors. This is especially impactful for a long‑running daemon. File: `packages/codev/src/agent-farm/servers/tower-server.ts`.
+
+6. Reduce complexity in the monolithic router and long files to improve reviewability and testability. `tower-routes.ts` is 2,181 lines and `session-manager.ts` is 965 lines. Even with the cohesion rationale, future changes will be expensive. Consider splitting by route groups or extracting per‑resource handlers. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/terminal/session-manager.ts`.
+
+7. Strengthen rate limiting beyond activation. Current rate limiting only targets activation paths and is in‑memory per IP. Consider extending to “expensive” endpoints (file tree, git status, websocket upgrades) and adding config‑driven thresholds. File: `packages/codev/src/agent-farm/servers/tower-utils.ts`.
+
+8. Add focused API contract tests for tower routes. There are large E2E tests, but route‑level invariants (status codes, error shapes, input validation) aren’t systematically covered. Adding a lightweight supertest suite would catch regressions quickly and improve feedback speed. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/__tests__/`.
+
+9. Normalize error response formats across the API. Error responses vary between endpoints (`{ success: false, error: ... }` vs `{ error: ... }`). Standardizing makes the dashboard client more robust and simplifies E2E assertions. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/servers/tower-messages.ts`.
+
+If you want, I can turn any of these into a concrete spec/plan (SPIR) or a scoped bugfix task.
+[codex completed in 121.0s]

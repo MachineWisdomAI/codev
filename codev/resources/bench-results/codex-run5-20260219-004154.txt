@@ -1,0 +1,33 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Below is a focused list of **impactful improvements** based on a quick pass through the codebase, build/test configs, and architecture docs.
+
+1. Enable file-tab E2E coverage and remove stale TODO  
+`packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts` skips file-tab checks because `/api/tabs/file` is “not implemented,” but `packages/codev/src/agent-farm/servers/tower-routes.ts` already wires `POST /api/tabs/file`. Align the test with the endpoint and add a UI assertion that a file tab renders. This closes a real regression gap.
+
+2. Make dashboard builds reproducible and faster  
+`packages/codev/package.json` runs `npm install` inside `build:dashboard` on every build, and `packages/codev/dashboard/package-lock.json` is gitignored (see `.gitignore`). This creates slow and non-deterministic builds. Commit a lockfile or move the dashboard to a workspace-style install and use `npm ci` once, then build without reinstalling.
+
+3. De-flake and re-enable excluded tests; raise coverage thresholds  
+`packages/codev/vitest.config.ts` excludes `init.test.ts` (flaky) and `bugfix-213-architect-restart.test.ts` (requires dist), and coverage thresholds are low (62% lines, 55% branches). Fix root causes and re-enable these tests; increase thresholds for critical modules (Tower, porch, agent-farm).
+
+4. Add a deterministic “mock consult” mode for E2E  
+`packages/codev/vitest.e2e.config.ts` documents $4/run, ~40 min “real AI” tests. Add a test mode that uses a stubbed consult provider to allow frequent CI runs, while keeping real consult tests for nightly or manual validation.
+
+5. Enforce `CLAUDE.md` ≡ `AGENTS.md` (and skeleton sync) automatically  
+`codev/resources/arch.md` declares this invariant, but there’s no enforcement. Add a lightweight test or pre-commit script to diff `CLAUDE.md` and `AGENTS.md` and optionally verify key protocol/template parity between `codev/` and `codev-skeleton/`.
+
+6. Optimize `copy-skeleton` in build  
+`packages/codev/package.json` deletes and recopies `codev-skeleton` every build. Replace `rm -rf` + `cp -r` with `rsync -a --delete` or a checksum-based copy to reduce build time and avoid permission regressions.
+
+If you want, I can go deeper in a specific area (Tower/agent-farm reliability, porch state machine, dashboard UI performance) and turn the above into concrete work items with file-level recommendations.
+[codex completed in 113.5s]

@@ -1,0 +1,51 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a concise, code‑grounded list of **impactful improvements** based on a quick scan of the repo. I focused on reliability, DX, and “core flow” integrity.
+
+1. **Fix Node version mismatch in `doctor`**  
+   `packages/codev/package.json` requires Node `>=20.0.0`, but `codev doctor` still enforces `>=18.0.0`. That will green‑light unsupported environments and cause hard‑to‑diagnose failures later.  
+   Files: `packages/codev/package.json`, `packages/codev/src/commands/doctor.ts`
+
+2. **Enable file tabs end‑to‑end and unskip the Playwright test**  
+   `/api/tabs/file` is implemented in Tower and `af open` relies on it, yet the dashboard video test still claims it’s unimplemented and skips the check. This is a real integration gap (or at least a stale test).  
+   Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/commands/open.ts`, `packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts`
+
+3. **Add a CI guard to prevent skeleton drift**  
+   You have both `codev-skeleton/` and `packages/codev/skeleton/`, with a `copy-skeleton` script. There’s no guard to ensure they stay identical. Add a “diff after copy” check (or generate the packaged skeleton at build time only). This prevents shipping outdated templates.  
+   Files: `codev-skeleton/`, `packages/codev/skeleton/`, `packages/codev/package.json`
+
+4. **Speed up the dashboard build**  
+   `npm run build` runs `npm install` inside `packages/codev/dashboard` every time. That is expensive and can lead to lockfile churn. Move install to CI setup, use workspaces, or gate install behind a node_modules check.  
+   Files: `packages/codev/package.json`, `packages/codev/dashboard/package.json`
+
+5. **Add structured logging + request IDs for Tower**  
+   Current logging is console‑only with simple severity tags. In production debugging, timestamps, request IDs, and optional file logging are big wins. The Tower server already centralizes routing in `tower-routes.ts`, making this easy to wire.  
+   Files: `packages/codev/src/agent-farm/utils/logger.ts`, `packages/codev/src/agent-farm/servers/tower-server.ts`
+
+6. **Add DB integrity checks and auto‑backup**  
+   The system relies on `~/.agent-farm/global.db` and `.agent-farm/state.db`. A lightweight `PRAGMA integrity_check` + backup before migrations or on `doctor` would prevent silent corruption.  
+   Files: `packages/codev/src/agent-farm/db/index.ts`, `packages/codev/src/agent-farm/db/schema.ts`, `packages/codev/src/commands/doctor.ts`
+
+7. **Formalize Tower API types for dashboard + CLI**  
+   Routes are defined in `tower-routes.ts` and consumed by dashboard/CLI using implicit JSON shapes. Export request/response types or generate an OpenAPI schema to avoid drift.  
+   Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/dashboard/src/*`, `packages/codev/src/agent-farm/lib/tower-client.ts`
+
+8. **Add a restart‑persistence E2E test**  
+   You already reconcile shellper sessions and persist file tabs; an E2E that starts Tower, opens tabs, restarts, and asserts continuity would lock down the core promise.  
+   Files: `packages/codev/src/agent-farm/__tests__/tower-*.test.ts`, `packages/codev/src/agent-farm/servers/tower-server.ts`
+
+9. **Optional repo hygiene: clean up packed tarballs**  
+   Multiple `cluesmith-codev-*.tgz` files live in `packages/codev/`. That bloats the repo and can confuse tooling. Consider moving to release artifacts or `.gitignore`ing them.  
+   Files: `packages/codev/`
+
+If you want, pick the top 2–3 and I’ll turn them into concrete specs or a focused BUGFIX.
+[codex completed in 183.8s]

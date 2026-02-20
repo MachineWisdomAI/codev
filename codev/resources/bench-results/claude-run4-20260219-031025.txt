@@ -1,0 +1,150 @@
+Model: claude
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CLAUDE] Starting consultation...
+============================================================
+
+I'll explore the codebase to understand its structure, architecture, and identify areas for improvement. Let me start with a broad exploration.Let me also dive into specific areas while the broad exploration runs.Let me launch a few more targeted investigations in parallel.Let me check on the completed explorations and launch one more targeted investigation.Good, the agents are making progress. Let me also launch one more investigation focused on the dashboard/frontend side and API design.Let me check on the agents that should be finishing up.Good, the structure exploration is complete. Let me collect the remaining results.Let me get the final agent result.Now let me verify a few key claims and check for additional signals before compiling my final analysis.Now I have a thorough picture. Here's my analysis:
+
+---
+
+## Codev Codebase — Potential Impactful Improvements
+
+After a deep exploration across server, terminal, dashboard, database, error handling, state management, and testing layers, here are the improvements I'd prioritize, ordered by **impact × feasibility**.
+
+---
+
+### 🔴 Tier 1 — High Impact, Addressable Now
+
+**1. Path normalization is a silent data-loss bug**
+
+The state management analysis identified a **real race condition** where macOS symlinks (`/var/folders/...` vs `/private/var/folders/...`) cause SQLite rows to silently not match during `getTerminalsForWorkspace()`. `normalizeWorkspacePath()` isn't called consistently at all entry points. This means terminals can become orphaned — existing in `TerminalManager` but invisible to the workspace cache. Since the MEMORY.md documents "second project kills first" and "project shows inactive" as known regression patterns, this may be a root cause contributor.
+
+**Fix:** Normalize at a single chokepoint — the moment any workspace path enters the system (API handler entry, CLI argument parsing). A single `assertNormalizedPath()` guard would catch all cases.
+
+---
+
+**2. Database layer has zero unit tests**
+
+SQLite is documented as the **single source of truth** (Spec 0090), yet `db/schema.ts`, `db/migrate.ts`, and `db/index.ts` have no dedicated tests. The migration system (currently at v8) runs on startup with no regression tests validating that schema changes preserve data. A bad migration silently corrupting `terminal_sessions` would break all shellper reconnections across every workspace.
+
+**Fix:** Add focused tests for schema creation, migration idempotency, and query correctness. The bounded scope (5 files, ~650 LOC) makes this very tractable.
+
+---
+
+**3. Replace 1000ms state polling with SSE push**
+
+The dashboard polls `/api/state` every 1000ms (60 requests/min) per connected client. The server already has SSE infrastructure (`/api/events`) for overview updates, but builder/architect state changes still rely on polling. This is wasted work — state only changes when builders spawn, complete, or change phase (maybe a few times per hour).
+
+**Fix:** Broadcast a `state-changed` SSE event when builders/architect mutate, and switch the frontend to event-driven refresh with a longer fallback poll (e.g., 10s). The SSE plumbing already exists.
+
+---
+
+**4. `tower-routes.ts` at 2,181 lines needs route-level extraction**
+
+The file self-documents why it's large (line 9: "cohesion trumps arbitrary ceilings"), but 30+ routes with inline body parsing, validation, and business logic in a single function makes it brittle. A typo in one route handler can break all routing. The file acknowledges it exceeds the 900-line guideline.
+
+**Fix:** Extract route groups into focused handler modules (`terminal-routes.ts`, `workspace-routes.ts`, `file-routes.ts`) while keeping the dispatch table in `tower-routes.ts`. This preserves cohesion while making individual routes testable in isolation.
+
+---
+
+### 🟡 Tier 2 — Significant Impact, Moderate Effort
+
+**5. Add API request schema validation**
+
+Currently, API input validation is ad-hoc type checks (`typeof body.cols !== 'number'`). There's no schema validation library (no Zod, no JSON Schema). This means malformed requests can sneak through with unexpected fields, and the frontend and backend type definitions can silently diverge since they live in separate files with no shared contract.
+
+**Fix:** Introduce Zod for request body validation. It's lightweight, generates TypeScript types, and can be shared between frontend and backend in the monorepo.
+
+---
+
+**6. Server-side auth validation is stubbed out**
+
+`isRequestAllowed()` returns `true` unconditionally. The security model relies entirely on localhost binding — but the cloud tunnel feature (Spec 0097) can expose Tower remotely. A token exists in localStorage and is sent as `Authorization: Bearer`, but the server never validates it. Anyone who can reach the port owns every workspace.
+
+**Fix:** Validate the bearer token server-side against a stored secret. This becomes critical the moment tunnel/remote access is enabled.
+
+---
+
+**7. Add structured logging with request context**
+
+The custom logger outputs `[timestamp] [LEVEL] message` to console + optional file. No JSON output, no request IDs, no trace correlation. When debugging multi-workspace issues (e.g., "which workspace triggered this error?"), logs are nearly useless because workspace context isn't attached.
+
+**Fix:** Add workspace path and request ID to log context. A minimal structured logger (or even just JSON.stringify of a log object) would make log analysis dramatically easier without requiring a heavy dependency like Winston.
+
+---
+
+**8. Concurrent terminal creation can orphan sessions**
+
+The state analysis found that two simultaneous `POST /api/terminals` for the same builder ID will race on `entry.builders.set()`. The second write wins the in-memory Map, but both sessions exist in SQLite and TerminalManager. The first terminal becomes a zombie — consuming resources but invisible to the UI.
+
+**Fix:** Add an atomic check-and-create pattern (check if `roleId` already has a terminal before creating a new one), or use SQLite's UNIQUE constraint to reject duplicates.
+
+---
+
+### 🟢 Tier 3 — Worthwhile, Lower Urgency
+
+**9. Dashboard code splitting**
+
+The 712KB JS bundle loads everything upfront. WorkView, FileTree, and the file viewer could be lazy-loaded since they're not visible on initial render (Terminal is the primary view). React.lazy + Suspense would reduce initial load by ~30%.
+
+---
+
+**10. Silent socket errors in shellper-process.ts**
+
+Socket error handlers in `shellper-process.ts` swallow errors completely — no logging. When shellper connections fail, there's zero observability. Adding a single `this.log()` call in each socket error handler would make debugging terminal issues significantly easier.
+
+---
+
+**11. Raise test coverage thresholds**
+
+Current thresholds (62% lines, 55% branches) are low for infrastructure that manages persistent processes. The critical untested paths — `shellper-main.ts` (the entry point for all persistent terminals), `pty-session.ts` lifecycle, and `tower-server.ts` graceful shutdown — are exactly the areas where bugs cause the most pain. Incrementally raising thresholds forces test coverage where it matters most.
+
+---
+
+**12. Add shared types between frontend and backend**
+
+Frontend types in `dashboard/src/lib/api.ts` (323 lines) duplicate backend types with no shared contract. When a field gets renamed server-side, the dashboard breaks at runtime with no compile-time warning. A shared `types` package in the monorepo (or even a single shared `.ts` file) would catch breaking API changes at build time.
+
+---
+
+**13. Add foreign key constraints in global.db**
+
+`terminal_sessions`, `file_tabs`, and `cron_tasks` all reference `workspace_path` but have no FK to `known_workspaces`. Orphaned rows accumulate when workspaces are removed. Either add CASCADE DELETE constraints or a periodic cleanup job.
+
+---
+
+### Summary Matrix
+
+| # | Improvement | Impact | Effort | Risk if Ignored |
+|---|------------|--------|--------|-----------------|
+| 1 | Path normalization chokepoint | 🔴 High | Low | Silent terminal loss |
+| 2 | Database layer tests | 🔴 High | Low-Med | Migration corruption |
+| 3 | SSE-based state updates | 🔴 High | Low | Wasted polling load |
+| 4 | Route handler extraction | 🔴 High | Medium | Fragile routing |
+| 5 | API schema validation (Zod) | 🟡 Med | Medium | Silent type drift |
+| 6 | Server-side auth validation | 🟡 Med | Low | Security gap via tunnel |
+| 7 | Structured logging | 🟡 Med | Low | Debugging blind spots |
+| 8 | Concurrent terminal guard | 🟡 Med | Low | Zombie terminals |
+| 9 | Dashboard code splitting | 🟢 Low | Low | Slower initial load |
+| 10 | Socket error logging | 🟢 Low | Trivial | Debugging blind spot |
+| 11 | Coverage threshold increase | 🟢 Low | Ongoing | Regression risk |
+| 12 | Shared FE/BE types | 🟢 Low | Low | Runtime API breaks |
+| 13 | FK constraints in global.db | 🟢 Low | Low | Stale row accumulation |
+
+Items 1, 3, 6, 7, 8, and 10 are all low-effort, high-signal wins that could be done in a single sprint. Item 2 (DB tests) is the most impactful single investment given SQLite's role as the authoritative state store.The analysis is already complete above. To briefly recap what I found by investigating five dimensions of the codebase in parallel (structure, error handling, testing, state management, and dashboard/API):
+
+The codebase is well-engineered overall — shellper persistence, SQLite-as-source-of-truth, graceful degradation, and the reconciliation guards are all solid. The 13 items above are where I see the best return on effort, with the top 4 being:
+
+1. **Path normalization** — a real bug, not a theoretical one, and trivial to fix
+2. **DB layer tests** — the foundation has zero tests; highest-risk gap
+3. **SSE for state** — the plumbing already exists, just needs wiring
+4. **Route extraction** — 2,181 lines with 30+ routes is a maintenance liability
+
+Want me to dig deeper into any of these, or should I draft specs for the ones you want to pursue?Glad the analysis landed well. Just let me know which items you'd like to move on, and whether you want specs drafted or just want to start building.Sounds good — standing by whenever you're ready to pick items off the list.All agents have reported in. The full analysis is in my earlier response — ready when you are.All agents finished. The analysis and recommendations are in my earlier response — let me know which items you want to act on.
+[claude completed in 369.0s]

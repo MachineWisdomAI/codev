@@ -1,0 +1,46 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+I scanned the repo structure and key runtime paths in `packages/codev`, plus build tooling and the dashboard package. Below is a focused list of **impactful improvements** tied to specific files.
+
+**Potential Improvements (Impactful)**
+- **Make tower HTTP handlers non-blocking for file I/O**  
+  Multiple request paths call `fs.readFileSync` and `fs.existsSync` (e.g., `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/servers/tower-utils.ts`). On large files or busy dashboards, this can stall the event loop. Switch to async `fs.promises`/streams and add simple caching for static assets.
+
+- **Add static asset caching + ETag/Last-Modified**  
+  `serveStaticFile` reads the full file every request and doesn’t set cache headers (`packages/codev/src/agent-farm/servers/tower-utils.ts`). Adding `ETag`/`Last-Modified` and a small in-memory cache for `dashboard/dist` improves dashboard responsiveness and lowers CPU.
+
+- **Make dashboard builds reproducible and faster**  
+  `build:dashboard` runs `npm install` every build (`packages/codev/package.json`) and the dashboard lockfile is ignored (`.gitignore` ignores `packages/codev/dashboard/package-lock.json`). This makes builds non-deterministic and slower. Prefer `npm ci` and commit the lockfile, or move dashboard into a workspace to share `node_modules`.
+
+- **Introduce a lint/format baseline**  
+  There’s no ESLint/Prettier config in the repo (no `*eslint*`/`*prettier*` found). Adding linting (with a minimal rule set) will prevent regressions in CLI/agent-farm code where small mistakes are costly.
+
+- **Consolidate MIME type logic**  
+  MIME logic is duplicated (`MIME_TYPES` and `getMimeTypeForFile` in `packages/codev/src/agent-farm/servers/tower-utils.ts`). A single authoritative map reduces drift and potential incorrect content types.
+
+- **Reduce synchronous file writes in request paths**  
+  There are additional `readFileSync` calls in tower handlers (file endpoints, templates, tab management). These are safe but can be improved to avoid spikes. Move to async reads and use streaming for raw file endpoints (large binaries) in `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+- **Break up large command modules for testability and maintainability**  
+  `packages/codev/src/commands/consult/index.ts` is very large and handles many modes. Splitting into focused modules (prompt handling, model adapters, reporting) would reduce risk and simplify tests.
+
+- **Centralize “process exit” behavior**  
+  `packages/codev/src/cli.ts` forces `process.exit()` in multiple commands; `consult` has a hard exit due to dangling handles. Consider a shared exit/cleanup layer to ensure logs are flushed and errors remain consistent.
+
+- **Make rate limits configurable**  
+  Rate limiting constants are hard-coded (`RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX` in `packages/codev/src/agent-farm/servers/tower-utils.ts`). Expose via config/env to tune for local vs remote use.
+
+- **Improve file-security invariants with shared helpers**  
+  There’s a symlink-aware containment check in one endpoint (GET `/file`), but similar operations exist elsewhere (`tower-routes.ts`). Centralize path validation for all file read/write endpoints to reduce traversal risk.
+
+If you want, I can turn any of these into concrete, scoped changes (or prioritize them by value vs effort).
+[codex completed in 156.4s]

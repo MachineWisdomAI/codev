@@ -1,0 +1,40 @@
+=== Codev Consultation Benchmark ===
+Host: Ms-MacBook-Pro-2.local
+Date: Thu Feb 19 03:10:25 PST 2026
+CPU: Apple M3 Pro
+RAM: 18 GB
+Iterations: 5
+Mode: parallel
+Prompt: Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+--- Iteration 1/5 ---
+  gemini: 1024.1s
+  codex: 191.3s
+  claude: 249.1s
+  wall: 1024.2s
+
+--- Iteration 2/5 ---
+  gemini: 701.6s
+  codex: 151.3s
+  claude: 165.8s
+  wall: 701.7s
+
+--- Iteration 3/5 ---
+  gemini: 244.7s
+  codex: 127.2s
+  claude: 363.2s
+  wall: 363.2s
+
+--- Iteration 4/5 ---
+  gemini: 432.3s
+  codex: 150.7s
+  claude: 369.2s
+  wall: 432.4s
+
+--- Iteration 5/5 ---
+  gemini: 330.4s
+  codex: 258.2s
+  claude: 304.6s
+  wall: 330.4s
+
+=== Summary ===

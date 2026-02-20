@@ -1,0 +1,136 @@
+Model: claude
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CLAUDE] Starting consultation...
+============================================================
+
+I'll explore the codebase thoroughly to identify impactful improvements. Let me start by understanding the structure, then dig into key areas.Good overview. Now let me dig into the actual code quality and patterns to find substantive improvements.I've done a deep analysis across error handling, resilience, testing, and architecture. Here's the consolidated picture.
+
+---
+
+## Potential Impactful Improvements for Codev
+
+### Tier 1 — High Impact, Addresses Real Risk
+
+#### 1. `process.exit(1)` on unhandled rejection is a kill switch
+**File:** `tower-server.ts:106-110`
+
+The global `unhandledRejection` handler crashes the entire Tower — all workspaces, all builders, everything — for *any* leaked promise. This interacts badly with two concrete patterns elsewhere:
+
+- **Async WebSocket upgrade handler** (`tower-websocket.ts:125`) — any throw becomes an unhandled rejection
+- **`_deps!` non-null assertions in async exit handlers** (`tower-terminals.ts:409-416`, `tower-instances.ts:410-416`) — if these fire during shutdown after `_deps` is nulled, boom
+
+**Recommendation:** Log + continue for unhandled rejections (or at least not `process.exit`). Guard `_deps` access with null checks instead of `!` assertions. Wrap the WebSocket upgrade handler in try/catch.
+
+#### 2. Database layer has 1% test coverage
+**Files:** `agent-farm/db/index.ts` (1.18% stmts), `agent-farm/db/errors.ts` (0% stmts)
+
+This is the foundation everything sits on. `getGlobalDb()` is called by nearly every server module. The `withRetry` wrapper for `SQLITE_BUSY` errors is **defined but never used anywhere** — meaning concurrent SQLite access under load will fail without retry. Meanwhile, migrations v7 and v8 silently swallow table-rebuild failures but still mark the migration as complete, which can corrupt migration state permanently.
+
+**Recommendation:** 
+- Write unit tests for db init, connection errors, migration edge cases
+- Actually use `withRetry` where DB operations happen in hot paths
+- Don't mark migrations complete inside the same catch block that swallows their errors
+
+#### 3. `cleanup.ts` at 14% coverage despite being the most historically dangerous command
+**File:** `agent-farm/commands/cleanup.ts`
+
+Per your own MEMORY.md, worktree destruction has been violated twice and is the "#1 rule." Yet the command that performs cleanup has almost no test coverage. The branch coverage is 10.67% — the error paths and edge cases that would prevent accidental data loss are unverified.
+
+**Recommendation:** Priority test target. Mock `fs` and `child_process`, test the guard rails that prevent accidental worktree deletion.
+
+---
+
+### Tier 2 — Meaningful Architecture Wins
+
+#### 4. Split `tower-routes.ts` (2,182 lines)
+This is the largest file in the codebase. It contains the main route dispatcher, ~30 route handlers, workspace sub-routing, a file viewer, cron management, and inline SQL. The file's own header comment defends this ("cohesion trumps arbitrary ceilings"), but at 2,182 lines with 34% test coverage, the monolith is actively hindering testability.
+
+**Natural split points:**
+- `tower-workspace-routes.ts` — the 260-line `handleWorkspaceRoutes` and its 15+ sub-functions
+- `tower-annotate-routes.ts` — the 175-line file viewer micro-service
+- `tower-cron-routes.ts` — cron handlers (which also have inline SQL that belongs in `tower-cron.ts`)
+
+#### 5. Extract shellper session creation helper
+The "try shellper, fall back to non-persistent" pattern is copy-pasted across `handleTerminalCreate()` (lines 382-448) and `handleWorkspaceShellCreate()` (lines 1349-1420) — ~70 lines of near-identical code. A change to one path that isn't propagated to the other is a bug waiting to happen.
+
+#### 6. Add HTTP response helpers
+`res.writeHead` appears 80+ times in tower-routes.ts. Error response shapes are inconsistent across the API:
+
+| Pattern | Used by |
+|---------|---------|
+| `{ error: 'CODE', message: '...' }` | Terminal routes |
+| `{ success: false, error: '...' }` | Workspace activate |
+| `{ ok: true }` | Deactivate |
+| `{ error: '...' }` | File tabs |
+
+A `jsonOk(res, data)` / `jsonError(res, status, code, message)` pair would fix both the noise and the inconsistency.
+
+#### 7. Eliminate dual YAML parser
+`overview.ts` has a 114-line hand-rolled YAML parser (`parseStatusYaml`) that re-implements what `porch/state.ts` already does with `js-yaml` (which is already a dependency). Any format change to `status.yaml` requires updating both parsers. Consolidate to one.
+
+---
+
+### Tier 3 — Resilience Improvements
+
+#### 8. Concurrent `getTerminalsForWorkspace` race condition
+**File:** `tower-terminals.ts:564-759`
+
+This async function can be called concurrently by multiple dashboard polls. When a shellper-backed session is found in SQLite but not in TerminalManager, both calls will attempt to reconnect the same shellper socket, creating an orphaned PtySession. The `_reconciling` flag only guards against startup reconciliation, not concurrent HTTP requests.
+
+**Recommendation:** Add a per-workspace mutex or "reconnecting" flag to prevent double-reconnection.
+
+#### 9. Silent error swallowing masks real failures
+Multiple catch blocks silently return empty/default values when the *comment* says "pre-migration table may not exist" but the *code* catches ALL errors including corruption and lock timeouts:
+
+- `tower-terminals.ts:254` — returns `[]` on any DB error (workspace looks empty)
+- `tower-instances.ts:94,106,152` — known workspace queries silently fail
+- `tower-routes.ts:812` — browse returns 200 with empty results on error
+
+**Recommendation:** Check for the specific expected error (table doesn't exist) and log unexpected ones.
+
+#### 10. SQLite not explicitly closed during shutdown
+`gracefulShutdown` never calls `closeGlobalDb()`. WAL checkpoint isn't flushed. In practice `process.exit(0)` makes this moot, but if shutdown ever becomes more graceful (e.g., waiting for in-flight requests), this becomes a real leak.
+
+---
+
+### Tier 4 — Developer Experience / Maintainability
+
+#### 11. Hoist `ensureDirectories` + `checkDependencies` out of spawn modes
+Called identically 6 times (once per spawn mode: spec, task, protocol, shell, worktree, bugfix). Should be called once in the `spawn()` entry point before mode dispatch.
+
+#### 12. Add request validation helpers
+Each route handler manually validates body fields with verbose `typeof body.x === 'string' ? body.x : undefined` chains — 10 such lines in `handleTerminalCreate`, 8 in `handleSend`. A `parseField(body, 'field', 'string')` or lightweight schema check would cut the noise.
+
+#### 13. Recursive `next()` in porch has no depth guard
+`porch/next.ts` calls itself recursively on phase transitions (6 call sites). A malformed protocol with circular `next` references would stack overflow. An iterative loop with a max-iteration guard would be trivial to add and eliminate the risk.
+
+#### 14. Raise coverage thresholds
+Current thresholds (62% lines, 55% branches) pass because well-tested utilities mask severe gaps in critical infrastructure. The database layer is at 1%, cleanup at 14%, routes at 34%, pty-manager at 33%. The thresholds provide false confidence.
+
+---
+
+### Priority Matrix
+
+| # | Improvement | Risk Reduced | Effort | ROI |
+|---|------------|-------------|--------|-----|
+| 1 | Fix unhandled rejection crash | Tower stability | Low | ★★★★★ |
+| 2 | Test database layer | Data integrity | Medium | ★★★★★ |
+| 3 | Test cleanup command | Data loss prevention | Medium | ★★★★☆ |
+| 5 | Extract shellper creation helper | Bug prevention | Low | ★★★★☆ |
+| 6 | HTTP response helpers | Consistency + DX | Low | ★★★★☆ |
+| 4 | Split tower-routes.ts | Testability + DX | Medium | ★★★☆☆ |
+| 8 | Fix reconnection race | Multi-user stability | Medium | ★★★☆☆ |
+| 9 | Fix silent error swallowing | Debuggability | Low | ★★★☆☆ |
+| 7 | Consolidate YAML parsers | Maintenance cost | Low | ★★★☆☆ |
+| 11 | Hoist spawn boilerplate | DX | Low | ★★☆☆☆ |
+
+Items 1-3 are the most impactful because they address real stability and data-integrity risks with concrete evidence from the codebase. Items 4-7 are the best bang-for-buck architectural improvements. Items 8-14 are solid hardening and DX wins.
+
+Want me to dig deeper into any of these, or spec out an implementation plan for a subset?
+[claude completed in 364.1s]

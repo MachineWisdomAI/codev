@@ -1,0 +1,123 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Attempt 2 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Error executing tool read_file: File not found.
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Error executing tool read_file: File not found.
+Based on my analysis of the `codev` codebase, here is a list of impactful improvements.
+
+### 1. Robustness: Native Gemini SDK Integration
+**Current State:** The `consult` command spawns the `gemini` CLI as a subprocess (`packages/codev/src/commands/consult/index.ts`). It passes the prompt as a CLI argument and relies on parsing stdout.
+**Problem:** This is fragile. CLI arguments have length limits, output formatting can change, and error handling is limited to exit codes. It also prevents using advanced features like streaming or multi-turn chat easily.
+**Improvement:** Migrate to the official **Google GenAI Node.js SDK** (`@google/genai`).
+*   **Benefits:**
+    *   **Reliability:** No subprocess spawning or argument length limits.
+    *   **Structure:** Native JSON object responses instead of parsing text output.
+    *   **Streaming:** Better user experience with real-time token streaming (already implemented for Claude/Codex).
+    *   **Context:** Easier to manage chat history and system instructions.
+
+### 2. Flexibility: Externalized Model Configuration
+**Current State:** Model names are hardcoded in `packages/codev/src/commands/consult/index.ts` (e.g., `gemini-3-pro-preview`, `claude-opus-4-6`, `gpt-5.2-codex`).
+**Problem:** If a provider deprecates a model or releases a better one, the user must wait for a package update or patch the code themselves.
+**Improvement:** Load model configurations from a user-modifiable file (e.g., `.codev/config.json` or `~/.codev/config.json`).
+*   **Benefits:**
+    *   **Future-proofing:** Users can switch to `gemini-4-pro` or `claude-4-opus` immediately upon release.
+    *   **Customization:** Users can define custom aliases or specialized model parameters (temperature, token limits).
+
+### 3. Architecture: Simplified Terminal Persistence
+**Current State:** The `agent-farm` server uses a complex "dual-source" strategy (SQLite + "Shellper" processes) to keep terminals alive across restarts (`packages/codev/src/agent-farm/servers/tower-terminals.ts`). The reconciliation logic handles race conditions, orphaned processes, and socket files manually.
+**Problem:** This is the most complex and fragile part of the system. Bugs here lead to "zombie" terminals, lost sessions, or UI desync. Windows support is likely poor due to reliance on Unix sockets.
+**Improvement:** Refactor to use a robust, platform-agnostic process manager or decouple the "Terminal Server" from the "Orchestrator".
+*   **Option A:** Use a dedicated persistent process manager (like `pm2` programmatic API) instead of custom "Shellper" scripts.
+*   **Option B:** Implement a proper **Client-Server architecture** where the "Tower" (server) is a long-running daemon that doesn't restart often, while the CLI/Dashboard are just ephemeral clients.
+
+### 4. Developer Experience: Mocked E2E Testing
+**Current State:** E2E tests (`vitest.e2e.config.ts`) run against real AI APIs, costing ~$4 per run and taking 20+ minutes.
+**Problem:** High cost and latency discourage frequent testing, leading to regressions in critical paths.
+**Improvement:** Implement a **Record/Replay** system (like `polly.js` or custom) for AI interactions in E2E tests.
+*   **Benefits:**
+    *   **Cost:** Zero cost for regression runs.
+    *   **Speed:** Tests run in seconds instead of minutes.
+    *   **Stability:** Flaky AI responses (non-deterministic output) won't break CI.
+    *   Real API tests can still run on a schedule (e.g., nightly).
+
+### 5. UI/UX: Dashboard State Modernization
+**Current State:** The dashboard (`packages/codev/dashboard/src/components/App.tsx`) handles WebSocket connections, terminal state, and UI logic within a monolithic component structure using basic `useState`.
+**Problem:** As features grow, this becomes unmaintainable. Manual WebSocket state handling is prone to connection leaks or stale data.
+**Improvement:** Introduce a robust state management and data fetching layer.
+*   **Tech Stack:** **TanStack Query** (React Query) for API state and a dedicated **WebSocket Context/Hook** library.
+*   **Benefits:**
+    *   **Clean Code:** Separation of UI and data logic.
+    *   **Resilience:** Automatic reconnection, caching, and background refetching.
+    *   **Performance:** Better control over re-renders than monolithic `useState`.
+
+### 6. Safety: Sandboxed Execution
+**Current State:** "Builders" (AI agents) run commands directly on the host machine in git worktrees.
+**Problem:** A hallucinating agent could accidentally run destructive commands (`rm -rf /`, `git push --force`, etc.) outside the worktree.
+**Improvement:** Optional **Docker / DevContainer support**.
+*   **Benefits:**
+    *   **Security:** Agents run in an isolated container.
+    *   **Reproducibility:** Every builder gets a clean environment with exact dependencies.
+    *   **Safety:** Filesystem access is strictly limited to the project volume.
+[gemini completed in 701.4s]

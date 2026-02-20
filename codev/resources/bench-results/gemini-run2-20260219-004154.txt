@@ -1,0 +1,68 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Based on my analysis of the `codev` codebase, here is a list of potential impactful improvements.
+
+### 1. Robust Database Migration System
+**Current State:**
+Database migrations are currently handled via inline SQL strings within `packages/codev/src/agent-farm/db/index.ts`. This file has grown large and mixes database initialization logic with schema evolution (v1 through v10).
+**Impact:** High. As the project grows, this single file will become unmaintainable and prone to merge conflicts.
+**Improvement:**
+- Extract migrations into separate files (e.g., `src/agent-farm/db/migrations/001_init.sql`, `002_add_terminal_id.sql`).
+- Implement a lightweight migration runner that reads these files, ensuring a cleaner separation of concerns.
+- This makes testing migrations easier and keeps `index.ts` focused on connection management.
+
+### 2. Protocol Schema Validation with Zod
+**Current State:**
+`packages/codev/src/commands/porch/protocol.ts` manually parses and normalizes `protocol.json` files with extensive `if/else` checks and type assertions.
+**Impact:** Medium. The current manual validation is verbose, brittle, and may produce vague error messages for users creating custom protocols.
+**Improvement:**
+- Adopt **Zod** (or a similar schema validation library) to define the `Protocol` schema.
+- Replace manual normalization with `ProtocolSchema.parse()`.
+- This will provide precise error messages (e.g., "Invalid type at phases[0].gate: expected string or object") and significantly reduce code boilerplate.
+
+### 3. Terminal Session Resource Management
+**Current State:**
+In `packages/codev/src/terminal/pty-session.ts`, the `cleanup()` method clears the `clients` set but does not explicitly close the WebSocket connections. Additionally, `PtyManager.createSession` has a potential race condition where the session limit check happens before the asynchronous spawn completes.
+**Impact:** Medium. Potential for "zombie" WebSocket connections and race conditions under load.
+**Improvement:**
+- **Explicit Cleanup:** Iterate through `clients` and call `client.close()` (or send a termination frame) during session cleanup.
+- **Atomic Reservation:** Reserve a session slot synchronously in `createSession` *before* awaiting the `spawn` process to prevent exceeding `maxSessions` under concurrent requests.
+- **Configurable Defaults:** Move hardcoded values like `xterm-256color` and restart timeouts into the `PtySessionConfig`.
+
+### 4. Decouple Shellper from PtySession
+**Current State:**
+`PtySession` has a hard dependency on `Shellper` logic via `attachShellper`, `_shellperBacked`, and `detachShellper`. This tight coupling makes `PtySession` responsible for too much (local PTYs vs. remote/persistent Shellper processes).
+**Impact:** Medium. Increases complexity and makes testing `PtySession` in isolation difficult.
+**Improvement:**
+- Refactor `PtySession` to use an interface (e.g., `ITerminalBackend`) that abstracts the underlying process.
+- Create two implementations: `LocalPtyBackend` (wrapping `node-pty`) and `ShellperBackend` (wrapping the shellper client).
+- This creates a cleaner architecture where `PtySession` only manages the buffer and clients, unaware of whether the process is local or remote.
+
+### 5. API Request Validation
+**Current State:**
+`packages/codev/src/terminal/pty-manager.ts` uses `readJsonBody` which returns `unknown`, followed by manual type checks (e.g., `typeof body.cols !== 'number'`).
+**Impact:** Low. Tedious to maintain and prone to missing edge cases.
+**Improvement:**
+- Use the same **Zod** schemas mentioned above to validate incoming HTTP requests for `createSession` and `resizeSession`.
+- This ensures API robustness and automatic documentation of expected payloads.
+
+### 6. Standardized Error Handling
+**Current State:**
+Error handling is inconsistent; some parts throw generic `Error` objects, while others use custom classes like `ManagerError`.
+**Impact:** Low. Makes debugging and upstream error handling (e.g., in the UI) inconsistent.
+**Improvement:**
+- Define a set of standard error classes (e.g., `ResourceNotFoundError`, `QuotaExceededError`) in a shared `errors.ts` module.
+- Update `porch`, `agent-farm`, and `terminal` modules to throw these specific errors, allowing the CLI and API to return appropriate status codes and messages automatically.
+[gemini completed in 253.3s]

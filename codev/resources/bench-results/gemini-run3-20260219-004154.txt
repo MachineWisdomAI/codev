@@ -1,0 +1,73 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Error executing tool read_file: File not found.
+Error executing tool read_file: File not found.
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Based on my analysis of the `codev` codebase and the recent development analysis document (`codev/plans/0376-development-analysis-feb-2026.md`), here are the most impactful improvements you can make.
+
+### 1. Fix Codex Worktree Blindness via Auto-Commit Snapshot
+**Problem:** The `codex-sdk` (and occasionally Claude) reads files from the main branch instead of the builder's worktree, leading to false positives where the AI claims code is missing or outdated. This is identified as the "highest-impact false-positive fix".
+**Impact:** Eliminates ~18% of wasted consultation iterations and significantly reduces builder frustration.
+**Proposal:**
+- Modify `packages/codev/src/commands/consult/index.ts` to detect when running in a builder context with uncommitted changes.
+- Before invoking the model, automatically create a temporary git commit (e.g., `WIP: Consultation snapshot`).
+- Run the consultation (allowing the model's git-backed tools to see the current state).
+- Immediately `git reset HEAD~1` (soft reset) to restore the worktree state.
+- Handle process exits/crashes to ensure the reset happens (use `try...finally`).
+
+### 2. Add Runtime Process Lifecycle Tests
+**Problem:** 5 of 8 recent post-merge defects were process lifecycle bugs (Shellper leaks, orphaned processes, pipe FD dependencies). Static code review consistently misses these. Current tests check for *socket* cleanup but not *process* cleanup.
+**Impact:** Prevents resource exhaustion and "zombie" processes that degrade system stability over time.
+**Proposal:**
+- Create `packages/codev/src/agent-farm/__tests__/process-lifecycle.e2e.test.ts`.
+- Use `ps` (via `execSync`) to strictly verify that `shellper`, `gemini-cli`, and `codex-sdk` processes are terminated when their parent sessions end.
+- Add a specific test case for **Tower Restart** (Issue #324) to verify that persistent shellper processes correctly re-attach or clean up when the main server restarts.
+
+### 3. Implement Supermajority Override in Porch
+**Problem:** A single reviewer can block progress indefinitely even if 2/3 reviewers approve, causing wasted iterations (e.g., Spec 0113 had 5+ iterations due to one repeated concern).
+**Impact:** Reduces wasted consultation spend and accelerates phase completion.
+**Proposal:**
+- Modify `packages/codev/src/commands/porch/protocol.ts` (or `next.ts`).
+- Track consecutive verdicts in `status.yaml`.
+- If 2/3 reviewers have voted `APPROVE` for 2+ consecutive iterations, auto-advance the phase.
+- Log the dissenting verdict as a warning in the next phase's prompt or a `tasks.md` entry.
+
+### 4. Lightweight Review Path for Mechanical Changes
+**Problem:** Simple mechanical changes (renames, deletions) currently trigger a full 3-way consultation (Cost: ~$1.50/run), which is wasteful and slow for trivial tasks.
+**Impact:** Reduces costs and cycle time for maintenance tasks.
+**Proposal:**
+- Add a `mechanical` flag to the `porch` plan or detect simple changes (e.g., `< 10 LOC` of new logic, or only file moves).
+- For these detected changes, use a "Fast Path": consult only 1 model (e.g., Claude) instead of 3.
+- Update `packages/codev/src/commands/porch/protocol.ts` to support a `consultation_strategy: fast` option in the plan.
+
+### 5. Standardize Spec ID Handling
+**Problem:** Specs with IDs > 999 (e.g., `0350`, `0364`) cause filename mismatches between Porch (which expects `{id}-*`) and Consult (which expects 4-digit padding `0{id}-*`).
+**Impact:** Prevents "file not found" errors and creating symlink workarounds.
+**Proposal:**
+- Update `findSpec` and `findPlan` in `packages/codev/src/lib/skeleton.ts` (and `commands/consult/index.ts`) to handle variable-length IDs consistently.
+- Remove the rigid 4-digit padding assumption or apply it consistently across all tools.
+[gemini completed in 347.8s]

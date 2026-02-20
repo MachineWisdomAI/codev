@@ -1,0 +1,29 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a concrete, code‑grounded list of impactful improvements I’d prioritize after a quick scan of `packages/codev`. I tried the required GitHub checks, but the `gh` CLI couldn’t reach the network here, and `rg` isn’t available in this shell. That said, the points below are based on reading key server/CLI code.
+
+1. Add real auth/origin validation for Tower APIs. `isRequestAllowed` currently returns `true`, and CORS allows any `https://` origin, which makes localhost APIs reachable from any website via the browser. Implement a token (e.g., `~/.codev/tower-token`) and enforce `Authorization` + stricter origin checks. Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+2. Replace shell `exec` with `execFile` (or native APIs) for safety and predictability. `handleCreateWorkspace` runs `codev init` via a shell string and `handleWorkspaceGitStatus` shells out. Use `execFile` with explicit args to avoid shell injection risk and reduce quoting bugs. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+3. Remove sync FS work on hot HTTP paths. `handleWorkspaceFiles` walks the tree with `fs.readdirSync` and recursion, which can block the event loop on large repos. Make it async with paging or caching, and honor `.gitignore` rather than a hardcoded ignore list. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+4. Make Tower logging non‑blocking and rotatable. `tower-server.ts` uses `fs.appendFileSync` on every log line. Switch to async/buffered logging and add rotation (or use a lightweight logger) to prevent stalls under load. File: `packages/codev/src/agent-farm/servers/tower-server.ts`.
+5. Improve overview resilience with stale‑if‑error. The `OverviewCache` only updates on success; on `gh` failure it returns `null`. Keep and serve the last successful cache on error with a “stale” flag so the dashboard doesn’t go empty. File: `packages/codev/src/agent-farm/servers/overview.ts`.
+6. Replace manual YAML parsing with `js-yaml`. Status parsing is line‑based and fragile to formatting changes. Since `js-yaml` is already a dependency, use it to parse `status.yaml` reliably. File: `packages/codev/src/agent-farm/servers/overview.ts`.
+7. Validate `af-config.json` with a schema. Config parsing is JSON‑only with no shape validation. Add a schema (Zod/JSON Schema) so errors are precise and defaults are enforced. File: `packages/codev/src/agent-farm/utils/config.ts`.
+8. Add Tower API integration tests. There’s an explicit TODO for `/api/tabs/file`, and tower routes are complex and critical. Add tests for create/launch/stop, send buffer, cron endpoints, and CORS/auth behavior. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/__tests__`.
+9. Tighten CORS behavior for local security. Today any `https://` origin is allowed. Restrict to known origins (dashboard/tunnel) and block others unless a token is presented. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+10. Reduce `build:dashboard` churn. `npm install` during `build:dashboard` is expensive and can drift. Prefer `npm ci` or move dashboard build to workspace scripts so it uses existing lockfiles and doesn’t re‑install every time. File: `packages/codev/package.json`.
+
+If you want, I can turn any subset into a concrete plan or start a spec.  
+Natural next steps:
+1. Pick the top 2–3 items you want implemented first.  
+2. Tell me if you want a SPIR spec or a direct patch (if you consider this small).
+[codex completed in 189.9s]

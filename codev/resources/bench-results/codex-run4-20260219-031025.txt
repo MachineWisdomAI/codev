@@ -1,0 +1,51 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a focused list of impactful improvements based on a static review of the core runtime (Agent Farm + Tower + terminal) in `packages/codev/src`. Each item includes the likely impact and a concrete starting point.
+
+1. Harden request validation and auth for Tower APIs and WS.  
+   `isRequestAllowed` currently always returns true, and WS upgrades don’t validate origin. This is fine for localhost, but brittle when tunnels are involved. Add host/origin checks, plus an optional token for `/api/*` and WS endpoints.  
+   Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/servers/tower-websocket.ts`
+
+2. Replace shell `exec` with `execFile` or internal function calls.  
+   `handleCreateWorkspace` runs `codev init` via shell string interpolation; `git status` uses `exec`. Safer and more robust to use `execFile` or direct library calls, and avoid shell buffering limits.  
+   File: `packages/codev/src/agent-farm/servers/tower-routes.ts`
+
+3. Add inbound WS rate limiting and frame size caps.  
+   Outbound backpressure is handled; inbound isn’t. A single client can send large frames or a flood of messages. Add per-connection limits and drop policy.  
+   File: `packages/codev/src/agent-farm/servers/tower-websocket.ts`
+
+4. Eliminate sync FS writes in hot paths.  
+   `appendFileSync` and `writeSync` are used in request/PTY data paths; under heavy output they block the event loop. Switch to async streams with buffering.  
+   Files: `packages/codev/src/agent-farm/servers/tower-server.ts`, `packages/codev/src/terminal/pty-session.ts`, `packages/codev/src/terminal/session-manager.ts`
+
+5. Fix log size accounting and rotation semantics for PTY logs.  
+   `PtySession` doesn’t initialize `logBytes` from the existing file size, so long-lived logs can grow beyond limits. Rotation currently renames `.log.1` to `.log.1.1`, which is odd. Standardize rotation and initialize `logBytes` from file stat.  
+   File: `packages/codev/src/terminal/pty-session.ts`
+
+6. Cap the typing-aware send buffer.  
+   `SendBuffer` has no per-session or global limit; a stuck “user typing” state could grow memory indefinitely. Add max queue length and drop/merge policy with a metric.  
+   File: `packages/codev/src/agent-farm/servers/send-buffer.ts`
+
+7. Add SSE heartbeat and backpressure handling.  
+   SSE `res.write` is used without checking backpressure or pruning clients on write failure. Add periodic ping and remove dead/slow clients to keep notifications reliable.  
+   Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/servers/tower-server.ts`
+
+8. Use schema validation for API request bodies.  
+   Many handlers do ad-hoc `typeof` checks and `as string` casts. Adding Zod (already in `node_modules`) or a lightweight validator would reduce edge-case bugs and simplify handlers.  
+   File: `packages/codev/src/agent-farm/servers/tower-routes.ts`
+
+9. Replace manual YAML parsing for `status.yaml`.  
+   The parser in `overview.ts` is line-based and likely to break on quoted values, colons in titles, or multiline fields. A YAML parser would be more resilient.  
+   File: `packages/codev/src/agent-farm/servers/overview.ts`
+
+If you want, I can go deeper on any subsystem (Tower, tunnel, terminal, dashboard, or protocols) and turn one of these into a concrete, scoped plan.
+[codex completed in 150.5s]

@@ -1,0 +1,52 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Based on my analysis of the `codev` codebase, here are several impactful improvements, categorized by their potential value and area of impact.
+
+### 1. Dashboard Enhancements (High Impact)
+
+The current dashboard is a read-only view of the development process. Transforming it into an interactive control center would significantly improve the "Architect" workflow.
+
+*   **Interactive Spec & Plan Editor**: Currently, users must edit Markdown files in their IDE. Adding a rich-text or split-view Markdown editor directly in the dashboard would allow Architects to modify specs and plans while monitoring builders, keeping them in the "Command Center" flow.
+    *   *Implementation*: extend `packages/codev/dashboard/src/components/FileViewer.tsx` to support editing and saving back to disk via the Tower API.
+*   **Terminal Replay & Search**: The backend (`shellper` and `tower-websocket.ts`) already supports session replay (`replayBufferLines`). The dashboard's terminal component should fully utilize this to allow users to scroll back through the entire history of a builder's session, even if they just opened the tab. Adding search functionality within the terminal output would also be valuable.
+*   **Visual Dependency Graph**: For complex projects with multiple specs and plans, a visual graph (using a library like React Flow) showing relationships between Specs, Plans, and source files would help Architects understand the ripple effects of changes.
+
+### 2. "Consult" Tool Evolution (High Impact)
+
+The `consult` tool is powerful but currently operates mostly as a "one-shot" command.
+
+*   **Interactive Chat Mode**: Users often have follow-up questions after a review. Adding an interactive mode (e.g., `consult --interactive` or `consult chat`) would allow users to have a dialogue with the consultant model without reloading the entire context.
+*   **Context-Aware Auto-Selection**: Currently, `consult` relies heavily on explicit file passing or simple heuristics. implementing a smarter context gathering mechanism (perhaps using a local vector index or `ripgrep`-based keyword search) would make reviews more accurate without requiring the user to manually curate context.
+*   **Automated Builder Consultation**: Integrate `consult` directly into the SPIR protocol's "Review" phase. Builders could automatically trigger a consultation request when they finish implementation, parsing the verdict to either auto-fix issues or present them to the human Architect.
+
+### 3. System Robustness & Resource Management (Medium Impact)
+
+As users scale to more builders, system stability becomes critical.
+
+*   **Shellper Process Recovery**: The `shellper` architecture uses standalone processes. If a `shellper` crashes (e.g., OOM), the session is lost. Implementing a "supervisor" within `tower` that can detect crashed shellpers and potentially restart them (or at least preserve the log buffer to disk) would prevent data loss during long-running builds.
+*   **Resource Throttling**: Running multiple AI builders can be resource-intensive (CPU/RAM for compilation/testing). Adding a configuration to limit the maximum number of concurrent active builders (queuing the rest) would prevent the host machine from becoming unresponsive.
+
+### 4. Developer Experience & Onboarding (Medium Impact)
+
+*   **Enhanced `codev doctor`**: Expand `codev doctor` to validate API keys (by making a cheap "ping" request) and check for recommended-but-optional dependencies (like `gh` CLI or specific font requirements for the dashboard).
+*   **Protocol Package Manager**: Facilitate community contributions by adding a command like `codev protocol install <github-repo>` to easily fetch and install custom protocols. Currently, users must manually copy files into `codev/protocols`.
+
+### 5. Test Infrastructure (Maintenance)
+
+*   **Agent Farm E2E Tests**: The current tests cover the CLI, but testing the full `af` -> `tower` -> `dashboard` loop is complex. specialized E2E tests (likely using Playwright) that simulate a browser connecting to the dashboard and interacting with a mock builder would ensure the UI doesn't regress as backend features are added.
+
+### Recommended First Step
+I recommend starting with **Interactive Spec & Plan Editing** in the dashboard. This bridges the gap between the "Planning" and "Monitoring" phases, making `codev` feel more like a cohesive IDE for AI development rather than just a task runner.
+[gemini completed in 244.5s]

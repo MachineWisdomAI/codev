@@ -1,0 +1,37 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+I ran the required pre-checks, but `gh` couldn’t reach GitHub and `git log` failed due to sandbox temp‑dir restrictions. I proceeded with a local code scan instead.
+
+Here’s a prioritized, code‑referenced list of impactful improvements grounded in the current codebase.
+
+1. Enforce real auth on Tower API (high impact, security). `isRequestAllowed()` is a no‑op and Tower accepts any request today; the local key exists but is never validated. Implement a server‑side check for `Authorization: Bearer <key>` or `codev-web-key` and reject unauthenticated requests. Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/lib/tower-client.ts`, `packages/codev/dashboard/src/lib/api.ts`, `packages/codev/templates/tower.html`.
+
+2. Tighten CORS and block localhost CSRF (high impact, security). Tower currently allows any `https://` origin, and with no auth this enables browser‑based localhost attacks. Restrict allowed origins to `localhost/127.0.0.1` plus the configured tunnel domain, and require auth for all non‑GET endpoints. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/utils/server-utils.ts`.
+
+3. Make dashboard auth coherent (high impact, security/UX). The React dashboard sends `Authorization: Bearer <localStorage>` but nothing sets that value. Decide on a single auth mechanism and wire it end‑to‑end (CLI, dashboard, server). Files: `packages/codev/dashboard/src/lib/api.ts`, `packages/codev/templates/tower.html`, `packages/codev/src/agent-farm/lib/tower-client.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+4. Enable file‑tab E2E in the dashboard video test (medium impact, test coverage). There’s a stale TODO asserting `/api/tabs/file` is unimplemented, but the route exists. Add the missing step to open a file tab and remove the TODO. Files: `packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+5. Add migration chain tests for v2+ schema changes (medium impact, reliability). JSON migration is tested, but the incremental `_migrations` logic (v2–v4) in `db/index.ts` isn’t. Add tests that start from older schemas and verify post‑migration invariants. Files: `packages/codev/src/agent-farm/db/index.ts`, `packages/codev/src/agent-farm/__tests__/migrate.test.ts`, `packages/codev/src/agent-farm/__tests__/db.test.ts`.
+
+6. Expand rate‑limiting to additional mutating endpoints (medium impact, abuse resistance). Only activation rate limiting exists; consider adding limits to `/api/send`, `/api/create`, `/api/launch`, `/api/terminals/*` to avoid accidental or malicious floods. Files: `packages/codev/src/agent-farm/servers/tower-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+7. Bound workspace file tree responses (medium impact, performance). `handleWorkspaceFiles` recursively walks the repo with depth but no cap on file count or total size; large monorepos can be slow. Add max entries/bytes and pagination or lazy loading. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+8. Improve daemon crash resilience (medium impact, reliability). Unhandled exceptions cause immediate `process.exit(1)`. Consider graceful shutdown + optional auto‑restart guidance or attempt to continue for certain errors. Files: `packages/codev/src/agent-farm/servers/tower-server.ts`.
+
+If you want, I can turn the top items into issues/specs or start implementation.  
+Suggested next steps:
+1. Pick top 2–3 priorities (auth/CORS, dashboard auth flow, file‑tab E2E).  
+2. I draft a SPIR spec and plan.  
+3. I implement and add tests.
+[codex completed in 257.9s]

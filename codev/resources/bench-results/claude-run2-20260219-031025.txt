@@ -1,0 +1,137 @@
+Model: claude
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CLAUDE] Starting consultation...
+============================================================
+
+I'll explore the codebase thoroughly to give you well-grounded recommendations. Let me start by understanding the project structure, architecture, and current state.Let me check on the exploration progress and do some targeted investigation myself.The exploration agent is still running. Let me do some targeted investigation in parallel.Good - I have the architecture, package.json, and tsconfig. Let me dig deeper into specific areas.Let me check some more specific areas for improvement potential.Let me check a few more critical areas before forming my analysis.Let me check the exploration agent and look at one more area.I now have a thorough understanding of the codebase. Here's my analysis:
+
+---
+
+## Codev Codebase: Potential Impactful Improvements
+
+### 🔴 High Impact
+
+**1. Dead dependencies — `http-proxy` and `@types/http-proxy`**
+
+Both `http-proxy` (runtime) and `@types/http-proxy` (also in `dependencies`, not `devDependencies`) are never imported anywhere in `src/`. Zero grep matches. That's a native-addon-sized dependency shipping to every install for no reason. Easy win, no risk.
+
+**2. `tower-routes.ts` at 2,181 lines — decompose further**
+
+The file self-documents its violation of the 900-line guideline with the justification "cohesion trumps arbitrary ceilings." But the routing code has clear natural seams: workspace routes, terminal CRUD, cron routes, file/annotation routes, send/message routes, overview/SSE routes. The existing dispatch table pattern (lines 131-149) would make extraction straightforward — each group becomes its own module exporting route entries. The precedent from Spec 0105's tower decomposition already proves this pattern works.
+
+**3. Inconsistent logging — 522 raw `console.*` calls vs. the `logger` utility**
+
+You have a clean `logger` abstraction in `utils/logger.ts` (with chalk formatting, levels, structured output), plus tower-server has its own separate `log()` function with timestamps and file output. But the overwhelming majority of the codebase (522 occurrences across 30+ files) uses raw `console.log/error/warn` directly. This means:
+- No log level filtering in production
+- No unified timestamping
+- No structured output for Tower daemon logs
+- `DEBUG` mode only works in the `logger.debug()` path, not the raw calls
+
+Consolidating to a single logger interface (with environment-based levels, optional file output) would make debugging multi-workspace issues *much* easier.
+
+**4. Coverage thresholds are low — 62% lines / 55% branches**
+
+For a system managing terminal sessions, PTY lifecycle, and multi-process state across workspaces, these thresholds don't catch regressions you've already experienced. Your MEMORY.md documents repeated state-corruption bugs (#274, #341, the "second project kills first" pattern). The two excluded-as-flaky tests (`init.test.ts`, `bugfix-213-architect-restart.test.ts`) are another signal — flaky tests hiding real issues. Incrementally raising thresholds (target 75% lines, 65% branches) and stabilizing flaky tests would directly reduce the regression frequency your memory docs describe.
+
+---
+
+### 🟡 Medium Impact
+
+**5. SQLite retry has no backoff**
+
+`withRetry()` in `db/errors.ts` retries `SQLITE_BUSY` immediately with zero delay. Under contention (multiple workspaces, concurrent `af send`, porch state writes), this tight-loop retry burns CPU without giving the lock holder time to release. Even a 50ms exponential backoff (`Math.min(50 * 2**i, 500)`) would be significantly more effective.
+
+**6. Tower crashes on unhandled rejection**
+
+```typescript
+process.on('unhandledRejection', (reason) => {
+  // ...
+  process.exit(1);
+});
+```
+
+For a long-running daemon managing multiple workspaces, this is aggressive. One unhandled promise rejection in a non-critical path (SSE broadcast, overview cache refresh, tunnel heartbeat) takes down all workspaces. Consider logging + continuing for non-critical paths, reserving `process.exit(1)` for truly unrecoverable states.
+
+**7. CORS allows all HTTPS origins**
+
+```typescript
+if (origin && (
+  origin.startsWith('http://localhost:') ||
+  origin.startsWith('http://127.0.0.1:') ||
+  origin.startsWith('https://')  // ← any HTTPS site
+)) {
+  res.setHeader('Access-Control-Allow-Origin', origin);
+}
+```
+
+This means any HTTPS page can make credentialed requests to the Tower API. The host/origin validation partially mitigates this, but it's still wider than necessary. If this exists for tunnel proxy support, consider validating against the actual tunnel server domain specifically.
+
+**8. Dashboard API layer has no resilience**
+
+`dashboard/src/lib/api.ts` does raw `fetch()` calls with no:
+- Request timeout (hanging fetch blocks the UI indefinitely)
+- Retry on transient failures (network blip while Tower restarts)
+- AbortController usage for cleanup on unmount
+
+Given the 1-second poll interval on `/api/state`, a hung request can queue up many pending fetches. An `AbortController` per poll cycle and a 5-second timeout would prevent this.
+
+**9. No API schema or validation**
+
+30+ HTTP endpoints defined in `tower-routes.ts` with no schema validation on request bodies. `parseJsonBody()` parses JSON but doesn't validate shape. A lightweight approach (zod schemas on the `RouteEntry` definitions) would catch malformed requests early and provide type-safe API contracts between dashboard and server.
+
+---
+
+### 🟢 Lower Impact (but worth tracking)
+
+**10. Top-level side effects in tower-server.ts**
+
+Line 57 starts a rate-limit cleanup interval at module import time. `Commander.parse()` also runs at the top level. This makes the module untestable in isolation — importing it starts a server. Wrapping the startup in an explicit `main()` function would enable unit testing of the orchestrator logic.
+
+**11. `porch/index.ts` at 28KB — monolithic CLI handler**
+
+This file handles all porch subcommands (`next`, `done`, `run`, `status`, `approve`, `init`). The command dispatch is in one place, but the implementation bodies could be extracted to per-command modules similar to how `agent-farm/commands/` is structured.
+
+**12. Dashboard type duplication**
+
+The `DashboardState`, `Builder`, `OverviewData` types are defined separately in `dashboard/src/lib/api.ts` and in the server-side `tower-types.ts`. These can drift. A shared types package (or even a single `.d.ts` file imported by both) would keep them in sync.
+
+**13. No readiness probe**
+
+Tower starts accepting HTTP requests before `reconcileTerminalSessions()` completes. A dashboard connecting during this window gets incomplete state. A `/health` endpoint that reports `{ ready: false }` until initialization completes would let clients (and monitoring) distinguish "starting" from "ready."
+
+---
+
+### Summary Priority Matrix
+
+| # | Improvement | Effort | Risk | Impact |
+|---|-----------|--------|------|--------|
+| 1 | Remove dead deps | 5 min | None | Clean install |
+| 3 | Unified logging | 1-2 days | Low | Debugging |
+| 5 | SQLite retry backoff | 30 min | None | Stability |
+| 6 | Graceful unhandled rejection | 1 hour | Low | Uptime |
+| 8 | Dashboard fetch resilience | 2 hours | Low | UX |
+| 4 | Raise coverage thresholds | Ongoing | Low | Regressions |
+| 2 | Decompose tower-routes | 1 day | Medium | Maintainability |
+| 7 | Tighten CORS | 1 hour | Medium | Security |
+| 9 | API schema validation | 2-3 days | Low | Correctness |
+
+Items 1, 5, 6 are quick wins you could batch into a single TICK. Items 3 and 2 are larger but directly address patterns your MEMORY.md flags as recurring pain points.
+
+The exploration agent finished and confirms my findings. I already delivered the full analysis above — here's a quick recap of the biggest bangs for buck:
+
+1. **Remove `http-proxy` + `@types/http-proxy`** — dead weight, 5-minute fix
+2. **SQLite retry backoff** — `withRetry` loops with zero delay, 30-minute fix
+3. **Graceful `unhandledRejection`** — daemon crashes on any stray rejection, 1-hour fix
+4. **Unified logging** — 522 raw `console.*` calls vs. an existing `logger` utility nobody uses
+5. **Dashboard fetch resilience** — no timeouts, no AbortController, no retry
+6. **tower-routes.ts decomposition** — 2,181 lines with natural split points
+7. **Coverage thresholds** — 62%/55% isn't catching the regressions your MEMORY.md documents
+
+Let me know if you want to dig deeper into any of these or turn them into specs.
+[claude completed in 165.6s]

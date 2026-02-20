@@ -1,0 +1,51 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a focused list of **impactful improvements** grounded in what I found in the repo. I kept them concrete and tied to specific files so you can decide what to pursue.
+
+1. **Add CI caching and switch to `npm ci` for determinism and speed.**  
+   Evidence: GitHub Actions jobs use `npm install` without caching in `.github/workflows/test.yml` and `.github/workflows/dashboard-e2e.yml`. This inflates runtime and makes builds less deterministic. Use `actions/cache` for `~/.npm` and Playwright browsers, and switch to `npm ci` where possible.  
+   Files: `.github/workflows/test.yml`, `.github/workflows/dashboard-e2e.yml`
+
+2. **Run dashboard unit tests in CI.**  
+   Evidence: `packages/codev/vitest.config.ts` explicitly excludes `**/dashboard/__tests__/**`, and CI never runs `packages/codev/dashboard` tests. Only Playwright e2e runs in `dashboard-e2e.yml`. This risks UI regressions slipping. Add a CI job to run `vitest` in `packages/codev/dashboard`.  
+   Files: `packages/codev/vitest.config.ts`, `packages/codev/dashboard/__tests__/*`, `.github/workflows/test.yml`
+
+3. **Fix or rehome excluded/flaky tests to raise coverage and stability.**  
+   Evidence: `packages/codev/vitest.config.ts` excludes `packages/codev/src/__tests__/init.test.ts` (flaky), and coverage thresholds are low (lines 62%, branches 55%). Stabilizing the flaky test or moving it to integration scope would let you tighten coverage gates gradually.  
+   Files: `packages/codev/vitest.config.ts`, `packages/codev/src/__tests__/init.test.ts`
+
+4. **Enforce `CLAUDE.md` ≡ `AGENTS.md` in CI.**  
+   Evidence: This invariant is documented but not enforced. A simple CI check (diff) would prevent drift and reduce human error.  
+   Files: `codev/resources/arch.md`, `CLAUDE.md`, `AGENTS.md`
+
+5. **Stop reinstalling dashboard deps on every build.**  
+   Evidence: `build:dashboard` runs `npm install` on every build, which is slow and fragile in CI or offline scenarios. Consider `npm ci` with caching, or use workspaces so the dashboard deps are installed once.  
+   Files: `packages/codev/package.json`
+
+6. **Ignore or relocate benchmark outputs.**  
+   Evidence: `codev/resources/bench-results/` is created by `codev/resources/bench.sh` and showed up as untracked in `git status`. Add to `.gitignore` or move under `tmp/` to prevent workspace noise.  
+   Files: `codev/resources/bench.sh`, `.gitignore`
+
+7. **Ignore coverage output at `packages/codev/coverage/`.**  
+   Evidence: `git status` reports untracked `packages/codev/coverage/`. Add to `.gitignore` or unify coverage output under `test-results/` so it’s already ignored.  
+   Files: `.gitignore`
+
+8. **Reduce reliance on `process.exit(0)` in `consult` by cleaning SDK handles.**  
+   Evidence: `consult` forcibly exits due to lingering handles from SDKs, which works but is blunt and can mask cleanup issues. Long-term improvement: add explicit shutdown/cleanup hooks for SDK clients to eliminate the forced exit and allow more composability.  
+   Files: `packages/codev/src/cli.ts`, `packages/codev/src/commands/consult/index.ts`
+
+9. **Add a Node version file for local consistency.**  
+   Evidence: You pin Node in `packages/codev/package.json` but there’s no `.nvmrc` or `.tool-versions` at repo root. Adding one prevents “works on my machine” drift.  
+   Files: `packages/codev/package.json`
+
+If you want, I can turn any of these into a concrete plan (or open a spec/plan if you want it in SPIR). Which of these feels most valuable to tackle first?
+[codex completed in 191.0s]

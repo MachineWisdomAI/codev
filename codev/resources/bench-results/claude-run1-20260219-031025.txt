@@ -1,0 +1,174 @@
+Model: claude
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CLAUDE] Starting consultation...
+============================================================
+
+I'll start by exploring the codebase structure and key files to give you informed, grounded recommendations.Good, I have a solid structural overview. Let me now dig into specific areas that surfaced as potential improvement targets — I want to verify claims against actual code before making recommendations.Now let me read the key files in parallel:Now let me check tests, error handling, and the dashboard:Now let me check some specific areas I want to verify — the logging, observability, and a few more patterns:I've done a thorough read of the codebase. Here's my analysis, grounded in what I actually found in the files.
+
+---
+
+## Potential Impactful Improvements
+
+### 1. Extract Shared Reconnection Logic (Duplication / Bug Risk)
+
+**Files:** `tower-terminals.ts` lines 349-553 vs 596-667
+
+The on-the-fly reconnect path inside `getTerminalsForWorkspace()` duplicates ~70 lines from `_reconcileTerminalSessionsInner()` — both build restart options from `af-config.json`, call `reconnectSession`, create a raw PtySession, attach shellper, wire up exit handlers, and update SQLite. If the reconnect logic changes (e.g., a new restart parameter), you need to update both places. This is the kind of duplication that has already bitten you (per MEMORY.md's "intermittent = external state mutation" pattern).
+
+**Suggested fix:** Extract a `reconnectShellperSession(dbSession, manager, restartOptions)` helper that both paths call.
+
+**Impact:** Medium-high. Reduces regression surface in the most critical startup/runtime path.
+
+---
+
+### 2. Structured Logging with Request Correlation
+
+**File:** `tower-server.ts` lines 79-98
+
+The current `log()` function is a plain string formatter with 3 levels and optional file output. When you're managing 4+ workspaces with 10+ shellper processes, and a problem like the "killed 3 architect sessions" incident happens, there's no way to trace which API request triggered which terminal operation.
+
+**Suggested fix:** Add a `requestId` to each incoming HTTP request (you already import `crypto` in tower-routes.ts), thread it through `RouteContext`, and include it in log lines. Even without a full structured logging library, `[${requestId}] [${level}]` would make `grep` debugging dramatically more effective.
+
+**Impact:** High for operational debugging. The multi-workspace architecture makes correlation essential.
+
+---
+
+### 3. Separate Liveness from Readiness at `/health`
+
+**File:** `tower-routes.ts` lines 242-256
+
+The health endpoint currently calls `await getInstances()`, which queries SQLite, iterates all known workspaces, and runs `getTerminalsForWorkspace()` for each. If the DB is locked or a shellper probe hangs, the health check fails — even though Tower itself is up and can accept connections.
+
+**Suggested fix:**
+- `/health` → fast liveness check (process uptime, memory, timestamp — no I/O)
+- `/api/status` → the full readiness check with instance counts (this already exists but duplicates health)
+
+**Impact:** Medium. Prevents false-positive "Tower is down" reports during heavy reconciliation.
+
+---
+
+### 4. Migration Code Extraction
+
+**File:** `db/index.ts` — 648 lines, ~400 of which are migrations
+
+10 global migrations and 7 local migrations live inline in `ensureGlobalDatabase()` and `ensureLocalDatabase()`. These run exactly once per installation but bloat the module and make the actual database access code hard to find.
+
+**Suggested fix:** Move migrations to a `db/migrations/` directory or at minimum a `db/migrate-global.ts` and `db/migrate-local.ts` file. The pattern already exists (`db/migrate.ts` handles JSON→SQLite migration).
+
+**Impact:** Medium for maintainability. Every new migration makes these functions harder to read.
+
+---
+
+### 5. Silent Error Swallowing Audit
+
+**Stats:** 47 `catch {}` blocks + 41 `catch (err)` blocks across the server modules.
+
+Many empty catch blocks are justified (migration column-already-exists checks). But several are not:
+
+- `tower-instances.ts` line 94: `registerKnownWorkspace` catches everything with just `// Table may not exist yet (pre-migration)` — if the table _does_ exist and the error is something else (disk full, corruption), you'll never know.
+- `tower-terminals.ts` line 254: `getTerminalSessionsForWorkspace` returns `[]` on any error, hiding query failures.
+- Reconciliation loop (`tower-terminals.ts` line 390): `try { process.kill(...); killed++; } catch { /* not killable */ }` — fine for ESRCH, but masks EPERM.
+
+**Suggested fix:** Add `_deps?.log('WARN', ...)` to the non-trivial catch blocks. You already have the pattern in most places — it's the remaining ~15 silent ones that need attention.
+
+**Impact:** Medium-high. Matches the MEMORY.md lesson: "intermittent = external state mutation" — silent catches hide the root cause.
+
+---
+
+### 6. Synchronous File I/O on Request Paths
+
+**File:** `tower-routes.ts` — annotate routes, file tab serving
+
+Routes like `handleWorkspaceAnnotate` use `fs.readFileSync`, `fs.statSync`, and `fs.existsSync` on user-provided file paths. These block the Node.js event loop. For small config files this is negligible, but serving large file content (binary images, PDFs) via `fs.readFileSync(filePath)` (line 1925) blocks all other requests.
+
+**Suggested fix:** Use `fs.createReadStream().pipe(res)` for binary file serving. The text/JSON endpoints are less critical but could be migrated incrementally.
+
+**Impact:** Medium. Currently masked by single-user usage patterns, but becomes a bottleneck with cloud tunnel access (Spec 0097) where latency and concurrency matter.
+
+---
+
+### 7. Normalize Workspace Paths at the API Boundary
+
+**Files:** `tower-terminals.ts`, `tower-instances.ts`
+
+`normalizeWorkspacePath()` is called in `saveTerminalSession`, `deleteWorkspaceTerminalSessions`, `getTerminalSessionsForWorkspace`, `loadFileTabsForWorkspace`, `saveFileTab`, and `getTerminalsForWorkspace`. That's 6+ normalization calls for what should be a single normalization at the HTTP handler level.
+
+In `deleteWorkspaceTerminalSessions` (lines 230-243), you even run _two_ DELETE queries (one for normalized, one for raw) as a safety net — which is a symptom of not normalizing early enough.
+
+**Suggested fix:** Normalize once in `handleRequest()` or at the workspace-path-decoding step, then pass the normalized path through the call chain.
+
+**Impact:** Low-medium. Reduces defensive code and eliminates the dual-delete pattern.
+
+---
+
+### 8. Tower Route Testing
+
+**Stats:** 0 test files for `tower-routes.ts` (2,181 LOC)
+
+The largest file in the server has no unit tests. `tower-terminals.test.ts` and `tower-instances.test.ts` exist, but routes are only tested indirectly via E2E. This means the entire HTTP API surface — CORS, rate limiting, workspace path validation, workspace activation, terminal creation, send buffer delivery — has no fast feedback loop.
+
+The `RouteContext` interface was clearly designed to enable dependency injection for testing, but it's unused for that purpose.
+
+**Suggested fix:** Create `tower-routes.test.ts` using the existing `RouteContext` interface to mock dependencies. Start with the critical paths: workspace activation, terminal creation, and the `/api/send` endpoint.
+
+**Impact:** High. Routes contain the most business logic and are the primary user-facing surface.
+
+---
+
+### 9. CORS Origin Validation
+
+**File:** `tower-routes.ts` lines 169-175
+
+```typescript
+if (origin && (
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin.startsWith('https://')
+)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+}
+```
+
+This allows _any_ HTTPS origin. With the cloud tunnel feature (Spec 0097), this means any website could make cross-origin requests to the tunnel URL. Browsers will send cookies and credentials by default.
+
+**Suggested fix:** For tunnel access, validate against the tunnel's known hostname. For local access, the `localhost`/`127.0.0.1` checks are fine.
+
+**Impact:** Medium. Security concern that's low-risk for local-only usage but becomes relevant with cloud tunnel.
+
+---
+
+### 10. Coverage Threshold Progression
+
+**File:** `vitest.config.ts` — 62% lines / 55% branches
+
+These thresholds are a reasonable floor given the project's age and E2E testing strategy. But the system manages terminal sessions, process lifecycles, and database state — areas where untested branches tend to manifest as "second project kills first" or "workspace shows inactive" (per MEMORY.md regression patterns).
+
+**Suggested fix:** Incrementally raise thresholds as new tests are added (the route testing from #8 would materially help). A reasonable target might be 70% lines / 62% branches within 2-3 sprints.
+
+**Impact:** Medium, compounding. Each point of coverage in the terminal/server modules reduces the chance of the regressions you've historically encountered.
+
+---
+
+### Summary by Priority
+
+| # | Improvement | Impact | Effort |
+|---|-------------|--------|--------|
+| 1 | Extract reconnect logic | Med-High | Low |
+| 2 | Structured logging + request IDs | High | Low-Med |
+| 8 | Tower route tests | High | Med |
+| 5 | Silent error swallowing audit | Med-High | Low |
+| 3 | Liveness vs readiness separation | Med | Low |
+| 9 | CORS origin validation | Med | Low |
+| 6 | Async file serving | Med | Med |
+| 4 | Migration code extraction | Med | Med |
+| 7 | Path normalization at boundary | Low-Med | Low |
+| 10 | Coverage threshold progression | Med | Ongoing |
+
+The first three are the highest leverage: they address the root causes behind the specific regressions documented in your MEMORY.md (state mutation bugs, multi-workspace confusion, lack of regression tests for the HTTP layer).
+[claude completed in 248.9s]

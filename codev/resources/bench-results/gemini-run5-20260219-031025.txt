@@ -1,0 +1,71 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Based on my analysis of the `codev` codebase, here are several impactful improvements to consider. The codebase implements a sophisticated "Agent Farm" architecture but shows signs of growing complexity that could hinder maintainability and stability.
+
+### 1. Refactor API Routing & Validation
+**Current State:** `tower-routes.ts` is a monolithic file (2000+ lines) handling all HTTP routes via manual string/regex matching and raw `http.IncomingMessage` parsing.
+**Impact:** High cognitive load, prone to routing errors, difficult to test individual endpoints, and risky manual input parsing.
+**Proposed Improvement:**
+*   **Adopt a lightweight router:** Use `hono` (works in Node) or `tiny-request-router` to organize routes declaratively.
+*   **Introduce Schema Validation:** Add `zod` to validate API request bodies at runtime. Currently, manual checks like `typeof body.cols === 'number'` are scattered throughout handlers.
+*   **Split Handlers:** Move route handlers into dedicated files (e.g., `src/agent-farm/routes/terminals.ts`, `src/agent-farm/routes/workspaces.ts`).
+
+### 2. Unify State Management (Single Source of Truth)
+**Current State:** The system maintains state in two places: in-memory `Map` objects (in `tower-terminals.ts`, `tower-instances.ts`) and SQLite databases (`state.db`, `global.db`). Code like `reconcileTerminalSessions` exists solely to keep these in sync.
+**Impact:** Synchronization bugs (e.g., "zombie" processes or "ghost" terminals) are likely when the two states drift.
+**Proposed Improvement:**
+*   **SQLite as Primary:** Treat SQLite as the authoritative source of truth. In-memory Maps should be read-through caches, not parallel state stores.
+*   **Reactive State:** When the DB changes, emit events to update connected clients (WebSockets) rather than manually updating both DB and Map.
+
+### 3. Harden "Shellper" Process Supervision
+**Current State:** Terminal persistence relies on "Shellper" processes (managed in `terminal/session-manager.ts`). The logic for handling orphans, stale sockets, and restarts is complex and scattered (e.g., `killOrphanedShellpers`, `cleanupStaleSockets`).
+**Impact:** Terminal instability is a major friction point. "Bugfix #341" and others in the comments highlight this fragility.
+**Proposed Improvement:**
+*   **Dedicated Supervisor:** Extract a `ShellperSupervisor` class whose *sole* job is ensuring the actual process state matches the desired state (reconciling PIDs/sockets).
+*   **Health Checks:** Implement active health checks for shellper sockets rather than just reacting to disconnects.
+
+### 4. Decouple Dashboard from Server
+**Current State:** The server performs server-side rendering (SSR) by manually injecting strings into HTML templates (e.g., `handleDashboard`, `handleWorkspaceAnnotate`).
+**Impact:** Tight coupling between backend and frontend makes it hard to iterate on the UI. It also mixes concerns (API server vs. Static Asset server).
+**Proposed Improvement:**
+*   **Pure SPA Dashboard:** Convert the dashboard to a fully static Single Page Application (SPA) that consumes the API for *all* data (including configuration).
+*   **Static Serving:** The server should only serve the static `dist/` folder and API JSON responses, removing all `fs.readFileSync` template injection logic.
+
+### 5. Standardize Dependency Injection
+**Current State:** Dependencies like `SessionManager` and `Db` are often imported directly or passed through a `RouteContext` object that is manually threaded through every handler.
+**Impact:** testing individual route handlers is difficult because dependencies are hard to mock.
+**Proposed Improvement:**
+*   **Service Layer:** Create explicit service classes (e.g., `TerminalService`, `WorkspaceService`) that encapsulate business logic.
+*   **Factory/Context:** Instantiate these services at startup and inject them into the router context cleanly. This makes unit testing the business logic trivial.
+
+### 6. Remove "Magic" from `codev-skeleton`
+**Current State:** The `codev-skeleton` directory contains template files copied to new projects.
+**Impact:** Changes to the core logic often require manual updates to the skeleton, leading to version drift between the CLI and user projects.
+**Proposed Improvement:**
+*   **Versioned Templates:** Treat templates as versioned artifacts.
+*   **Migration Scripts:** Ensure `codev update` can robustly patch existing user projects when the skeleton structure changes (currently partially handled, but could be more robust).
+[gemini completed in 330.2s]

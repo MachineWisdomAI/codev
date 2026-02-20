@@ -1,0 +1,172 @@
+Model: claude
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CLAUDE] Starting consultation...
+============================================================
+
+I'll explore the codebase thoroughly to give you well-grounded recommendations. Let me start by understanding the project structure, architecture, and key files.The exploration agent is still working. Let me also kick off some targeted investigations in parallel to cover more ground.Let me also directly read some key architectural files while the agents work.Now let me dig into specific areas where I suspect improvements could be high-impact.Let me check on my background agents and also look at some specific code areas directly.Good progress. Let me read a few more specific files to complete my analysis while the agents finish.Let me check on the remaining agents and look at a couple more key files.All three investigation agents have completed. I now have a thorough understanding of the codebase. Let me synthesize everything into a prioritized analysis.
+
+---
+
+## Codev: Potential High-Impact Improvements
+
+I've analyzed the codebase across architecture, testing, error handling, observability, and maintainability. Here are the improvements ranked by impact — each grounded in specific files and line numbers I actually read.
+
+---
+
+### 🔴 Tier 1 — High Impact, Reduces Real Risk
+
+#### 1. Tower Server Integration Test (Critical Gap)
+
+`tower-server.ts` (353 lines) is the daemon entry point that initializes *everything* — terminal manager, shellper sessions, cron, tunnel, instances, websocket — and it has **zero test coverage**. The lcov report confirms it's not even in the coverage data. Given your MEMORY.md documents at least 4 ordering-sensitive bugs (Bugfix #274, #341, the `_reconciling` guard race), this is the highest-risk untested surface.
+
+**What to test:** Server lifecycle — startup initialization order, graceful shutdown preserving shellper sessions, signal handling (SIGINT/SIGTERM). A lightweight integration test that spins up Tower on a random port and verifies subsystem initialization would catch the class of regressions you've been bitten by.
+
+**Effort:** Medium. **Risk reduction:** Very high.
+
+---
+
+#### 2. React Error Boundary (Missing)
+
+The dashboard has no React Error Boundary. If any component in the tree throws during render, the entire dashboard white-screens. Given that `Terminal.tsx` does binary WebSocket protocol parsing and `App.tsx` manages complex tab state, this is a real risk.
+
+Currently the dashboard catches API errors with bare `console.error('Failed to open file:', err)` — no user-facing feedback at all.
+
+**What to add:**
+- A root-level `<ErrorBoundary>` that shows a "something went wrong, reload" message instead of a white screen
+- Structured error display for API failures in the UI (toast/banner)
+
+**Effort:** Low. **Impact:** Prevents total UI failure.
+
+---
+
+#### 3. Raise Coverage Thresholds & Close CLI Entry Point Gaps
+
+Current thresholds are `lines: 62, branches: 55` in `vitest.config.ts`. These are low for a system managing PTY sessions and multi-workspace state. More concretely:
+
+- `cli.ts` (249 lines) — main `codev` command router, **no tests**
+- `agent-farm/cli.ts` (584 lines) — `af` command router with 15+ subcommands, **no tests**
+- `shellper-main.ts` (225 lines) — the Shellper entry point, **no tests**
+- `init.test.ts` — excluded from CI due to flakiness ("codev doctor timeout in worktree context")
+
+The CLI routers are especially important because they're the user-facing entry points. A typo in command registration or a broken import silently breaks an entire command.
+
+**Action:** Add unit tests for CLI dispatch, fix the flaky init test, then bump thresholds to 70/60.
+
+---
+
+### 🟡 Tier 2 — Meaningful Improvements, Good ROI
+
+#### 4. Structured Logging & Request Tracing
+
+Tower's `log()` function (tower-server.ts:79-98) writes timestamped lines to console and optionally a file. There's no:
+- Request ID tracing across HTTP → WebSocket → terminal operations
+- Structured JSON output for machine parsing
+- Log levels beyond INFO/WARN/ERROR (no DEBUG)
+- Per-workspace log context
+
+For a daemon managing multiple workspaces concurrently, correlating "which workspace caused this error" requires manual socket/PID inspection. Even a simple `requestId` on HTTP requests flowing through to `log()` calls in `tower-routes.ts` would dramatically improve debuggability.
+
+The `logger.ts` utility in `agent-farm/utils/` is a separate, simpler logger that doesn't share anything with Tower's logger — two logging systems with no coordination.
+
+---
+
+#### 5. Dashboard Polling → SSE for State Updates
+
+The dashboard polls `/api/state` on a **1-second interval** (documented in arch.md line 162). The SSE infrastructure already exists at `/api/events` with `SSEClient` types and broadcast helpers. But it's only used for push notifications, not state updates.
+
+Switching `/api/state` to push state diffs over SSE would:
+- Eliminate 1 HTTP request/second per open dashboard tab
+- Reduce latency for state changes (builder status, gate transitions)
+- Reduce Tower CPU load under multi-workspace scenarios
+
+The `/api/events` endpoint and SSE plumbing are already built — this is a matter of sending state-change events through the existing channel.
+
+---
+
+#### 6. `tower-routes.ts` Domain Decomposition
+
+At **2,181 lines**, this is the largest file in the codebase. The header comment (line 9-12) acknowledges it exceeds the 900-line guideline and argues "cohesion trumps arbitrary ceilings." But the file handles workspace management, terminal CRUD, file operations, cron, messaging, overview, and static file serving — these are distinct domains.
+
+A pragmatic split:
+- `tower-workspace-routes.ts` — workspace activate/deactivate/status/browse/create
+- `tower-terminal-routes.ts` — terminal create/delete/resize/output
+- `tower-message-routes.ts` — send/broadcast/SSE
+- `tower-routes.ts` — route table + dispatch (stays as orchestrator)
+
+This mirrors what Spec 0105 did for `tower-server.ts` itself — same principle, applied to routes.
+
+---
+
+#### 7. API Error Response Standardization
+
+Error responses are inconsistent across routes. Some return:
+```json
+{ "error": "message string" }
+```
+Others return:
+```json
+{ "error": "INVALID_PARAMS", "message": "Invalid JSON body" }
+```
+And the browse endpoint (line numbers from tower-routes.ts) returns errors *inside a 200 response*:
+```json
+{ "suggestions": [], "error": "message" }
+```
+
+A consistent error envelope (`{ error: { code: string, message: string } }`) with proper HTTP status codes would improve both the dashboard's error handling and any future API consumers.
+
+---
+
+### 🟢 Tier 3 — Housekeeping & Polish
+
+#### 8. Remove Deprecated `INSTALL.md`
+
+The file opens with:
+> **DEPRECATED**: This document is outdated and references v1.x architecture (tmux, state.json, config.json).
+
+It references tmux (removed in Spec 0104), `state.json` (replaced by SQLite), and `config.json` (replaced by `af-config.json`). The README already has current install instructions. This file is just a trap for anyone reading the repo top-level.
+
+---
+
+#### 9. Move `@types/http-proxy` to `devDependencies`
+
+In `package.json` line 41, `@types/http-proxy` is listed in `dependencies` instead of `devDependencies`. Type definitions are only needed at compile time, not at runtime. Minor, but it inflates the installed package size for all users.
+
+---
+
+#### 10. State Split Documentation + Runtime Invariant Checks
+
+The SQLite ↔ in-memory `workspaceTerminals` state split is documented in arch.md (lines 495-504) and testing-guide.md (lines 75-81) as a known risk. You've been bitten by it multiple times per MEMORY.md.
+
+Beyond documentation, consider adding runtime invariant assertions — e.g., after `reconcileTerminalSessions()`, verify that every entry in `workspaceTerminals` has a corresponding row in SQLite, and vice versa. Log warnings (not crashes) on mismatch. This turns silent state corruption into visible warnings before they become user-facing bugs.
+
+---
+
+### Summary Table
+
+| # | Improvement | Risk Reduced | Effort | ROI |
+|---|------------|-------------|--------|-----|
+| 1 | Tower server integration test | 🔴 Critical | Medium | ★★★★★ |
+| 2 | React Error Boundary | 🔴 High | Low | ★★★★★ |
+| 3 | CLI tests + raise coverage | 🔴 High | Medium | ★★★★ |
+| 4 | Structured logging + request tracing | 🟡 Medium | Medium | ★★★★ |
+| 5 | Dashboard polling → SSE | 🟡 Medium | Medium | ★★★ |
+| 6 | tower-routes.ts decomposition | 🟡 Maintenance | Medium | ★★★ |
+| 7 | API error standardization | 🟡 DX | Low | ★★★ |
+| 8 | Remove deprecated INSTALL.md | 🟢 Hygiene | Trivial | ★★ |
+| 9 | Fix @types/http-proxy placement | 🟢 Hygiene | Trivial | ★ |
+| 10 | Runtime state-split invariant checks | 🟡 Regression | Low | ★★★★ |
+
+Items 1-3 are the clear winners — they address the highest-risk gaps with reasonable effort. Item 10 is a sleeper: low effort but directly targets your most recurring class of bugs.
+
+The analysis is complete — everything above is the final output. Let me know if you want me to dig deeper into any specific item, or if you'd like me to draft a spec for any of these improvements.
+
+Sounds good — everything's in the analysis above. Just say the word on which items to pursue.
+
+Thanks for the confirmation notifications. The full analysis is above — ready when you are.
+[claude completed in 304.4s]

@@ -1,0 +1,68 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Error executing tool read_file: File not found.
+Based on my analysis of the `codev` codebase, here is a list of potential impactful improvements, categorized by their nature.
+
+### 1. Architectural Improvements
+
+**A. Modularize AI Model Integration (Plugin System)**
+*   **Current State:** The `consult` command (`packages/codev/src/commands/consult/index.ts`) contains hardcoded logic for `claude`, `codex`, and `gemini`. Adding a new model requires modifying the core `consult` logic and duplicating prompt construction code.
+*   **Improvement:** Abstract the model interaction into a `ModelProvider` interface. Create separate classes for each provider (e.g., `ClaudeProvider`, `GeminiProvider`, `CodexProvider`).
+*   **Impact:** Significantly easier to add new models (e.g., DeepSeek, Llama) and maintain existing ones. It separates the "business logic" of consultation (prompt building, cost calculation) from the "implementation details" of calling a specific API or CLI.
+
+**B. Database Migration Framework**
+*   **Current State:** Database migrations in `packages/codev/src/agent-farm/db/index.ts` are handled via a growing list of inline `if (!vX) { ... }` blocks. This is error-prone and hard to read as the schema evolves.
+*   **Improvement:** Implement a structured migration system. Create a `migrations` directory with numbered files (e.g., `001_initial.ts`, `002_add_terminal_id.ts`). Use a lightweight migration runner to apply these in order.
+*   **Impact:** safer schema evolution, easier testing of database changes, and a cleaner startup routine for `Agent Farm`.
+
+**C. Unified Configuration Management**
+*   **Current State:** Pricing for models (e.g., `CODEX_PRICING`) and model CLI arguments are hardcoded in source files.
+*   **Improvement:** Move these configurations to a `codev.config.json` or `config/default.ts` file that can be overridden by user configuration.
+*   **Impact:** Allows users to update pricing or tweak model parameters without waiting for a package update. It also makes the system more adaptable to different environments.
+
+### 2. Robustness & Stability
+
+**A. Shellper Process Supervision**
+*   **Current State:** The `shellper` process (which persists terminal sessions) relies on `node-pty` and socket files. The `tower-server` attempts to clean up "orphaned" shellpers on startup, which suggests that process lifecycle management is a known pain point.
+*   **Improvement:** Implement a robust heartbeat mechanism between the `Tower` server and `shellper` processes. Instead of just checking for socket files, the server could maintain a registry of active PIDs and strictly manage their lifecycle.
+*   **Impact:** Fewer "zombie" processes, more reliable terminal reconnection, and less risk of accidental data loss (e.g., killing a valid shellper that was mistakenly identified as an orphan).
+
+**B. Graceful Error Handling in Tower Server**
+*   **Current State:** `packages/codev/src/agent-farm/servers/tower-server.ts` uses `process.exit(1)` immediately upon catching an uncaught exception.
+*   **Improvement:** Implement a graceful shutdown sequence even for uncaught exceptions. Attempt to close active WebSocket connections, flush pending logs to disk, and remove temporary socket files before exiting.
+*   **Impact:** Better debugging (logs are preserved), cleaner system state (no stale lock files), and a more professional runtime behavior.
+
+### 3. Developer Experience (DX)
+
+**A. Native "Porch" Checks**
+*   **Current State:** The `porch` command runs checks by spawning shell commands (`packages/codev/src/commands/porch/checks.ts`). This is flexible but relies on the host OS having specific tools (like `grep`, `ls`) and incurs shell overhead.
+*   **Improvement:** specific built-in check types (e.g., `type: file-exists`, `type: regex-match`, `type: json-valid`).
+*   **Impact:** Faster check execution, better cross-platform compatibility (Windows support), and more descriptive error messages for common validation tasks.
+
+**B. Refactor `consult` Logic**
+*   **Current State:** `packages/codev/src/commands/consult/index.ts` is a massive file (>800 lines) that handles CLI arguments, prompt construction, model execution, cost calculation, and metric recording.
+*   **Improvement:** Split this file into specialized modules:
+    *   `PromptBuilder`: Generates the markdown prompts for specs, plans, and reviews.
+    *   `CostCalculator`: Handles token counting and pricing logic.
+    *   `ConsultOrchestrator`: Ties everything together.
+*   **Impact:** Improves code readability and testability. It makes it much easier to unit test the prompt generation logic without mocking the entire CLI environment.
+
+### 4. Testing
+
+**A. Expand E2E Test Coverage for Agent Farm**
+*   **Current State:** There are E2E tests (`vitest.e2e.config.ts`), but `Agent Farm`'s complexity (multiple processes, WebSockets, terminals) makes it prone to regressions.
+*   **Improvement:** Add more scenario-based integration tests that simulate a full "Architect-Builder" workflow: spawning a builder, editing a file, running a review, and merging a PR.
+*   **Impact:** Catch regression bugs earlier, especially in the complex interaction between the `Tower` server and the `dashboard` UI.
+[gemini completed in 498.4s]

@@ -1,0 +1,31 @@
+Model: codex
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+============================================================
+[CODEX] Starting consultation...
+============================================================
+
+Here’s a focused, code‑referenced list of **potentially impactful improvements** based on a quick scan of the runtime‑critical areas (`tower` server, tunnel, file tabs, and API surface). I prioritized security, reliability, and test coverage.
+
+1. **Harden request authentication + origin validation** — `isRequestAllowed` currently always returns `true`, and CORS reflects any `https://` origin. With the tunnel enabled, that makes state‑changing endpoints reachable without a strong allowlist or auth gate. Add explicit allowlist logic (localhost + configured `server_url`), require an auth token/header on non‑GETs, and add tests. Files: `packages/codev/src/agent-farm/utils/server-utils.ts`, `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+2. **Restrict CORS to known origins (not any HTTPS)** — `handleRequest` currently allows any `https://` origin and reflects it back in `Access-Control-Allow-Origin`. Tighten to exact known origins (localhost + cloud host) and avoid reflecting arbitrary origins. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+3. **Prevent static‑file path traversal in workspace routes** — workspace dashboard serving uses `path.join(reactDashboardPath, subPath)` without ensuring the resolved path stays within the dashboard dist directory. Add `path.resolve` + prefix check before serving. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+4. **Stream large file responses and add size caps** — file endpoints read full file contents into memory with `fs.readFileSync` for both text and binary. Large files can cause high memory usage or blocking. Switch to streaming (`createReadStream`), add size caps, and return 413 for huge files. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+5. **Use `spawn` instead of `exec` for shelling out** — `execAsync` is used for `codev init` and `git status`. `exec` has output buffer limits and goes through a shell. Replace with `spawn` or `execa` to avoid shell injection risk and handle large output safely. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+6. **Add rate limiting beyond workspace activation** — only `/api/workspaces/:path/activate` is rate limited. Other mutating endpoints (`/api/send`, `/api/terminals`, `/api/notify`, `/api/create`, `/api/launch`, file saves) are currently unlimited. Extending rate limits reduces abuse risk when the tunnel is active. Files: `packages/codev/src/agent-farm/servers/tower-routes.ts`, `packages/codev/src/agent-farm/servers/tower-utils.ts`.
+
+7. **Cleanup for pasted image temp files** — `/api/paste-image` writes to `tmpdir()/codev-paste` with no TTL cleanup. Add periodic cleanup or cleanup on startup to avoid disk growth. File: `packages/codev/src/agent-farm/servers/tower-routes.ts`.
+
+8. **Resolve the file‑tab E2E test gap** — there’s a TODO to enable file‑tab coverage in the dashboard video E2E test. The API is implemented, so this test should be activated or updated to match current behavior. File: `packages/codev/src/agent-farm/__tests__/e2e/dashboard-video.test.ts`.
+
+If you want, I can turn any of these into a SPIR spec (or a BUGFIX issue if you already have one).
+[codex completed in 151.1s]

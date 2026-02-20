@@ -1,0 +1,133 @@
+Model: gemini
+
+============================================================
+PROMPT:
+============================================================
+Please analyze the codev codebase and give me a list of potential impactful improvements.
+
+You have file access. Read files directly from disk to review code.
+
+============================================================
+[GEMINI] Starting consultation...
+============================================================
+
+Error executing tool read_file: File not found.
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Attempt 1 failed with status 503. Retrying with backoff... ApiError: {"error":{"message":"{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n","code":503,"status":"Service Unavailable"}}
+    at throwErrorIfNotOK (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11716:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:11469:13
+    at async Models.generateContentStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/genai/dist/node/index.mjs:12859:24)
+    at async file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:143:26
+    at async retryWithBackoff (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:128:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:444:32)
+    at async GeminiChat.streamWithRetries (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40)
+    at async Turn.run (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/turn.js:67:30)
+    at async GeminiClient.processTurn (file:///opt/homebrew/Cellar/gemini-cli/0.29.0/libexec/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/client.js:475:26) {
+  status: 503
+}
+Based on my analysis of the `codev` codebase, here is a list of potential impactful improvements, categorized by area:
+
+### 1. Architecture & Code Quality
+
+*   **Refactor `consult` Command Logic**:
+    *   **Issue**: The `consult` command implementation (`packages/codev/src/commands/consult/index.ts`) is a monolithic function handling argument parsing, prompt construction, model selection, and execution.
+    *   **Improvement**: Refactor this into a **Strategy Pattern**. Create separate classes/modules for:
+        *   **Context Resolvers**: Specific logic for `builder` vs `architect` contexts.
+        *   **Model Adapters**: distinct classes for `Gemini`, `Claude`, `Codex` that implement a common interface (`consult(prompt, options)`).
+        *   **Prompt Builders**: Separate the prompt template logic from the execution logic, potentially using a lightweight template engine (like `handlebars` or just template literals in dedicated files) rather than inline string concatenation.
+    *   **Impact**: Makes adding new models or review types much easier and significantly improves testability.
+
+*   **Centralized Configuration Management**:
+    *   **Issue**: Configuration is scattered across `process.env`, CLI arguments (`commander`), and helper functions like `getConfig` in `utils`.
+    *   **Improvement**: Introduce a configuration library (like `zod` for validation + `dotenv` or `cosmiconfig`) to define a strictly typed configuration schema. Validate all required environment variables and paths at startup.
+    *   **Impact**: Prevents runtime errors due to missing configuration and provides a single source of truth for all config values.
+
+*   **Structured Logging**:
+    *   **Issue**: `tower-server.ts` uses a custom `log` function that prints to stdout and appends to a file. This is hard to parse programmatically.
+    *   **Improvement**: Replace custom logging with a structured logging library like **Pino** or **Winston**. Output logs in JSON format for easier ingestion by monitoring tools or the dashboard itself.
+    *   **Impact**: greatly improves debugging and observability, allowing for easier filtering and analysis of logs.
+
+### 2. Reliability & Error Handling
+
+*   **Robust Process Management**:
+    *   **Issue**: The server manages `shellper` processes directly. While there is logic to clean up orphans, relying on `process.exit` and signal handling in Node.js can be brittle.
+    *   **Improvement**: Consider using a dedicated process manager or enhancing the internal process supervisor to be more resilient. Ensure that `shellper` processes act as a true supervision tree, restarting if they crash unexpectedly (unless explicitly stopped).
+    *   **Impact**: Increases system stability, especially for long-running agent sessions.
+
+*   **Database Resilience**:
+    *   **Issue**: While `better-sqlite3` is used with WAL mode, heavy concurrent access (e.g., from multiple agents) could still lead to contention.
+    *   **Improvement**: meaningful usage of `busy_timeout` is present, but ensure all database interactions are wrapped in a robust retry mechanism (specifically for `SQLITE_BUSY` errors) to handle high-concurrency scenarios gracefully.
+
+### 3. Testing
+
+*   **Integration Testing**:
+    *   **Issue**: Existing tests (like `metrics.test.ts`) are good unit tests. However, there seems to be a lack of end-to-end integration tests that spin up the `tower-server` and verify API/WebSocket interactions.
+    *   **Improvement**: Add a suite of integration tests that:
+        1.  Start a test instance of `tower-server`.
+        2.  Connect a WebSocket client.
+        3.  Simulate agent/CLI commands.
+        4.  Verify state changes in the database and responses.
+    *   **Impact**: Catches regressions in the complex interaction between the CLI, Server, and Database that unit tests miss.
+
+*   **Mocking External Commands**:
+    *   **Issue**: The `consult` command relies heavily on `execSync` to call `git`, `gh`, etc. This makes tests slow and dependent on the environment.
+    *   **Improvement**: Abstract system calls into a wrapper service that can be easily mocked in tests. This allows testing failure modes (e.g., "what if git fails?") without needing to corrupt a real git repo.
+
+### 4. Features & Usability
+
+*   **Enhanced Metrics**:
+    *   **Issue**: Currently, metrics focus on consultation usage (tokens, cost).
+    *   **Improvement**: Expand `MetricsDB` to track:
+        *   **Build Success/Failure Rates**: How often do builds fail?
+        *   **Test Execution Time**: Are tests getting slower?
+        *   **Agent Performance**: How long do specific tasks take?
+    *   **Impact**: Provides insights into the development process itself, not just the AI tool usage.
+
+*   **Dashboard Improvements**:
+    *   **Issue**: The dashboard is a standard React app.
+    *   **Improvement**:
+        *   **Real-time Logs**: Stream agent logs via WebSockets directly to the dashboard for live debugging.
+        *   **Task Management**: Allow basic task management (cancel, restart) directly from the dashboard UI.
+
+### 5. Security
+
+*   **Input Sanitization**:
+    *   **Issue**: Arguments passed to `spawn` and `execSync` should be rigorously sanitized, especially if any part of them comes from user input (e.g., branch names, project paths).
+    *   **Improvement**: Ensure all file paths are resolved to safe directories and that command arguments are properly escaped or passed as arrays (which `spawn` does, but `execSync` does not).
+
+### 6. Code Hygiene
+
+*   **Remove Dead Code/Files**:
+    *   **Issue**: There are many plan files (`codev/plans/*.md`) and potentially unused templates.
+    *   **Improvement**: Archive completed plans and remove unused templates to keep the repository clean and navigable.
+
+*   **Standardize Dependency Management**:
+    *   **Issue**: `package.json` was missing from the root in the initial listing (though `package-lock.json` was there).
+    *   **Improvement**: Ensure the project structure is a standard Monorepo (using Workspaces) or a single package, and that `package.json` is consistently present and valid at the root.
+[gemini completed in 1023.9s]
