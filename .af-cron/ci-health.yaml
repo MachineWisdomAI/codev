@@ -5,7 +5,7 @@
 name: CI Health Check
 schedule: "*/30 * * * *"
 enabled: true
-command: gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length'
+command: gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length' || (sleep 5 && gh run list --limit 5 --json status,conclusion --jq '[.[] | select(.conclusion == "failure")] | length')
 condition: "output != '0'"
 message: "CI Alert: ${output} recent failure(s) on main. Run `gh run list --limit 5` to investigate."
 target: architect
