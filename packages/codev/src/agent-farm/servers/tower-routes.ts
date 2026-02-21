@@ -68,6 +68,9 @@ import {
   saveFileTab,
   deleteFileTab,
   getTerminalsForWorkspace,
+  getTerminalSessionById,
+  getActiveShellLabels,
+  updateTerminalLabel,
 } from './tower-terminals.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -174,7 +177,7 @@ export async function handleRequest(
   )) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store');
 
@@ -566,6 +569,81 @@ async function handleTerminalRoutes(
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(output));
+    return;
+  }
+
+  // PATCH /api/terminals/:id/rename - Rename terminal session (Spec 468)
+  if (req.method === 'PATCH' && subpath === '/rename') {
+    try {
+      const body = await parseJsonBody(req);
+      let name = body.name as string | undefined;
+      if (typeof name !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Name must be 1-100 characters' }));
+        return;
+      }
+
+      // Strip control characters
+      name = name.replace(/[\x00-\x1f\x7f]/g, '');
+
+      if (name.length === 0 || name.length > 100) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Name must be 1-100 characters' }));
+        return;
+      }
+
+      // Two-step ID lookup: direct PtySession ID match, then shellperSessionId match
+      let session = manager.getSession(terminalId);
+      if (!session) {
+        for (const info of manager.listSessions()) {
+          const candidate = manager.getSession(info.id);
+          if (candidate?.shellperSessionId === terminalId) {
+            session = candidate;
+            break;
+          }
+        }
+      }
+      if (!session) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found' }));
+        return;
+      }
+
+      // Look up terminal_sessions row to check type
+      const dbSession = getTerminalSessionById(session.id);
+      if (!dbSession) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found' }));
+        return;
+      }
+
+      if (dbSession.type !== 'shell') {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Cannot rename builder/architect terminals' }));
+        return;
+      }
+
+      // Dedup: check active shell labels in the same workspace, excluding current session
+      const otherLabels = new Set(getActiveShellLabels(dbSession.workspace_path, session.id));
+      let finalName = name;
+      if (otherLabels.has(name)) {
+        let suffix = 1;
+        while (otherLabels.has(`${name}-${suffix}`)) {
+          suffix++;
+        }
+        finalName = `${name}-${suffix}`;
+      }
+
+      // Update SQLite and in-memory
+      updateTerminalLabel(session.id, finalName);
+      session.label = finalName;
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: terminalId, name: finalName }));
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+    }
     return;
   }
 }
@@ -1293,7 +1371,7 @@ async function handleWorkspaceState(
     if (session) {
       state.utils.push({
         id: shellId,
-        name: `Shell ${shellId.replace('shell-', '')}`,
+        name: session.label,
         port: 0,
         pid: session.pid || 0,
         terminalId,
@@ -1357,6 +1435,9 @@ async function handleWorkspaceShellCreate(
         // Strip CLAUDECODE so spawned Claude processes don't detect nesting
         const shellEnv = { ...process.env } as Record<string, string>;
         delete shellEnv['CLAUDECODE'];
+        // Inject session identity for af rename (Spec 468)
+        shellEnv['SHELLPER_SESSION_ID'] = sessionId;
+        shellEnv['TOWER_PORT'] = String(ctx.port);
         const client = await shellperManager.createSession({
           sessionId,
           command: shellCmd,
@@ -1381,14 +1462,14 @@ async function handleWorkspaceShellCreate(
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           id: shellId,
           port: 0,
-          name: `Shell ${shellId.replace('shell-', '')}`,
+          name: session.label,
           terminalId: session.id,
           persistent: true,
         }));
@@ -1399,6 +1480,8 @@ async function handleWorkspaceShellCreate(
 
     // Fallback: non-persistent session (graceful degradation per plan)
     // Shellper is the only persistence backend for new sessions.
+    // Note: SHELLPER_SESSION_ID is not set for non-persistent sessions since
+    // they don't survive Tower restarts and rename wouldn't persist.
     if (!shellCreated) {
       const session = await manager.createSession({
         command: shellCmd,
@@ -1410,14 +1493,14 @@ async function handleWorkspaceShellCreate(
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label);
       ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         id: shellId,
         port: 0,
-        name: `Shell ${shellId.replace('shell-', '')}`,
+        name: session.label,
         terminalId: session.id,
         persistent: false,
       }));

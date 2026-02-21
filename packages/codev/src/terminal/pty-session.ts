@@ -40,7 +40,7 @@ export interface PtySessionInfo {
 
 export class PtySession extends EventEmitter {
   readonly id: string;
-  readonly label: string;
+  label: string;
   readonly createdAt: string;
   readonly ringBuffer: RingBuffer;
 
