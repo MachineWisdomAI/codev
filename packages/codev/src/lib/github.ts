@@ -88,7 +88,9 @@ export async function fetchPRList(cwd?: string): Promise<GitHubPR[] | null> {
       '--json', 'number,title,url,reviewDecision,body,createdAt',
     ], { cwd });
     return JSON.parse(stdout);
-  } catch {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchPRList failed (cwd=${cwd ?? 'none'}): ${msg}`);
     return null;
   }
 }
@@ -106,7 +108,9 @@ export async function fetchIssueList(cwd?: string): Promise<GitHubIssueListItem[
       '--limit', '200',
     ], { cwd });
     return JSON.parse(stdout);
-  } catch {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchIssueList failed (cwd=${cwd ?? 'none'}): ${msg}`);
     return null;
   }
 }
@@ -128,7 +132,9 @@ export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueList
     // Filter to last 24 hours
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     return issues.filter(i => i.closedAt && new Date(i.closedAt).getTime() >= cutoff);
-  } catch {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchRecentlyClosed failed (cwd=${cwd ?? 'none'}): ${msg}`);
     return null;
   }
 }
