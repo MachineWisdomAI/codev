@@ -80,14 +80,14 @@ Architect review"
 af send 0042 "PR approved, please merge"
 ```
 
-### Medium Risk: New Feature (180 lines, 5 files, commands/)
+### Medium Risk: New Feature (180 lines, 3 files, commands/)
 
 ```bash
 $ gh pr diff --stat 121
  packages/codev/src/commands/consult/risk.ts | 120 +++++++++++++
  packages/codev/src/cli.ts                    |  15 ++
  packages/codev/tests/unit/risk.test.ts       |  45 +++++
- 2 files changed, 180 insertions(+)
+ 3 files changed, 180 insertions(+)
 
 # Medium risk — single-model review
 consult -m claude --type integration pr 121
