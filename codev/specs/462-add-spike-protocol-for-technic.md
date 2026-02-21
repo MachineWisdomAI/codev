@@ -62,7 +62,8 @@ A lightweight `spike` protocol that:
 - [ ] Soft mode only — porch treats it as a no-orchestration protocol
 - [ ] No gates defined in protocol.json
 - [ ] Consultation disabled by default in protocol.json
-- [ ] Three phases defined: research, iterate, findings
+- [ ] protocol.json is minimal — single "spike" phase (schema requires ≥1), no orchestration
+- [ ] Three-step guidance (research, iterate, findings) documented in protocol.md and builder-prompt.md as recommended workflow, not porch-enforced phases
 - [ ] Output is a single findings document
 
 ## Constraints
@@ -81,12 +82,12 @@ A lightweight `spike` protocol that:
 - The protocol-schema.json supports a protocol with no gates (confirmed: bugfix has no gates; experiment has one informational gate but no approval gates)
 - `af spawn --protocol spike` will work once the protocol directory exists in codev-skeleton
 - Soft mode builders can follow protocol.md directly without porch orchestration
-- The `input` field can use type `task` (per protocol-schema.json enum: `spec`, `github-issue`, `task`, `protocol`, `shell`, `worktree`) with `required: false`
+- The `input` field supports type `task` (established by convention across existing protocols and defined in protocol-schema.json's `protocolInput` definition) with `required: false`
 
 ## Solution Approaches
 
 ### Approach 1: Three-Phase Linear Protocol (Recommended)
-**Description**: Define spike as a 3-phase protocol: research → iterate → findings. Each phase is `once` type. No gates, no consultation. Input type is `task` (task description comes from `af spawn --task "..." --protocol spike`). Output goes to `codev/spikes/` directory.
+**Description**: Define spike with a minimal protocol.json (single "spike" phase for schema compliance) and a 3-step recommended workflow (research → iterate → findings) documented in protocol.md as guidance. No gates, no consultation, no porch orchestration. Input type is `task` (task description comes from `af spawn --task "..." --protocol spike`). Output goes to `codev/spikes/` directory. The builder follows the guidance phases at their discretion — they can skip iterate if the answer is clear from research alone.
 
 **Pros**:
 - Matches the issue description exactly (Research, Iterate, Findings)
@@ -95,7 +96,7 @@ A lightweight `spike` protocol that:
 - Clean semantic separation: reviews are retrospective, spikes are prospective
 
 **Cons**:
-- Adds a new `codev/spikes/` directory convention
+- Adds a new `codev/spikes/` directory convention (note: `codev-skeleton/spikes/` already exists with `.gitkeep`, so projects using `codev init`/`codev adopt` will already have it)
 - Projects adopting codev need to know about one more directory
 
 **Estimated Complexity**: Low
@@ -139,7 +140,7 @@ A lightweight `spike` protocol that:
 - [x] Output directory: `codev/spikes/` vs `codev/reviews/` — Recommending `codev/spikes/`
 
 ### Important (Affects Design)
-- [x] Should `codev init` / `codev adopt` create the `codev/spikes/` directory? Or create it on first spike? — Create on first spike. Adding a new directory to init/adopt requires changes to the codev CLI, which is out of scope. The builder-prompt can instruct the builder to `mkdir -p codev/spikes/` when writing findings.
+- [x] Should `codev init` / `codev adopt` create the `codev/spikes/` directory? Or create it on first spike? — Already handled. `codev-skeleton/spikes/` already exists with a `.gitkeep`, so projects using `codev init`/`codev adopt` will already have the directory. No additional work needed.
 - [x] What input type to use in protocol.json? — Use `task` (not `none`). The `task` type is in the protocol schema enum and matches the spawn pattern `af spawn --task "Can we do X?" --protocol spike`. Unlike experiments, spikes are specifically driven by a task/question.
 
 ### Nice-to-Know (Optimization)
@@ -174,33 +175,62 @@ A lightweight `spike` protocol that:
 
 ## Protocol Design Details
 
-### Phase Structure
+### protocol.json Structure
 
-**Phase 1: Research**
+The protocol.json is intentionally minimal. Since the protocol schema requires at least one phase (`minItems: 1`), we define a single "spike" phase. This phase is NOT orchestrated by porch — it exists purely for schema compliance.
+
+```json
+{
+  "name": "spike",
+  "version": "1.0.0",
+  "description": "Time-boxed technical feasibility exploration",
+  "input": { "type": "task", "required": false },
+  "phases": [
+    {
+      "id": "spike",
+      "name": "Spike",
+      "type": "once",
+      "description": "Execute the spike — research, iterate, write findings"
+    }
+  ],
+  "defaults": {
+    "mode": "soft",
+    "consultation": { "enabled": false }
+  }
+}
+```
+
+No gates, no consultation config, no transitions, no hooks. The simplest valid protocol.
+
+### Recommended Workflow (Guidance Only)
+
+The following 3-step workflow is documented in protocol.md and builder-prompt.md as **recommended guidance**. It is NOT enforced by porch. The builder can follow it, skip steps, or reorder as they see fit.
+
+**Step 1: Research**
 - Read documentation, examine existing code, search for prior art
 - Identify constraints, dependencies, and potential blockers
 - Understand the problem space before writing any code
-- Steps: `explore`, `document_constraints`
 
-**Phase 2: Iterate**
+**Step 2: Iterate**
 - Build minimal proof-of-concept code
 - Try different approaches, hit walls, pivot
 - Focus on answering the feasibility question, not building production code
-- Steps: `prototype`, `test_approaches`
+- **Can be skipped** if the answer is clear from research alone
 
-**Phase 3: Findings**
-- Document what was learned
+**Step 3: Findings**
+- Document what was learned in `codev/spikes/<id>-<name>.md`
 - Provide a clear feasibility verdict (feasible / not feasible / feasible with caveats)
 - Recommend an approach if feasible
 - Estimate effort for full implementation
-- Steps: `write_findings`, `commit`
+- Commit and notify architect
 
 ### Protocol Properties
 - **Mode**: `soft` (default and only mode — no strict/porch orchestration)
 - **Consultation**: Disabled by default
 - **Gates**: None
 - **Input**: Type `task` — task description provided via `af spawn --task "..." --protocol spike`
-- **Signals**: `PHASE_COMPLETE`, `BLOCKED`
+- **Hooks**: None
+- **Signals**: `PHASE_COMPLETE`, `BLOCKED` (for convention, though not porch-tracked)
 
 ### Findings Document Naming Convention
 Findings are stored in `codev/spikes/` using the pattern: `<id>-<descriptive-name>.md`
@@ -268,8 +298,12 @@ The builder-prompt.md should emphasize:
 4. **Handlebars templating convention**: Added — documented template variables
 5. **POC code disposition**: Added — committed to branch as evidence, not merged to main
 
+### Architect Feedback
+1. **Phases are guidance only**: The 3 phases (research, iterate, findings) are recommended in protocol.md as guidance, not formal porch phases in protocol.json. protocol.json should be minimal — single "spike" phase for schema compliance, no orchestration. Builder can follow or skip steps as needed.
+2. **Resolution**: Restructured protocol design to use minimal protocol.json with single phase + guidance-only workflow in protocol.md/builder-prompt.md.
+
 ## Approval
-- [ ] Technical Lead Review
+- [x] Technical Lead Review (architect feedback incorporated)
 - [x] Expert AI Consultation Complete
 
 ## Notes
