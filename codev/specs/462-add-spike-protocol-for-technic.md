@@ -78,7 +78,7 @@ A lightweight `spike` protocol that:
 - Must not add complexity to existing protocols
 
 ## Assumptions
-- The protocol-schema.json supports a protocol with no gates (confirmed: bugfix and experiment have no gates)
+- The protocol-schema.json supports a protocol with no gates (confirmed: bugfix has no gates; experiment has one informational gate but no approval gates)
 - `af spawn --protocol spike` will work once the protocol directory exists in codev-skeleton
 - Soft mode builders can follow protocol.md directly without porch orchestration
 - The `input` field can use type `task` (per protocol-schema.json enum: `spec`, `github-issue`, `task`, `protocol`, `shell`, `worktree`) with `required: false`
@@ -202,6 +202,15 @@ A lightweight `spike` protocol that:
 - **Input**: Type `task` — task description provided via `af spawn --task "..." --protocol spike`
 - **Signals**: `PHASE_COMPLETE`, `BLOCKED`
 
+### Findings Document Naming Convention
+Findings are stored in `codev/spikes/` using the pattern: `<id>-<descriptive-name>.md`
+
+Examples:
+- `codev/spikes/462-spike-websocket-feasibility.md`
+- `codev/spikes/475-spike-sqlite-fts-performance.md`
+
+The `<id>` is the GitHub issue number or project ID. The builder creates the `codev/spikes/` directory if it doesn't exist (`mkdir -p codev/spikes/`).
+
 ### Findings Template Structure
 The findings document should include:
 - **Question**: What technical question was being investigated?
@@ -211,7 +220,29 @@ The findings document should include:
 - **Constraints Discovered**: Technical limitations, dependencies, gotchas
 - **Recommended Approach**: If feasible, how should full implementation proceed?
 - **Effort Estimate**: Rough sizing for a full SPIR project (small/medium/large)
+- **Next Steps**: Explicit recommendation — e.g., "Create SPIR spec for X" or "Do not pursue — blocked by Y"
 - **References**: Links to relevant docs, code, and resources
+
+### Proof-of-Concept Code Disposition
+POC code from the iterate phase should be committed to the branch alongside the findings document. It serves as evidence supporting the findings. However:
+- POC code does NOT need tests, polish, or production quality
+- POC code does NOT get merged to main — it stays on the spike branch
+- The findings document is the primary deliverable; the code is supporting evidence
+- If the spike leads to a SPIR project, the builder starts fresh (POC informs design but isn't reused directly)
+
+### Outcome Handling
+- **Feasible**: Write findings with recommended approach and effort estimate. Architect decides whether to create a SPIR project.
+- **Not Feasible**: Write findings documenting why it's not feasible, what was tried, and what alternatives exist. This is still a valuable output — it prevents future teams from wasting time on the same investigation.
+- **Feasible with Caveats**: Write findings with conditions, risks, and trade-offs. Include what would need to change for full feasibility.
+
+In all cases, the builder commits the findings document and notifies the architect via `af send architect "Spike 462 complete. Verdict: [feasible/not feasible/caveats]"`.
+
+### Builder Prompt Conventions
+The builder-prompt.md uses Handlebars templating (consistent with all other protocols):
+- `{{protocol_name}}` — protocol identifier
+- `{{#if mode_soft}}` / `{{#if mode_strict}}` — mode conditionals
+- `{{task_text}}` — the task description from `af spawn --task "..."`
+- `{{spec_path}}`, `{{plan_path}}` — artifact paths (not used for spike since no spec/plan)
 
 ### Builder Prompt Emphasis
 The builder-prompt.md should emphasize:
@@ -220,9 +251,26 @@ The builder-prompt.md should emphasize:
 - **Clear output**: The findings document is the deliverable, not the code
 - **Know when to stop**: Once you can answer the feasibility question, write findings and stop
 
+## Expert Consultation
+
+**Date**: 2026-02-21
+**Models Consulted**: Gemini, Claude (Codex did not produce output)
+
+### Gemini Feedback (REQUEST_CHANGES)
+1. **Directory scaffolding**: Resolved — create on first use, not via init/adopt
+2. **Input type**: Resolved — use `task` type per schema enum
+3. **Success criteria incomplete**: Added that builder-prompt must use Handlebars templating
+
+### Claude Feedback (COMMENT)
+1. **Incorrect gate claim**: Fixed — experiment DOES have a gate (`experiment-complete`). Corrected to cite only bugfix as gate-free.
+2. **Input type `none` contradiction**: Resolved — changed to `task` which is in schema enum
+3. **Findings naming convention**: Added — `<id>-spike-<name>.md` pattern
+4. **Handlebars templating convention**: Added — documented template variables
+5. **POC code disposition**: Added — committed to branch as evidence, not merged to main
+
 ## Approval
 - [ ] Technical Lead Review
-- [ ] Expert AI Consultation Complete
+- [x] Expert AI Consultation Complete
 
 ## Notes
 - The spike protocol fills the gap between EXPERIMENT (formal hypothesis testing) and ad-hoc exploration
