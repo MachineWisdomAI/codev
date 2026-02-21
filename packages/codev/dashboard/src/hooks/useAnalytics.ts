@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchStatistics } from '../lib/api.js';
-import type { StatisticsResponse } from '../lib/api.js';
+import { fetchAnalytics } from '../lib/api.js';
+import type { AnalyticsResponse } from '../lib/api.js';
 
-type RangeLabel = '7d' | '30d' | 'all';
+type RangeLabel = '24h' | '7d' | '30d' | 'all';
 
 function rangeToParam(range: RangeLabel): string {
+  if (range === '24h') return '1';
   if (range === '7d') return '7';
   if (range === '30d') return '30';
   return 'all';
 }
 
-export function useStatistics(isActive: boolean) {
-  const [data, setData] = useState<StatisticsResponse | null>(null);
+export function useAnalytics(isActive: boolean) {
+  const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<RangeLabel>('7d');
@@ -20,10 +21,10 @@ export function useStatistics(isActive: boolean) {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchStatistics(rangeToParam(r), bypass);
+      const result = await fetchAnalytics(rangeToParam(r), bypass);
       setData(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch statistics');
+      setError(err instanceof Error ? err.message : 'Failed to fetch analytics');
     } finally {
       setLoading(false);
     }

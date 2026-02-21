@@ -52,7 +52,7 @@ import {
   stopInstance,
 } from './tower-instances.js';
 import { OverviewCache } from './overview.js';
-import { computeStatistics } from './statistics.js';
+import { computeAnalytics } from './analytics.js';
 import { getAllTasks, executeTask, getTaskId } from './tower-cron.js';
 import { getGlobalDb } from '../db/index.js';
 import type { CronTask } from './tower-cron.js';
@@ -137,7 +137,7 @@ const ROUTES: Record<string, RouteEntry> = {
   'GET /api/terminals':   (_req, res) => handleTerminalList(res),
   'GET /api/status':      (_req, res) => handleStatus(res),
   'GET /api/overview':    (_req, res, url) => handleOverview(res, url),
-  'GET /api/statistics':  (_req, res, url) => handleStatistics(res, url),
+  'GET /api/analytics':   (_req, res, url) => handleAnalytics(res, url),
   'POST /api/overview/refresh': (_req, res, _url, ctx) => handleOverviewRefresh(res, ctx),
   'GET /api/events':      (req, res, _url, ctx) => handleSSEEvents(req, res, ctx),
   'POST /api/notify':     (req, res, _url, ctx) => handleNotify(req, res, ctx),
@@ -619,7 +619,7 @@ function handleOverviewRefresh(res: http.ServerResponse, ctx?: RouteContext): vo
   res.end(JSON.stringify({ ok: true }));
 }
 
-async function handleStatistics(res: http.ServerResponse, url: URL, workspaceOverride?: string): Promise<void> {
+async function handleAnalytics(res: http.ServerResponse, url: URL, workspaceOverride?: string): Promise<void> {
   let workspaceRoot = workspaceOverride || url.searchParams.get('workspace');
 
   if (!workspaceRoot) {
@@ -629,20 +629,20 @@ async function handleStatistics(res: http.ServerResponse, url: URL, workspaceOve
 
   // Validate range parameter (before workspace check so fallback uses correct range)
   const rangeParam = url.searchParams.get('range') ?? '7';
-  if (!['7', '30', 'all'].includes(rangeParam)) {
+  if (!['1', '7', '30', 'all'].includes(rangeParam)) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Invalid range. Must be 7, 30, or all.' }));
+    res.end(JSON.stringify({ error: 'Invalid range. Must be 1, 7, 30, or all.' }));
     return;
   }
 
-  const rangeLabel = rangeParam === 'all' ? 'all' : `${rangeParam}d`;
+  const rangeLabel = rangeParam === 'all' ? 'all' : rangeParam === '1' ? '24h' : `${rangeParam}d`;
 
   if (!workspaceRoot) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ timeRange: rangeLabel, github: { prsMerged: 0, avgTimeToMergeHours: null, bugBacklog: 0, nonBugBacklog: 0, issuesClosed: 0, avgTimeToCloseBugsHours: null }, builders: { projectsCompleted: 0, throughputPerWeek: 0, activeBuilders: 0 }, consultation: { totalCount: 0, totalCostUsd: null, costByModel: {}, avgLatencySeconds: null, successRate: null, byModel: [], byReviewType: {}, byProtocol: {}, costByProject: [] } }));
     return;
   }
-  const range = rangeParam as '7' | '30' | 'all';
+  const range = rangeParam as '1' | '7' | '30' | 'all';
   const refresh = url.searchParams.get('refresh') === '1';
 
   // Get active builder count from workspace terminals
@@ -650,7 +650,7 @@ async function handleStatistics(res: http.ServerResponse, url: URL, workspaceOve
   const entry = wsTerminals.get(normalizeWorkspacePath(workspaceRoot));
   const activeBuilders = entry?.builders.size ?? 0;
 
-  const data = await computeStatistics(workspaceRoot, range, activeBuilders, refresh);
+  const data = await computeAnalytics(workspaceRoot, range, activeBuilders, refresh);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
@@ -1246,9 +1246,9 @@ async function handleWorkspaceRoutes(
       return handleOverviewRefresh(res, ctx);
     }
 
-    // GET /api/statistics - Dashboard statistics (Spec 456)
-    if (req.method === 'GET' && apiPath === 'statistics') {
-      return handleStatistics(res, url, workspacePath);
+    // GET /api/analytics - Dashboard analytics (Spec 456)
+    if (req.method === 'GET' && apiPath === 'analytics') {
+      return handleAnalytics(res, url, workspacePath);
     }
 
     // GET /api/events - SSE push notifications (Bugfix #388)

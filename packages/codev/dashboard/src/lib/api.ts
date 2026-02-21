@@ -136,10 +136,10 @@ export interface OverviewData {
   errors?: { prs?: string; issues?: string };
 }
 
-// Spec 456: Statistics tab types and fetcher
+// Spec 456: Analytics tab types and fetcher
 
-export interface StatisticsResponse {
-  timeRange: '7d' | '30d' | 'all';
+export interface AnalyticsResponse {
+  timeRange: '24h' | '7d' | '30d' | 'all';
   github: {
     prsMerged: number;
     avgTimeToMergeHours: number | null;
@@ -179,11 +179,11 @@ export interface StatisticsResponse {
   };
 }
 
-export async function fetchStatistics(range: string, refresh?: boolean): Promise<StatisticsResponse> {
+export async function fetchAnalytics(range: string, refresh?: boolean): Promise<AnalyticsResponse> {
   const params = new URLSearchParams({ range });
   if (refresh) params.set('refresh', '1');
-  const res = await fetch(apiUrl(`api/statistics?${params}`), { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error(`Failed to fetch statistics: ${res.status}`);
+  const res = await fetch(apiUrl(`api/analytics?${params}`), { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`Failed to fetch analytics: ${res.status}`);
   return res.json();
 }
 

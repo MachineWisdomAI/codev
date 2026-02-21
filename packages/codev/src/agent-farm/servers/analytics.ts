@@ -1,5 +1,5 @@
 /**
- * Statistics aggregation service for the dashboard Statistics tab.
+ * Analytics aggregation service for the dashboard Analytics tab.
  *
  * Aggregates data from three sources:
  * - GitHub CLI (merged PRs, closed issues, open issue backlogs)
@@ -24,8 +24,8 @@ import { MetricsDB } from '../../commands/consult/metrics.js';
 // Types
 // =============================================================================
 
-export interface StatisticsResponse {
-  timeRange: '7d' | '30d' | 'all';
+export interface AnalyticsResponse {
+  timeRange: '24h' | '7d' | '30d' | 'all';
   github: {
     prsMerged: number;
     avgTimeToMergeHours: number | null;
@@ -70,14 +70,14 @@ export interface StatisticsResponse {
 // =============================================================================
 
 interface CacheEntry {
-  data: StatisticsResponse;
+  data: AnalyticsResponse;
   timestamp: number;
 }
 
 const CACHE_TTL_MS = 60_000; // 60 seconds
 const cache = new Map<string, CacheEntry>();
 
-export function clearStatisticsCache(): void {
+export function clearAnalyticsCache(): void {
   cache.clear();
 }
 
@@ -85,16 +85,18 @@ export function clearStatisticsCache(): void {
 // Range helpers
 // =============================================================================
 
-type RangeParam = '7' | '30' | 'all';
-type TimeRangeLabel = '7d' | '30d' | 'all';
+type RangeParam = '1' | '7' | '30' | 'all';
+type TimeRangeLabel = '24h' | '7d' | '30d' | 'all';
 
 function rangeToLabel(range: RangeParam): TimeRangeLabel {
+  if (range === '1') return '24h';
   if (range === '7') return '7d';
   if (range === '30') return '30d';
   return 'all';
 }
 
 function rangeToDays(range: RangeParam): number | undefined {
+  if (range === '1') return 1;
   if (range === '7') return 7;
   if (range === '30') return 30;
   return undefined;
@@ -108,6 +110,7 @@ function rangeToSinceDate(range: RangeParam): string | null {
 }
 
 function rangeToWeeks(range: RangeParam): number {
+  if (range === '1') return 1 / 7;
   if (range === '7') return 1;
   if (range === '30') return 30 / 7;
   // For "all", we can't know the true range without data, so return 1
@@ -283,19 +286,19 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
 // =============================================================================
 
 /**
- * Compute statistics for the dashboard Statistics tab.
+ * Compute analytics for the dashboard Analytics tab.
  *
  * @param workspaceRoot - Path to the workspace root (used as cwd for gh CLI)
- * @param range - Time range: '7', '30', or 'all'
+ * @param range - Time range: '1', '7', '30', or 'all'
  * @param activeBuilders - Current active builder count (from tower context)
  * @param refresh - If true, bypass the cache
  */
-export async function computeStatistics(
+export async function computeAnalytics(
   workspaceRoot: string,
   range: RangeParam,
   activeBuilders: number,
   refresh = false,
-): Promise<StatisticsResponse> {
+): Promise<AnalyticsResponse> {
   const cacheKey = `${workspaceRoot}:${range}`;
 
   // Check cache
@@ -349,7 +352,7 @@ export async function computeStatistics(
     };
   }
 
-  const result: StatisticsResponse = {
+  const result: AnalyticsResponse = {
     timeRange: rangeToLabel(range),
     github: {
       prsMerged: githubMetrics.prsMerged,

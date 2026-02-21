@@ -1,7 +1,7 @@
 /**
- * Unit tests for the statistics service (Spec 456, Phase 1).
+ * Unit tests for the analytics service (Spec 456, Phase 1).
  *
- * Tests computeStatistics() with mocked GitHub CLI and MetricsDB.
+ * Tests computeAnalytics() with mocked GitHub CLI and MetricsDB.
  * Tests fetchMergedPRs/fetchClosedIssues via child_process mock.
  *
  * costByProject integration tests live in consult/__tests__/metrics.test.ts.
@@ -26,7 +26,7 @@ vi.mock('node:util', () => ({
   promisify: () => execFileMock,
 }));
 
-// Mock MetricsDB (for consultation metrics in statistics.ts)
+// Mock MetricsDB (for consultation metrics in analytics.ts)
 vi.mock('../../commands/consult/metrics.js', () => ({
   MetricsDB: class MockMetricsDB {
     summary = mockSummary;
@@ -40,7 +40,7 @@ vi.mock('../../commands/consult/metrics.js', () => ({
 // ---------------------------------------------------------------------------
 
 import { fetchMergedPRs, fetchClosedIssues } from '../../lib/github.js';
-import { computeStatistics, clearStatisticsCache } from '../servers/statistics.js';
+import { computeAnalytics, clearAnalyticsCache } from '../servers/analytics.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -194,12 +194,12 @@ describe('fetchClosedIssues', () => {
 });
 
 // ---------------------------------------------------------------------------
-// computeStatistics
+// computeAnalytics
 // ---------------------------------------------------------------------------
 
-describe('computeStatistics', () => {
+describe('computeAnalytics', () => {
   beforeEach(() => {
-    clearStatisticsCache();
+    clearAnalyticsCache();
     vi.clearAllMocks();
     mockSummary.mockReturnValue(defaultSummary());
     mockCostByProject.mockReturnValue(defaultCostByProject());
@@ -222,7 +222,7 @@ describe('computeStatistics', () => {
       ]),
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 3);
+    const result = await computeAnalytics('/tmp/workspace', '7', 3);
 
     expect(result.timeRange).toBe('7d');
     expect(result.github.prsMerged).toBe(2);
@@ -248,21 +248,27 @@ describe('computeStatistics', () => {
     expect(result.errors).toBeUndefined();
   });
 
+  it('returns 24h label for range "1"', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
+    const result = await computeAnalytics('/tmp/workspace', '1', 0);
+    expect(result.timeRange).toBe('24h');
+  });
+
   it('returns 30d label for range "30"', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-    const result = await computeStatistics('/tmp/workspace', '30', 0);
+    const result = await computeAnalytics('/tmp/workspace', '30', 0);
     expect(result.timeRange).toBe('30d');
   });
 
   it('returns all label for range "all"', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-    const result = await computeStatistics('/tmp/workspace', 'all', 0);
+    const result = await computeAnalytics('/tmp/workspace', 'all', 0);
     expect(result.timeRange).toBe('all');
   });
 
   it('passes null since date for "all" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-    await computeStatistics('/tmp/workspace', 'all', 0);
+    await computeAnalytics('/tmp/workspace', 'all', 0);
 
     const prCall = execFileMock.mock.calls.find(
       (c: unknown[]) => (c[1] as string[]).includes('merged'),
@@ -273,7 +279,7 @@ describe('computeStatistics', () => {
 
   it('passes a date string for "7" range', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-    await computeStatistics('/tmp/workspace', '7', 0);
+    await computeAnalytics('/tmp/workspace', '7', 0);
 
     const prCall = execFileMock.mock.calls.find(
       (c: unknown[]) => (c[1] as string[]).includes('merged'),
@@ -290,7 +296,7 @@ describe('computeStatistics', () => {
   it('returns GitHub defaults and error when all GitHub calls fail', async () => {
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
-    const result = await computeStatistics('/tmp/workspace', '7', 2);
+    const result = await computeAnalytics('/tmp/workspace', '7', 2);
 
     expect(result.errors?.github).toBeDefined();
     expect(result.github.prsMerged).toBe(0);
@@ -313,7 +319,7 @@ describe('computeStatistics', () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
     mockSummary.mockImplementation(() => { throw new Error('DB file not found'); });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
 
     expect(result.errors?.consultation).toBe('DB file not found');
     expect(result.consultation.totalCount).toBe(0);
@@ -338,7 +344,7 @@ describe('computeStatistics', () => {
     });
     mockCostByProject.mockReturnValue([]);
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
 
     expect(result.github.avgTimeToMergeHours).toBeNull();
     expect(result.github.avgTimeToCloseBugsHours).toBeNull();
@@ -358,7 +364,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.builders.projectsCompleted).toBe(1);
   });
 
@@ -371,7 +377,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.builders.projectsCompleted).toBe(2); // Both #42 and #73
   });
 
@@ -385,7 +391,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.builders.projectsCompleted).toBe(1);
   });
 
@@ -398,7 +404,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.builders.projectsCompleted).toBe(3);
   });
 
@@ -414,7 +420,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.github.avgTimeToCloseBugsHours).toBeCloseTo(24);
   });
 
@@ -430,7 +436,7 @@ describe('computeStatistics', () => {
       ],
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.consultation.costByModel).toEqual({ codex: 3.50 });
   });
 
@@ -439,8 +445,8 @@ describe('computeStatistics', () => {
   it('returns cached result on second call within TTL', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
 
-    const result1 = await computeStatistics('/tmp/workspace', '7', 3);
-    const result2 = await computeStatistics('/tmp/workspace', '7', 3);
+    const result1 = await computeAnalytics('/tmp/workspace', '7', 3);
+    const result2 = await computeAnalytics('/tmp/workspace', '7', 3);
 
     expect(result1).toBe(result2);
     expect(mockSummary).toHaveBeenCalledTimes(1);
@@ -449,8 +455,8 @@ describe('computeStatistics', () => {
   it('bypasses cache when refresh=true', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
 
-    await computeStatistics('/tmp/workspace', '7', 3);
-    await computeStatistics('/tmp/workspace', '7', 3, true);
+    await computeAnalytics('/tmp/workspace', '7', 3);
+    await computeAnalytics('/tmp/workspace', '7', 3, true);
 
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
@@ -458,8 +464,8 @@ describe('computeStatistics', () => {
   it('does not share cache between different ranges', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
 
-    await computeStatistics('/tmp/workspace', '7', 3);
-    await computeStatistics('/tmp/workspace', '30', 3);
+    await computeAnalytics('/tmp/workspace', '7', 3);
+    await computeAnalytics('/tmp/workspace', '30', 3);
 
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
@@ -478,7 +484,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '30', 0);
+    const result = await computeAnalytics('/tmp/workspace', '30', 0);
     const expected = Math.round((4 / (30 / 7)) * 10) / 10;
     expect(result.builders.throughputPerWeek).toBeCloseTo(expected, 1);
   });
@@ -493,7 +499,7 @@ describe('computeStatistics', () => {
       openIssues: '[]',
     });
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
     expect(result.builders.throughputPerWeek).toBe(2);
   });
 });
