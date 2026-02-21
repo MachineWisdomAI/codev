@@ -4,17 +4,21 @@
  * Tests computeStatistics() with mocked GitHub CLI and MetricsDB.
  * Tests fetchMergedPRs/fetchClosedIssues via child_process mock.
  *
- * costByProject tests live in consult/__tests__/metrics.test.ts
- * since they test a MetricsDB method directly.
+ * costByProject integration tests live in consult/__tests__/metrics.test.ts.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock child_process for GitHub CLI calls
+// Hoisted mocks — declared before all imports
 // ---------------------------------------------------------------------------
 
 const execFileMock = vi.hoisted(() => vi.fn());
+const mockSummary = vi.hoisted(() => vi.fn());
+const mockCostByProject = vi.hoisted(() => vi.fn());
+const mockClose = vi.hoisted(() => vi.fn());
+
+// Mock child_process + util (for GitHub CLI calls in github.ts)
 vi.mock('node:child_process', () => ({
   execFile: execFileMock,
 }));
@@ -22,14 +26,7 @@ vi.mock('node:util', () => ({
   promisify: () => execFileMock,
 }));
 
-// ---------------------------------------------------------------------------
-// Mock MetricsDB for computeStatistics tests
-// ---------------------------------------------------------------------------
-
-const mockSummary = vi.hoisted(() => vi.fn());
-const mockCostByProject = vi.hoisted(() => vi.fn());
-const mockClose = vi.hoisted(() => vi.fn());
-
+// Mock MetricsDB (for consultation metrics in statistics.ts)
 vi.mock('../../commands/consult/metrics.js', () => ({
   MetricsDB: class MockMetricsDB {
     summary = mockSummary;
@@ -39,42 +36,11 @@ vi.mock('../../commands/consult/metrics.js', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Imports (after mocks)
+// Static imports (resolved after mocks are hoisted)
 // ---------------------------------------------------------------------------
 
-// Re-import after mocking to get mocked versions
-let fetchMergedPRs: typeof import('../../lib/github.js').fetchMergedPRs;
-let fetchClosedIssues: typeof import('../../lib/github.js').fetchClosedIssues;
-let computeStatistics: typeof import('../servers/statistics.js').computeStatistics;
-let clearStatisticsCache: typeof import('../servers/statistics.js').clearStatisticsCache;
-
-beforeEach(async () => {
-  vi.resetModules();
-  vi.clearAllMocks();
-
-  // Re-mock after resetModules
-  vi.mock('node:child_process', () => ({
-    execFile: execFileMock,
-  }));
-  vi.mock('node:util', () => ({
-    promisify: () => execFileMock,
-  }));
-  vi.mock('../../commands/consult/metrics.js', () => ({
-    MetricsDB: class MockMetricsDB {
-      summary = mockSummary;
-      costByProject = mockCostByProject;
-      close = mockClose;
-    },
-  }));
-
-  const github = await import('../../lib/github.js');
-  fetchMergedPRs = github.fetchMergedPRs;
-  fetchClosedIssues = github.fetchClosedIssues;
-
-  const stats = await import('../servers/statistics.js');
-  computeStatistics = stats.computeStatistics;
-  clearStatisticsCache = stats.clearStatisticsCache;
-});
+import { fetchMergedPRs, fetchClosedIssues } from '../../lib/github.js';
+import { computeStatistics, clearStatisticsCache } from '../servers/statistics.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,15 +50,12 @@ function mockGhOutput(responses: Record<string, string>) {
   execFileMock.mockImplementation((_cmd: string, args: string[]) => {
     const argsStr = args.join(' ');
 
-    // Match PR list --state merged
     if (argsStr.includes('pr') && argsStr.includes('list') && argsStr.includes('merged')) {
       return Promise.resolve({ stdout: responses.mergedPRs ?? '[]' });
     }
-    // Match issue list --state closed
     if (argsStr.includes('issue') && argsStr.includes('list') && argsStr.includes('closed')) {
       return Promise.resolve({ stdout: responses.closedIssues ?? '[]' });
     }
-    // Match issue list (open)
     if (argsStr.includes('issue') && argsStr.includes('list') && !argsStr.includes('closed')) {
       return Promise.resolve({ stdout: responses.openIssues ?? '[]' });
     }
@@ -136,6 +99,10 @@ function defaultCostByProject() {
 // ---------------------------------------------------------------------------
 
 describe('fetchMergedPRs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('returns parsed merged PRs from gh CLI', async () => {
     const prs = [
       { number: 1, title: 'PR 1', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42' },
@@ -192,6 +159,10 @@ describe('fetchMergedPRs', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetchClosedIssues', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('returns parsed closed issues from gh CLI', async () => {
     const issues = [
       { number: 42, title: 'Bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-11T00:00:00Z', labels: [{ name: 'bug' }] },
@@ -229,53 +200,46 @@ describe('fetchClosedIssues', () => {
 describe('computeStatistics', () => {
   beforeEach(() => {
     clearStatisticsCache();
+    vi.clearAllMocks();
     mockSummary.mockReturnValue(defaultSummary());
     mockCostByProject.mockReturnValue(defaultCostByProject());
   });
 
   it('assembles full statistics from all data sources', async () => {
-    const mergedPRs = [
-      { number: 1, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T12:00:00Z', body: 'Closes #42' },
-      { number: 2, title: '[Spec 73] Other', createdAt: '2026-02-12T00:00:00Z', mergedAt: '2026-02-13T00:00:00Z', body: '' },
-    ];
-    const closedIssues = [
-      { number: 42, title: 'Bug fix', createdAt: '2026-02-08T00:00:00Z', closedAt: '2026-02-11T12:00:00Z', labels: [{ name: 'bug' }] },
-      { number: 50, title: 'Feature', createdAt: '2026-02-09T00:00:00Z', closedAt: '2026-02-12T00:00:00Z', labels: [] },
-    ];
-    const openIssues = [
-      { number: 100, title: 'Open bug', url: '', labels: [{ name: 'bug' }], createdAt: '2026-02-01T00:00:00Z' },
-      { number: 101, title: 'Open feature', url: '', labels: [], createdAt: '2026-02-02T00:00:00Z' },
-      { number: 102, title: 'Another feature', url: '', labels: [], createdAt: '2026-02-03T00:00:00Z' },
-    ];
-
     mockGhOutput({
-      mergedPRs: JSON.stringify(mergedPRs),
-      closedIssues: JSON.stringify(closedIssues),
-      openIssues: JSON.stringify(openIssues),
+      mergedPRs: JSON.stringify([
+        { number: 1, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T12:00:00Z', body: 'Closes #42' },
+        { number: 2, title: '[Spec 73] Other', createdAt: '2026-02-12T00:00:00Z', mergedAt: '2026-02-13T00:00:00Z', body: '' },
+      ]),
+      closedIssues: JSON.stringify([
+        { number: 42, title: 'Bug fix', createdAt: '2026-02-08T00:00:00Z', closedAt: '2026-02-11T12:00:00Z', labels: [{ name: 'bug' }] },
+        { number: 50, title: 'Feature', createdAt: '2026-02-09T00:00:00Z', closedAt: '2026-02-12T00:00:00Z', labels: [] },
+      ]),
+      openIssues: JSON.stringify([
+        { number: 100, title: 'Open bug', url: '', labels: [{ name: 'bug' }], createdAt: '2026-02-01T00:00:00Z' },
+        { number: 101, title: 'Open feature', url: '', labels: [], createdAt: '2026-02-02T00:00:00Z' },
+        { number: 102, title: 'Another feature', url: '', labels: [], createdAt: '2026-02-03T00:00:00Z' },
+      ]),
     });
 
     const result = await computeStatistics('/tmp/workspace', '7', 3);
 
     expect(result.timeRange).toBe('7d');
-
-    // GitHub metrics
     expect(result.github.prsMerged).toBe(2);
     expect(result.github.avgTimeToMergeHours).toBeCloseTo(30); // (36+24)/2
     expect(result.github.bugBacklog).toBe(1);
     expect(result.github.nonBugBacklog).toBe(2);
     expect(result.github.issuesClosed).toBe(2);
-    expect(result.github.avgTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days
+    expect(result.github.avgTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days for bug only
 
-    // Builder metrics
-    expect(result.builders.projectsCompleted).toBe(2); // #42 from body, #73 from title
+    expect(result.builders.projectsCompleted).toBe(2); // #42 (body) + #73 (title)
     expect(result.builders.activeBuilders).toBe(3);
 
-    // Consultation metrics (from mock)
     expect(result.consultation.totalCount).toBe(5);
     expect(result.consultation.totalCostUsd).toBe(15.00);
     expect(result.consultation.costByModel).toEqual({ gemini: 5.00, codex: 6.00, claude: 4.00 });
-    expect(result.consultation.avgLatencySeconds).toBeCloseTo(100); // 500/5
-    expect(result.consultation.successRate).toBeCloseTo(80); // 4/5
+    expect(result.consultation.avgLatencySeconds).toBeCloseTo(100);
+    expect(result.consultation.successRate).toBeCloseTo(80);
     expect(result.consultation.byModel).toHaveLength(3);
     expect(result.consultation.byReviewType).toEqual({ spec: 2, pr: 3 });
     expect(result.consultation.byProtocol).toEqual({ spir: 3, tick: 2 });
@@ -284,10 +248,49 @@ describe('computeStatistics', () => {
     expect(result.errors).toBeUndefined();
   });
 
-  it('returns GitHub error + defaults when gh CLI fails', async () => {
+  it('returns 30d label for range "30"', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
+    const result = await computeStatistics('/tmp/workspace', '30', 0);
+    expect(result.timeRange).toBe('30d');
+  });
+
+  it('returns all label for range "all"', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
+    const result = await computeStatistics('/tmp/workspace', 'all', 0);
+    expect(result.timeRange).toBe('all');
+  });
+
+  it('passes null since date for "all" range', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
+    await computeStatistics('/tmp/workspace', 'all', 0);
+
+    const prCall = execFileMock.mock.calls.find(
+      (c: unknown[]) => (c[1] as string[]).includes('merged'),
+    );
+    expect(prCall).toBeDefined();
+    expect((prCall![1] as string[])).not.toContain('--search');
+  });
+
+  it('passes a date string for "7" range', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
+    await computeStatistics('/tmp/workspace', '7', 0);
+
+    const prCall = execFileMock.mock.calls.find(
+      (c: unknown[]) => (c[1] as string[]).includes('merged'),
+    );
+    expect(prCall).toBeDefined();
+    const args = prCall![1] as string[];
+    const searchIdx = args.indexOf('--search');
+    expect(searchIdx).toBeGreaterThan(-1);
+    expect(args[searchIdx + 1]).toMatch(/^merged:>=\d{4}-\d{2}-\d{2}$/);
+  });
+
+  // --- Partial failure: GitHub unavailable ---
+
+  it('returns GitHub defaults and error when all GitHub calls fail', async () => {
     execFileMock.mockRejectedValue(new Error('gh not found'));
 
-    const result = await computeStatistics('/tmp/workspace', '7', 0);
+    const result = await computeStatistics('/tmp/workspace', '7', 2);
 
     expect(result.errors?.github).toBeDefined();
     expect(result.github.prsMerged).toBe(0);
@@ -298,15 +301,15 @@ describe('computeStatistics', () => {
     expect(result.github.avgTimeToCloseBugsHours).toBeNull();
     expect(result.builders.projectsCompleted).toBe(0);
     expect(result.builders.throughputPerWeek).toBe(0);
-    // Active builders still works (passed in directly)
-    expect(result.builders.activeBuilders).toBe(0);
-
-    // Consultation should still work
+    expect(result.builders.activeBuilders).toBe(2);
+    // Consultation still works
     expect(result.consultation.totalCount).toBe(5);
     expect(result.errors?.consultation).toBeUndefined();
   });
 
-  it('returns consultation error + defaults when MetricsDB fails', async () => {
+  // --- Partial failure: MetricsDB unavailable ---
+
+  it('returns consultation defaults and error when MetricsDB fails', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
     mockSummary.mockImplementation(() => { throw new Error('DB file not found'); });
 
@@ -322,23 +325,16 @@ describe('computeStatistics', () => {
     expect(result.consultation.byReviewType).toEqual({});
     expect(result.consultation.byProtocol).toEqual({});
     expect(result.consultation.costByProject).toEqual([]);
-
-    // GitHub should still work
-    expect(result.github.prsMerged).toBe(0);
     expect(result.errors?.github).toBeUndefined();
   });
 
-  it('returns null averages when no items exist', async () => {
+  // --- Null averages ---
+
+  it('returns null averages when no data exists', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
     mockSummary.mockReturnValue({
-      totalCount: 0,
-      totalDuration: 0,
-      totalCost: null,
-      costCount: 0,
-      successCount: 0,
-      byModel: [],
-      byType: [],
-      byProtocol: [],
+      totalCount: 0, totalDuration: 0, totalCost: null, costCount: 0,
+      successCount: 0, byModel: [], byType: [], byProtocol: [],
     });
     mockCostByProject.mockReturnValue([]);
 
@@ -350,41 +346,55 @@ describe('computeStatistics', () => {
     expect(result.consultation.successRate).toBeNull();
   });
 
+  // --- Projects completed ---
+
   it('excludes PRs without linked issues from projectsCompleted', async () => {
-    const mergedPRs = [
-      { number: 1, title: 'No link', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'No issue ref' },
-      { number: 2, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: '' },
-    ];
-    mockGhOutput({ mergedPRs: JSON.stringify(mergedPRs), closedIssues: '[]', openIssues: '[]' });
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'No link', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'No issue ref' },
+        { number: 2, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: '' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
-    expect(result.builders.projectsCompleted).toBe(1); // Only #42
+    expect(result.builders.projectsCompleted).toBe(1);
   });
 
   it('counts distinct issues when multiple PRs link to same issue', async () => {
-    const mergedPRs = [
-      { number: 1, title: '[Spec 42] Part 1', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42' },
-      { number: 2, title: '[Spec 42] Part 2', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Closes #42' },
-    ];
-    mockGhOutput({ mergedPRs: JSON.stringify(mergedPRs), closedIssues: '[]', openIssues: '[]' });
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: '[Spec 42] Part 1', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42' },
+        { number: 2, title: '[Spec 42] Part 2', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Closes #42' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
-    expect(result.builders.projectsCompleted).toBe(1); // Same issue #42
+    expect(result.builders.projectsCompleted).toBe(1);
   });
 
+  // --- Bug-only avg time to close ---
+
   it('only counts bug-labeled issues for avgTimeToCloseBugsHours', async () => {
-    const closedIssues = [
-      { number: 1, title: 'Bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-11T00:00:00Z', labels: [{ name: 'bug' }] },
-      { number: 2, title: 'Feature', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-15T00:00:00Z', labels: [{ name: 'enhancement' }] },
-    ];
-    mockGhOutput({ mergedPRs: '[]', closedIssues: JSON.stringify(closedIssues), openIssues: '[]' });
+    mockGhOutput({
+      mergedPRs: '[]',
+      closedIssues: JSON.stringify([
+        { number: 1, title: 'Bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-11T00:00:00Z', labels: [{ name: 'bug' }] },
+        { number: 2, title: 'Feature', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-15T00:00:00Z', labels: [{ name: 'enhancement' }] },
+      ]),
+      openIssues: '[]',
+    });
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
-    // Only bug #1: 24 hours (not averaged with feature #2)
     expect(result.github.avgTimeToCloseBugsHours).toBeCloseTo(24);
   });
 
-  it('derives costByModel from summary.byModel', async () => {
+  // --- costByModel derivation ---
+
+  it('derives costByModel correctly, excluding null costs', async () => {
     mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
     mockSummary.mockReturnValue({
       ...defaultSummary(),
@@ -395,35 +405,7 @@ describe('computeStatistics', () => {
     });
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
-    // gemini has null cost → excluded from costByModel
     expect(result.consultation.costByModel).toEqual({ codex: 3.50 });
-  });
-
-  it('uses "all" time range correctly', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-
-    const result = await computeStatistics('/tmp/workspace', 'all', 0);
-    expect(result.timeRange).toBe('all');
-  });
-
-  it('uses "30d" time range correctly', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-
-    const result = await computeStatistics('/tmp/workspace', '30', 0);
-    expect(result.timeRange).toBe('30d');
-  });
-
-  it('passes null since date for "all" range to GitHub', async () => {
-    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]', openIssues: '[]' });
-
-    await computeStatistics('/tmp/workspace', 'all', 0);
-
-    // Check that gh was called without --search qualifier
-    const calls = execFileMock.mock.calls;
-    const prCall = calls.find((c: unknown[]) => (c[1] as string[]).includes('merged'));
-    expect(prCall).toBeDefined();
-    const prArgs = prCall![1] as string[];
-    expect(prArgs).not.toContain('--search');
   });
 
   // --- Caching ---
@@ -434,12 +416,8 @@ describe('computeStatistics', () => {
     const result1 = await computeStatistics('/tmp/workspace', '7', 3);
     const result2 = await computeStatistics('/tmp/workspace', '7', 3);
 
-    expect(result1).toBe(result2); // Same reference = from cache
-    // GitHub functions called only once
-    const prCalls = execFileMock.mock.calls.filter(
-      (c: unknown[]) => (c[1] as string[]).includes('merged'),
-    );
-    expect(prCalls).toHaveLength(1);
+    expect(result1).toBe(result2);
+    expect(mockSummary).toHaveBeenCalledTimes(1);
   });
 
   it('bypasses cache when refresh=true', async () => {
@@ -448,10 +426,7 @@ describe('computeStatistics', () => {
     await computeStatistics('/tmp/workspace', '7', 3);
     await computeStatistics('/tmp/workspace', '7', 3, true);
 
-    const prCalls = execFileMock.mock.calls.filter(
-      (c: unknown[]) => (c[1] as string[]).includes('merged'),
-    );
-    expect(prCalls).toHaveLength(2);
+    expect(mockSummary).toHaveBeenCalledTimes(2);
   });
 
   it('does not share cache between different ranges', async () => {
@@ -460,38 +435,39 @@ describe('computeStatistics', () => {
     await computeStatistics('/tmp/workspace', '7', 3);
     await computeStatistics('/tmp/workspace', '30', 3);
 
-    const prCalls = execFileMock.mock.calls.filter(
-      (c: unknown[]) => (c[1] as string[]).includes('merged'),
-    );
-    expect(prCalls).toHaveLength(2);
+    expect(mockSummary).toHaveBeenCalledTimes(2);
   });
 
   // --- Throughput ---
 
   it('computes throughput for 30d range', async () => {
-    const mergedPRs = [
-      { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
-      { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
-      { number: 3, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #30' },
-      { number: 4, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #40' },
-    ];
-    mockGhOutput({ mergedPRs: JSON.stringify(mergedPRs), closedIssues: '[]', openIssues: '[]' });
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
+        { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
+        { number: 3, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #30' },
+        { number: 4, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #40' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
 
     const result = await computeStatistics('/tmp/workspace', '30', 0);
-    // 4 projects / (30/7 weeks) ≈ 0.9
     const expected = Math.round((4 / (30 / 7)) * 10) / 10;
     expect(result.builders.throughputPerWeek).toBeCloseTo(expected, 1);
   });
 
   it('computes throughput for 7d range (equals projectsCompleted)', async () => {
-    const mergedPRs = [
-      { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
-      { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
-    ];
-    mockGhOutput({ mergedPRs: JSON.stringify(mergedPRs), closedIssues: '[]', openIssues: '[]' });
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
+        { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
+      ]),
+      closedIssues: '[]',
+      openIssues: '[]',
+    });
 
     const result = await computeStatistics('/tmp/workspace', '7', 0);
-    // 7d = 1 week, so throughput = projectsCompleted
     expect(result.builders.throughputPerWeek).toBe(2);
   });
 });
