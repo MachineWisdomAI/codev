@@ -1,0 +1,18 @@
+id: '456'
+title: dashboard-statistics-tab-in-ri
+protocol: spir
+phase: specify
+plan_phases: []
+current_plan_phase: null
+gates:
+  spec-approval:
+    status: pending
+  plan-approval:
+    status: pending
+  pr:
+    status: pending
+iteration: 1
+build_complete: false
+history: []
+started_at: '2026-02-21T12:39:09.052Z'
+updated_at: '2026-02-21T12:39:09.054Z'
