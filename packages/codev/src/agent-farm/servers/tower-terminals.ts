@@ -309,18 +309,20 @@ export function deleteFileTabsForWorkspace(workspacePath: string): void {
 }
 
 /**
- * Delete file tabs whose file_path starts with a given prefix.
+ * Delete file tabs whose file_path is inside a given directory.
  * Used during builder cleanup to remove tabs pointing into a deleted worktree (Bugfix #474).
  * Also evicts matching entries from the in-memory registry.
  */
 export function deleteFileTabsByPathPrefix(pathPrefix: string): number {
   try {
     const deleted = deleteFileTabsByPathPrefixFromDb(getGlobalDb(), pathPrefix);
+    // Ensure trailing slash for boundary-safe in-memory matching
+    const safePrefix = pathPrefix.endsWith('/') ? pathPrefix : pathPrefix + '/';
     // Evict matching entries from in-memory registries
     for (const [, entry] of workspaceTerminals) {
       if (entry.fileTabs) {
         for (const [id, tab] of entry.fileTabs) {
-          if (tab.path.startsWith(pathPrefix)) {
+          if (tab.path.startsWith(safePrefix)) {
             entry.fileTabs.delete(id);
           }
         }

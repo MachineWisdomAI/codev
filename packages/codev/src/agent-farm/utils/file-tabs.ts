@@ -43,11 +43,14 @@ export function deleteFileTabsForWorkspace(db: Database.Database, workspacePath:
 }
 
 /**
- * Delete file tabs whose file_path starts with a given prefix.
+ * Delete file tabs whose file_path is inside a given directory.
  * Used during builder cleanup to remove tabs pointing into a deleted worktree.
+ * Ensures path boundary safety by normalizing the prefix to end with '/'.
  */
 export function deleteFileTabsByPathPrefix(db: Database.Database, pathPrefix: string): number {
-  const result = db.prepare('DELETE FROM file_tabs WHERE file_path LIKE ? || \'%\'').run(pathPrefix);
+  // Ensure trailing slash to prevent prefix collisions (e.g. bugfix-42 matching bugfix-424)
+  const safePrefix = pathPrefix.endsWith('/') ? pathPrefix : pathPrefix + '/';
+  const result = db.prepare('DELETE FROM file_tabs WHERE file_path LIKE ? || \'%\'').run(safePrefix);
   return result.changes;
 }
 

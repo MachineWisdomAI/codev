@@ -158,4 +158,23 @@ describe('File tab SQLite persistence (utils/file-tabs)', () => {
     const tabs = loadFileTabsForWorkspace(db, '/project');
     expect(tabs.size).toBe(1);
   });
+
+  it('should not delete tabs for similarly-prefixed worktrees (boundary safety)', () => {
+    const workspace = '/home/user/project';
+    const worktree42 = '/home/user/project/.builders/bugfix-42';
+    const worktree424 = '/home/user/project/.builders/bugfix-424';
+
+    // Tabs in bugfix-42 worktree
+    saveFileTab(db, 'file-42a', workspace, `${worktree42}/src/fix.ts`, 1000);
+    // Tabs in bugfix-424 worktree (should NOT be deleted when cleaning bugfix-42)
+    saveFileTab(db, 'file-424a', workspace, `${worktree424}/src/other.ts`, 2000);
+
+    const deleted = deleteFileTabsByPathPrefix(db, worktree42);
+    expect(deleted).toBe(1);
+
+    // bugfix-424 tab should survive
+    const tabs = loadFileTabsForWorkspace(db, workspace);
+    expect(tabs.size).toBe(1);
+    expect(tabs.get('file-424a')?.path).toBe(`${worktree424}/src/other.ts`);
+  });
 });
