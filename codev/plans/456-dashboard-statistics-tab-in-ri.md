@@ -63,14 +63,14 @@ async function fetchMergedPRs(
   since: string | null,  // ISO date string or null for "all"
   cwd?: string
 ): Promise<MergedPR[]>
-// Uses: gh search prs --repo OWNER/REPO --state merged --merged ">=YYYY-MM-DD" --json number,title,createdAt,mergedAt,body --limit 500
+// Uses: gh search prs --repo OWNER/REPO --state merged --merged ">=YYYY-MM-DD" --json number,title,createdAt,mergedAt,body --limit 1000
 
 // Fetch closed issues using gh search with date filtering
 async function fetchClosedIssues(
   since: string | null,  // ISO date string or null for "all"
   cwd?: string
 ): Promise<ClosedIssue[]>
-// Uses: gh search issues --repo OWNER/REPO --state closed --closed ">=YYYY-MM-DD" --json number,title,createdAt,closedAt,labels --limit 500
+// Uses: gh search issues --repo OWNER/REPO --state closed --closed ">=YYYY-MM-DD" --json number,title,createdAt,closedAt,labels --limit 1000
 ```
 
 New types needed:
@@ -105,7 +105,13 @@ Query: `SELECT project_id, SUM(cost_usd) as total_cost FROM consultation_metrics
 Create a `computeStatistics(workspaceRoot: string, range: '7' | '30' | 'all')` function that:
 1. Determines `since` date from range (rolling window from now)
 2. Calls `fetchMergedPRs(since, workspaceRoot)` and `fetchClosedIssues(since, workspaceRoot)`
-3. Computes GitHub metrics (counts, averages, backlogs via existing `fetchIssueList`)
+3. Computes GitHub metrics:
+   - Counts merged PRs and closed issues in range
+   - Computes average time-to-merge from `createdAt`/`mergedAt` timestamps
+   - Computes average time-to-close for bug-labeled closed issues only (filter by `bug` label)
+   - Gets current open backlogs via existing `fetchIssueList()` from `src/lib/github.ts`
+   - Derives projects completed by calling `parseLinkedIssue(pr.body, pr.title)` on each merged PR and counting distinct non-null issue numbers; PRs without linked issues are excluded, PRs linking to multiple issues count each distinct issue once
+   - Derives `costByModel` as `Record<string, number>` from `summary.byModel` (mapping model → totalCost)
 4. Calls `MetricsDB.summary({ days })` and `MetricsDB.costByProject({ days })`
 5. Gets active builder count from existing overview cache
 6. Assembles and returns `StatisticsResponse`
@@ -126,6 +132,8 @@ Also define the `StatisticsResponse` TypeScript interface in this file (matching
 - **Unit Tests**: Mock `gh` CLI output (spawn) for `fetchMergedPRs` and `fetchClosedIssues`. Test date filter construction, empty results, error handling.
 - **Unit Tests**: Use a test SQLite fixture for `costByProject`. Test with data, empty DB, missing DB file.
 - **Unit Tests**: Mock all data sources for `computeStatistics`. Test full aggregation, partial failures, null averages when no data.
+- **Unit Tests**: Test `parseLinkedIssue` integration in `computeStatistics` — verify PRs with no linked issue are excluded, PRs linking to multiple issues count each issue once, and `costByModel` is correctly derived from `summary.byModel`.
+- **Unit Tests**: Test `avgTimeToCloseBugsHours` only includes closed issues with the `bug` label.
 
 #### Rollback Strategy
 New functions are additive — no existing code is modified except adding `costByProject` to MetricsDB. Revert the commit to roll back.
@@ -195,7 +203,7 @@ async function handleStatistics(
 
 #### Test Plan
 - **Unit Tests**: Test route handler with mocked `computeStatistics`. Verify caching (call twice, assert compute called once). Verify cache bypass. Verify range validation.
-- **Integration Tests**: Verify route registration in both dispatch table and workspace-scoped block.
+- **Unit Tests**: Verify route registration in both dispatch table and workspace-scoped block (structural assertions).
 
 #### Rollback Strategy
 Remove route entries from `tower-routes.ts` and the handler function. No other files are affected.
@@ -217,7 +225,7 @@ Remove route entries from `tower-routes.ts` and the handler function. No other f
 #### Deliverables
 - [ ] `'statistics'` added to `Tab['type']` union in `useTabs.ts`
 - [ ] Statistics tab entry in `buildTabs()` (non-closable, after Work)
-- [ ] `∿` icon registered in `TAB_ICONS` in `TabBar.tsx`
+- [ ] `∿` glyph included in tab label in `useTabs.ts`
 - [ ] Statistics rendering branch in `App.tsx`
 - [ ] `fetchStatistics()` function in `api.ts`
 - [ ] `useStatistics` hook in `hooks/useStatistics.ts`
@@ -232,14 +240,13 @@ Remove route entries from `tower-routes.ts` and the handler function. No other f
 - Add `'statistics'` to the `Tab['type']` union
 - In `buildTabs()`, add a static statistics tab entry immediately after the work tab:
   ```typescript
-  { id: 'statistics', type: 'statistics', label: 'Stats', closable: false, persistent: true }
+  { id: 'statistics', type: 'statistics', label: '∿ Stats', closable: false, persistent: true }
   ```
-
-`packages/codev/dashboard/src/components/TabBar.tsx`:
-- Add `statistics: '∿'` to `TAB_ICONS`
+  Note: `TabBar.tsx` renders `tab.label` directly as text — there is no `TAB_ICONS` map. The `∿` glyph is prepended to the label string.
 
 `packages/codev/dashboard/src/components/App.tsx`:
-- Add rendering for `statistics` tab type. Use the same show/hide CSS pattern as `work` tab (always mounted, display toggled) to preserve state across tab switches.
+- Add rendering for `statistics` tab type. Use the same show/hide CSS pattern as `work` tab (always mounted, display toggled) to preserve collapse state across tab switches.
+- Pass an `isActive` prop to `StatisticsView` indicating whether the statistics tab is currently selected. This is needed because the always-mounted pattern means the component doesn't unmount/remount on tab switch, so `useStatistics` must trigger a re-fetch when `isActive` transitions from `false` to `true` (fulfilling R8's "refresh on tab activation" requirement).
 
 **API client** (`packages/codev/dashboard/src/lib/api.ts`):
 ```typescript
@@ -251,7 +258,7 @@ Export the `StatisticsResponse` type (or define a matching interface).
 
 **useStatistics hook** (`packages/codev/dashboard/src/hooks/useStatistics.ts`):
 ```typescript
-function useStatistics(): {
+function useStatistics(isActive: boolean): {
   data: StatisticsResponse | null;
   error: string | null;
   loading: boolean;
@@ -260,7 +267,8 @@ function useStatistics(): {
   refresh: () => void;
 }
 ```
-- Fetches on mount and when range changes
+- Accepts `isActive` param — fetches when `isActive` transitions to `true` (tab activation refresh per R8)
+- Fetches on mount (if active) and when range changes
 - No auto-polling (unlike useOverview)
 - `refresh()` calls `fetchStatistics(range, true)` to bypass cache
 - Maps UI range values ('7d' → '7', '30d' → '30', 'all' → 'all') for the API
@@ -286,7 +294,8 @@ Error state: Per-section error message when `errors.github` or `errors.consultat
 Style: Use existing dashboard CSS patterns (inline styles or class-based, matching WorkView).
 
 #### Acceptance Criteria
-- [ ] Stats tab appears after Work tab with `∿` icon
+- [ ] Stats tab appears after Work tab with `∿` glyph in label
+- [ ] Tab activation (switching to Stats tab) triggers data refresh
 - [ ] Tab is non-closable and persistent
 - [ ] Deep linking via `?tab=statistics` works
 - [ ] Time range selector switches between 7d/30d/all
@@ -302,7 +311,7 @@ Style: Use existing dashboard CSS patterns (inline styles or class-based, matchi
 
 #### Test Plan
 - **Component Tests**: Mock `fetchStatistics` response. Test loading state, data rendering, null handling, error states, time range switching, refresh button click.
-- **E2E**: Add Stats tab to existing dashboard E2E suite — verify tab loads and shows sections.
+- **E2E (Playwright)**: Add Stats tab to existing dashboard Playwright E2E suite (`packages/codev/tests/e2e/`) — verify tab loads and shows sections. Follow patterns in `codev/resources/testing-guide.md`.
 
 #### Rollback Strategy
 Revert tab registration changes in useTabs/TabBar/App and remove new component/hook files.
@@ -339,7 +348,9 @@ Linear dependency chain — each phase builds on the previous.
 ### Technical Risks
 | Risk | Probability | Impact | Mitigation |
 |------|------------|--------|------------|
-| `gh search` rate limiting on large repos | M | M | 500-item limit per query, 60s cache |
+| `gh search` rate limiting on large repos | M | M | 1000-item limit per query, 60s cache |
+| `gh search` 30 req/min rate limit with rapid cache-bypass refreshes | L | L | 60s cache prevents most cases; `refresh=1` is manual user action |
+| UI range ↔ API range mapping mismatch ('7d' → '7') | L | M | Explicit mapping function with unit test |
 | `metrics.db` concurrent access during writes | L | L | WAL mode + 5s busy timeout already configured |
 | `gh search` unavailable in older `gh` versions | L | H | Document minimum `gh` version requirement |
 
@@ -360,6 +371,9 @@ Linear dependency chain — each phase builds on the previous.
 - The `gh search` commands have a 1000-item limit imposed by GitHub. For repos with more than 1000 merged PRs or closed issues, the "all" range metrics are approximate.
 - `af bench` results are out of scope for this implementation per spec decision.
 - Verdict text (APPROVE/REQUEST_CHANGES/COMMENT) is not stored in the metrics DB and is out of scope.
+- **Cache key deviation from spec**: The spec (R6) describes caching keyed by `range`. The implementation extends this to `${workspaceRoot}:${range}` to support workspace-scoped routes where multiple workspaces may be active. This is a necessary deviation for multi-workspace correctness.
+- **Shared types**: `StatisticsResponse` is defined in the server-side `statistics.ts`. The dashboard defines a matching local interface in `api.ts` (same pattern used for `OverviewData`). No cross-package type sharing is needed.
+- **Mobile layout**: The statistics tab works in mobile mode automatically — `MobileLayout` in `App.tsx` renders all tab types including the always-mounted pattern. No separate mobile handling is needed.
 
 ---
 
