@@ -799,7 +799,7 @@ body {
 }
 
 .work-title {
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -815,7 +815,7 @@ body {
   border: none;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -843,7 +843,7 @@ body {
   margin-bottom: 16px;
   background: var(--bg-tertiary);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -863,7 +863,7 @@ body {
   background: var(--bg-primary);
   padding: 1px 4px;
   border-radius: 2px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-primary);
 }
 
@@ -906,7 +906,7 @@ body {
 }
 
 .work-section-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -920,19 +920,19 @@ body {
 .work-empty {
   color: var(--text-muted);
   font-style: italic;
-  font-size: 12px;
+  font-size: 14px;
   padding: 8px 0;
 }
 
 .work-unavailable {
   color: var(--status-waiting);
-  font-size: 12px;
+  font-size: 14px;
   padding: 8px 0;
 }
 
 .work-error {
   color: var(--status-error);
-  font-size: 12px;
+  font-size: 14px;
   padding: 8px;
   margin-bottom: 12px;
   background: rgba(239, 68, 68, 0.1);
@@ -953,7 +953,7 @@ body {
 }
 
 .builder-table thead th {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
   text-align: left;
@@ -964,7 +964,7 @@ body {
 .builder-row td {
   background: var(--bg-secondary);
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: 16px;
   border-top: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
 }
@@ -1009,12 +1009,12 @@ body {
 }
 
 .builder-state-active {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--accent);
 }
 
 .builder-state-blocked {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--status-waiting);
 }
 
@@ -1045,14 +1045,14 @@ body {
 }
 
 .progress-pct {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-secondary);
   margin-left: 6px;
   vertical-align: middle;
 }
 
 .builder-col-elapsed {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
   white-space: nowrap;
   width: 70px;
@@ -1064,7 +1064,7 @@ body {
 }
 
 .builder-row-open {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--accent);
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.2);
@@ -1106,7 +1106,7 @@ a.pr-row {
 }
 
 .pr-row-number {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--accent);
   white-space: nowrap;
@@ -1114,7 +1114,7 @@ a.pr-row {
 
 .pr-row-title {
   flex: 1;
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1122,7 +1122,7 @@ a.pr-row {
 }
 
 .pr-row-status {
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -1139,7 +1139,7 @@ a.pr-row {
 }
 
 .pr-row-age {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1172,7 +1172,7 @@ a.attention-row {
 }
 
 .attention-row-id {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--accent);
   white-space: nowrap;
@@ -1180,7 +1180,7 @@ a.attention-row {
 
 .attention-row-title {
   flex: 1;
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1188,7 +1188,7 @@ a.attention-row {
 }
 
 .attention-row-kind {
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -1205,7 +1205,7 @@ a.attention-row {
 }
 
 .attention-row-age {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1250,7 +1250,7 @@ a.attention-row {
 }
 
 .backlog-artifact-link {
-  font-size: 10px;
+  font-size: 12px;
   padding: 1px 5px;
   border-radius: 3px;
   border: 1px solid var(--border-color);
@@ -1286,14 +1286,14 @@ a.attention-row {
 }
 
 .backlog-row-number {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--accent);
   white-space: nowrap;
 }
 
 .backlog-type-tag {
-  font-size: 10px;
+  font-size: 12px;
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 500;
@@ -1312,7 +1312,7 @@ a.attention-row {
 
 .backlog-row-title {
   flex: 1;
-  font-size: 13px;
+  font-size: 16px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1320,7 +1320,7 @@ a.attention-row {
 }
 
 .backlog-row-age {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1349,7 +1349,7 @@ a.attention-row {
 }
 
 .recently-closed-check {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--status-active);
   flex-shrink: 0;
 }
@@ -1385,12 +1385,12 @@ a.attention-row {
 }
 
 .work-file-panel-toggle {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .work-file-panel-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -1402,7 +1402,7 @@ a.attention-row {
   border: 1px solid var(--border-color);
   border-radius: 3px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 14px;
   padding: 3px 8px;
   outline: none;
 }
@@ -1441,7 +1441,7 @@ a.attention-row {
   }
 
   .builder-table {
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .builder-col-elapsed,
