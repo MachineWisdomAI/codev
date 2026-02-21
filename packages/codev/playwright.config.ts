@@ -15,6 +15,7 @@ export default defineConfig({
   testDir: './src/agent-farm/__tests__/e2e',
   timeout: 60_000,
   retries: 0,
+  globalSetup: './src/agent-farm/__tests__/e2e/global-setup.ts',
   use: {
     baseURL: `http://localhost:${port}`,
   },
