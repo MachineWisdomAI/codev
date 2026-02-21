@@ -203,10 +203,16 @@ export function getTerminalSessionById(terminalId: string): DbTerminalSession | 
 /**
  * Get labels of all active shell sessions in a workspace (Spec 468, for dedup).
  */
-export function getActiveShellLabels(workspacePath: string): string[] {
+export function getActiveShellLabels(workspacePath: string, excludeId?: string): string[] {
   try {
     const db = getGlobalDb();
     const normalizedPath = normalizeWorkspacePath(workspacePath);
+    if (excludeId) {
+      const rows = db.prepare(
+        "SELECT label FROM terminal_sessions WHERE workspace_path = ? AND type = 'shell' AND label IS NOT NULL AND id != ?"
+      ).all(normalizedPath, excludeId) as Array<{ label: string }>;
+      return rows.map(r => r.label);
+    }
     const rows = db.prepare(
       "SELECT label FROM terminal_sessions WHERE workspace_path = ? AND type = 'shell' AND label IS NOT NULL"
     ).all(normalizedPath) as Array<{ label: string }>;
@@ -546,7 +552,7 @@ async function _reconcileTerminalSessionsInner(): Promise<void> {
     // Update SQLite with new terminal ID
     db.prepare('DELETE FROM terminal_sessions WHERE id = ?').run(dbSession.id);
     saveTerminalSession(session.id, workspacePath, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
+      dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label);
     _deps.registerKnownWorkspace(workspacePath);
 
     // Clean up on exit (only fires for permanent death when restartOnExit is set)
@@ -675,7 +681,7 @@ export async function getTerminalsForWorkspace(
         );
         if (client) {
           const replayData = client.getReplayData() ?? Buffer.alloc(0);
-          const label = dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id);
+          const label = dbSession.label || (dbSession.type === 'architect' ? 'Architect' : (dbSession.role_id || dbSession.id));
           const newSession = manager.createSessionRaw({ label, cwd: dbSession.workspace_path });
           const ptySession = manager.getSession(newSession.id);
           if (ptySession) {
@@ -697,7 +703,7 @@ export async function getTerminalsForWorkspace(
           const originalSessionId = dbSession.id;
           deleteTerminalSession(dbSession.id);
           saveTerminalSession(newSession.id, dbSession.workspace_path, dbSession.type, dbSession.role_id, dbSession.shellper_pid,
-            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time);
+            dbSession.shellper_socket, dbSession.shellper_pid, dbSession.shellper_start_time, dbSession.label);
           dbSession.id = newSession.id;
           session = manager.getSession(newSession.id);
           _deps.log('INFO', `On-the-fly reconnect succeeded for ${originalSessionId} → ${newSession.id}`);
@@ -735,10 +741,11 @@ export async function getTerminalsForWorkspace(
     } else if (dbSession.type === 'shell') {
       const shellId = dbSession.role_id || dbSession.id;
       freshEntry.shells.set(shellId, dbSession.id);
+      const shellLabel = session?.label || dbSession.label || `Shell ${shellId.replace('shell-', '')}`;
       terminals.push({
         type: 'shell',
         id: shellId,
-        label: `Shell ${shellId.replace('shell-', '')}`,
+        label: shellLabel,
         url: `${proxyUrl}?tab=${shellId}`,
         active: true,
       });
@@ -784,7 +791,7 @@ export async function getTerminalsForWorkspace(
           terminals.push({
             type: 'shell',
             id: shellId,
-            label: `Shell ${shellId.replace('shell-', '')}`,
+            label: session.label || `Shell ${shellId.replace('shell-', '')}`,
             url: `${proxyUrl}?tab=${shellId}`,
             active: true,
           });
