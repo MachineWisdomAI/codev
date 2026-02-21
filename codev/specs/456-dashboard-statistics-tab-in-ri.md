@@ -255,6 +255,7 @@ No sparklines or charts in v1 — keep it to simple numbers. Charts can be added
 ## Out of Scope
 
 - **Sparklines or charts**: v1 is numbers-only. Trend visualization is a future enhancement.
+<!-- REVIEW(@architect): Why? Why not have charts? I think they're required. -->
 - **Per-project drill-down**: Clicking a metric to see per-project breakdown is not in scope (except cost-per-project list which is inline).
 - **Historical builder session data**: Porch project state files track current state, not historical snapshots. We only get builder throughput from merged PRs, not actual agent time per session.
 - **Export/download**: No CSV or JSON export of statistics.

@@ -140,6 +140,76 @@ export async function fetchRecentlyClosed(cwd?: string): Promise<GitHubIssueList
 }
 
 // =============================================================================
+// Historical data queries (for statistics)
+// =============================================================================
+
+export interface MergedPR {
+  number: number;
+  title: string;
+  createdAt: string;
+  mergedAt: string;
+  body: string;
+}
+
+export interface ClosedIssue {
+  number: number;
+  title: string;
+  createdAt: string;
+  closedAt: string;
+  labels: Array<{ name: string }>;
+}
+
+/**
+ * Fetch merged PRs, optionally filtered to those merged since a given date.
+ * Uses `gh pr list --state merged --search "merged:>=DATE"` which provides `mergedAt`.
+ * Returns null on failure.
+ */
+export async function fetchMergedPRs(since: string | null, cwd?: string): Promise<MergedPR[] | null> {
+  try {
+    const args = [
+      'pr', 'list',
+      '--state', 'merged',
+      '--json', 'number,title,createdAt,mergedAt,body',
+      '--limit', '1000',
+    ];
+    if (since) {
+      args.push('--search', `merged:>=${since}`);
+    }
+    const { stdout } = await execFileAsync('gh', args, { cwd });
+    return JSON.parse(stdout);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchMergedPRs failed (cwd=${cwd ?? 'none'}): ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Fetch closed issues, optionally filtered to those closed since a given date.
+ * Uses `gh issue list --state closed --search "closed:>=DATE"` which provides `closedAt`.
+ * Returns null on failure.
+ */
+export async function fetchClosedIssues(since: string | null, cwd?: string): Promise<ClosedIssue[] | null> {
+  try {
+    const args = [
+      'issue', 'list',
+      '--state', 'closed',
+      '--json', 'number,title,createdAt,closedAt,labels',
+      '--limit', '1000',
+    ];
+    if (since) {
+      args.push('--search', `closed:>=${since}`);
+    }
+    const { stdout } = await execFileAsync('gh', args, { cwd });
+    return JSON.parse(stdout);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[github] fetchClosedIssues failed (cwd=${cwd ?? 'none'}): ${msg}`);
+    return null;
+  }
+}
+
+// =============================================================================
 // Parsing utilities
 // =============================================================================
 
