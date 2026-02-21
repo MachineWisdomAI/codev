@@ -32,4 +32,6 @@ jobs:
 
       - name: Run Playwright tests
         working-directory: packages/codev
+        env:
+          TOWER_ARCHITECT_CMD: bash
         run: npx playwright test --retries 3
