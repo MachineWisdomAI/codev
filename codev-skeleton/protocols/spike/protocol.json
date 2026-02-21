@@ -13,16 +13,12 @@
       "id": "spike",
       "name": "Spike",
       "description": "Execute the spike — research, iterate, write findings",
-      "type": "once",
-      "transition": {
-        "on_complete": null
-      }
+      "type": "once"
     }
   ],
   "signals": {
     "PHASE_COMPLETE": {
-      "description": "Signal spike is complete",
-      "transitions_to": "next_phase"
+      "description": "Signal spike is complete"
     },
     "BLOCKED": {
       "description": "Signal spike is blocked",
@@ -35,7 +31,6 @@
       "enabled": false,
       "models": [],
       "parallel": false
-    },
-    "checks": {}
+    }
   }
 }
