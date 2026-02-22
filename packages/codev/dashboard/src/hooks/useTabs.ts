@@ -17,7 +17,7 @@ export interface Tab {
 function buildTabs(state: DashboardState | null): Tab[] {
   const tabs: Tab[] = [
     { id: 'work', type: 'work', label: 'Work', closable: false },
-    { id: 'analytics', type: 'analytics', label: '\u223F Analytics', closable: false, persistent: true },
+    { id: 'analytics', type: 'analytics', label: 'Analytics', closable: false, persistent: true },
   ];
 
   if (state?.architect) {
