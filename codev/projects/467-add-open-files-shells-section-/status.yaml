@@ -20,7 +20,7 @@ gates:
   pr:
     status: pending
 iteration: 1
-build_complete: false
+build_complete: true
 history:
   - iteration: 1
     plan_phase: backend_last_data_at
@@ -55,4 +55,4 @@ history:
         file: >-
           /Users/mwk/Development/cluesmith/codev/.builders/spir-467-add-open-files-shells-section-/codev/projects/467-add-open-files-shells-section-/467-frontend_component-iter1-claude.txt
 started_at: '2026-02-21T18:43:02.587Z'
-updated_at: '2026-02-22T08:11:19.878Z'
+updated_at: '2026-02-22T08:14:44.979Z'
