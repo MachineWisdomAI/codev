@@ -426,7 +426,7 @@ async function handleTerminalCreate(
             entry.shells.set(roleId, session.id);
           }
           saveTerminalSession(session.id, workspacePath, termType, roleId, shellperInfo.pid,
-            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime);
+            shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, label ?? null, cwd ?? null);
           ctx.log('INFO', `Registered shellper terminal ${session.id} as ${termType} "${roleId}" for workspace ${workspacePath}`);
         }
       } catch (shellperErr) {
@@ -447,7 +447,7 @@ async function handleTerminalCreate(
         } else {
           entry.shells.set(roleId, info.id);
         }
-        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid);
+        saveTerminalSession(info.id, workspacePath, termType, roleId, info.pid, null, null, null, null, cwd ?? null);
         ctx.log('WARN', `Terminal ${info.id} for ${workspacePath} is non-persistent (shellper unavailable)`);
       }
     }
@@ -1496,7 +1496,7 @@ async function handleWorkspaceShellCreate(
         const entry = getWorkspaceTerminalsEntry(workspacePath);
         entry.shells.set(shellId, session.id);
         saveTerminalSession(session.id, workspacePath, 'shell', shellId, shellperInfo.pid,
-          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label);
+          shellperInfo.socketPath, shellperInfo.pid, shellperInfo.startTime, session.label, workspacePath);
 
         shellCreated = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1527,7 +1527,7 @@ async function handleWorkspaceShellCreate(
 
       const entry = getWorkspaceTerminalsEntry(workspacePath);
       entry.shells.set(shellId, session.id);
-      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label);
+      saveTerminalSession(session.id, workspacePath, 'shell', shellId, session.pid, null, null, null, session.label, workspacePath);
       ctx.log('WARN', `Shell ${shellId} for ${workspacePath} is non-persistent (shellper unavailable)`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
