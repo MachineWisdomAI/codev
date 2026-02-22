@@ -316,8 +316,10 @@ function deliverMessage(task: CronTask, message: string): void {
   }
 
   const formatted = formatBuilderMessage('af-cron', message);
-  // Combine message + Enter into a single write for atomic delivery (Bugfix #481)
-  session.write(formatted + '\r');
+  // Write message, then Enter separately after delay so PTY processes the
+  // multi-line paste before receiving the submission keystroke (Bugfix #492)
+  session.write(formatted);
+  setTimeout(() => session.write('\r'), 50);
 
   broadcastMessage({
     type: 'message',

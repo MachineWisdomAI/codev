@@ -86,10 +86,11 @@ const sendBuffer = new SendBuffer();
 
 /** Deliver a buffered message to a session (write + broadcast + log). */
 function deliverBufferedMessage(session: PtySession, msg: BufferedMessage): void {
-  // Combine message + Enter into a single write for atomic delivery through
-  // the shellper protocol (Bugfix #481: split writes can arrive as separate
-  // DATA frames, allowing the Enter to be lost between frames).
-  session.write(msg.noEnter ? msg.formattedMessage : msg.formattedMessage + '\r');
+  // Write message, then Enter after delay — see handleSend for rationale (Bugfix #492)
+  session.write(msg.formattedMessage);
+  if (!msg.noEnter) {
+    setTimeout(() => session.write('\r'), 50);
+  }
   broadcastMessage(msg.broadcastPayload as Parameters<typeof broadcastMessage>[0]);
 }
 
@@ -913,10 +914,14 @@ async function handleSend(
     ctx.log('INFO', `Message deferred (user typing): ${from ?? 'unknown'} → ${result.agent} (terminal ${result.terminalId.slice(0, 8)}...)`);
   } else {
     // User is idle (or interrupt) — deliver immediately.
-    // Combine message + Enter into a single write for atomic delivery through
-    // the shellper protocol (Bugfix #481: split writes can arrive as separate
-    // DATA frames, allowing the Enter to be lost between frames).
-    session.write(noEnter ? formattedMessage : formattedMessage + '\r');
+    // Write message first, then Enter separately after a short delay.
+    // Multi-line formatted messages contain embedded \n which the PTY processes
+    // as line breaks. A trailing \r in the same write submits an empty line after
+    // the footer, not the message. Delayed \r lets the PTY process the paste first.
+    session.write(formattedMessage);
+    if (!noEnter) {
+      setTimeout(() => session.write('\r'), 50);
+    }
     broadcastMessage(broadcastPayload);
     ctx.log('INFO', logMessage);
   }
