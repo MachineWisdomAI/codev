@@ -68,6 +68,8 @@ You are working in the Codev project itself, with multiple development protocols
 
 **Available Protocols**:
 - **SPIR**: Multi-phase development with consultation - `codev/protocols/spir/protocol.md`
+- **ASPIR**: Autonomous SPIR (no human gates on spec/plan) - `codev/protocols/aspir/protocol.md`
+- **AIR**: Autonomous Implement & Review for small features - `codev/protocols/air/protocol.md`
 - **TICK**: Amendment workflow for existing specs - `codev/protocols/tick/protocol.md`
 - **EXPERIMENT**: Disciplined experimentation - `codev/protocols/experiment/protocol.md`
 - **MAINTAIN**: Codebase maintenance (code hygiene + documentation sync) - `codev/protocols/maintain/protocol.md`
