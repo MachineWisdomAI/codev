@@ -2,7 +2,8 @@
  * Tests for OpenFilesShellsSection utility functions (Spec 467)
  *
  * Tests pure utility functions (formatDuration, shortPath) extracted from
- * the React component. Component rendering is verified via Playwright E2E.
+ * the React component. Component rendering is not unit-tested here because
+ * React is a dashboard-only dependency. Visual verification is manual.
  */
 
 import { describe, it, expect } from 'vitest';

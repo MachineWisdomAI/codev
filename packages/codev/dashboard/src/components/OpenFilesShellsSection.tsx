@@ -1,8 +1,6 @@
 import type { UtilTerminal, Annotation } from '../lib/api.js';
 import { formatDuration, shortPath } from '../lib/open-files-shells-utils.js';
 
-export { formatDuration, shortPath };
-
 const IDLE_THRESHOLD_MS = 30_000;
 
 interface OpenFilesShellsSectionProps {
