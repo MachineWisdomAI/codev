@@ -484,15 +484,11 @@ export function Terminal({ wsPath, onFileOpen, persistent }: TerminalProps) {
 
         if (rc.attempts >= MAX_ATTEMPTS) {
           setConnStatus('disconnected');
-          term.write('\r\n\x1b[90m[Session ended — unable to reconnect]\x1b[0m\r\n');
           return;
         }
 
-        // Start reconnection
+        // Start reconnection — status icon in toolbar handles visual feedback
         setConnStatus('reconnecting');
-        if (rc.attempts === 0) {
-          term.write('\r\n\x1b[33m[Connection lost — reconnecting...]\x1b[0m');
-        }
 
         const delay = Math.min(1000 * Math.pow(2, rc.attempts), BACKOFF_CAP_MS);
         rc.attempts++;
