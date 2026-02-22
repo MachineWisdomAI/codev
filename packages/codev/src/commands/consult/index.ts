@@ -1357,8 +1357,10 @@ export async function consult(options: ConsultOptions): Promise<void> {
   // Auto-generate persistent output path when --output is not provided.
   // In builder context with protocol mode, write results to the project
   // directory so they survive Claude Code's temp file cleanup (#512).
+  // Skip when --issue is set (architect-mode query from builder worktree).
   let outputPath = options.output;
-  if (!outputPath && hasType && isBuilderContext()) {
+  const shouldAutoPersist = isBuilderContext() && !options.issue;
+  if (!outputPath && hasType && shouldAutoPersist) {
     try {
       const projectState = getBuilderProjectState(workspaceRoot, options.projectId);
       outputPath = computePersistentOutputPath(projectState, model);
