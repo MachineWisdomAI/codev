@@ -233,7 +233,7 @@ export async function next(workspaceRoot: string, projectId: string): Promise<Po
     const commitStatusTask: PorchTask = {
       subject: 'Commit project status for historical record',
       activeForm: 'Committing project status',
-      description: `Commit status.yaml to your branch so project history survives cleanup:\n\ngit add ${relStatusPath}\ngit commit -m "chore: Preserve project status for analytics"\ngit push\n\nThis ensures wall clock time, gate timestamps, and protocol data are available for analytics after cleanup.`,
+      description: `Commit status.yaml to your branch so project history survives cleanup:\n\ngit add "${relStatusPath}"\ngit commit -m "chore: Preserve project status for analytics"\ngit push\n\nThis ensures wall clock time, gate timestamps, and protocol data are available for analytics after cleanup.`,
       sequential: true,
     };
 
