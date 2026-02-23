@@ -177,63 +177,49 @@ export function App() {
   // Desktop: architect terminal on left, tabbed content on right
   const architectTab = tabs.find(t => t.type === 'architect');
 
-  // Bugfix #522: Collapse/expand buttons consolidated into architect toolbar.
-  // Uses onPointerDown+preventDefault to avoid stealing xterm focus on clicks,
-  // with onClick for keyboard activation (Enter/Space). No tabIndex={-1} so
-  // buttons remain keyboard-reachable (CMAP review feedback).
+  // Bugfix #524: Tri-state collapse buttons — one button per side that cycles
+  // through full-width → 50/50 → collapsed. Uses onPointerDown+preventDefault
+  // to avoid stealing xterm focus, with onClick for keyboard activation.
+  const handleLeftCollapse = () => {
+    // If architect is full-width (work collapsed), reduce to 50/50
+    // If 50/50, collapse architect
+    setCollapsedPane(collapsedPane === 'right' ? null : 'left');
+  };
+  const handleRightCollapse = () => {
+    // If work is full-width (architect collapsed), reduce to 50/50
+    // If 50/50, collapse work
+    setCollapsedPane(collapsedPane === 'left' ? null : 'right');
+  };
+
+  // Left button: visible when architect is visible (not collapsed)
+  // Right button: visible when work is not collapsed
   const architectToolbarExtra = (
     <>
-      {collapsedPane !== 'left' ? (
+      {collapsedPane !== 'left' && (
         <button
           className="terminal-control-btn"
           onPointerDown={(e) => e.preventDefault()}
-          onClick={() => setCollapsedPane('left')}
-          title="Collapse architect panel"
-          aria-label="Collapse architect panel"
+          onClick={handleLeftCollapse}
+          title={collapsedPane === 'right' ? 'Restore split layout' : 'Collapse architect panel'}
+          aria-label={collapsedPane === 'right' ? 'Restore split layout' : 'Collapse architect panel'}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="3" y1="2" x2="3" y2="14" />
             <path d="M12 5l-4 3 4 3" />
           </svg>
         </button>
-      ) : (
-        <button
-          className="terminal-control-btn"
-          onPointerDown={(e) => e.preventDefault()}
-          onClick={() => setCollapsedPane(null)}
-          title="Expand architect panel"
-          aria-label="Expand architect panel"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="3" y1="2" x2="3" y2="14" />
-            <path d="M7 5l4 3-4 3" />
-          </svg>
-        </button>
       )}
-      {collapsedPane !== 'right' ? (
+      {collapsedPane !== 'right' && (
         <button
           className="terminal-control-btn"
           onPointerDown={(e) => e.preventDefault()}
-          onClick={() => setCollapsedPane('right')}
+          onClick={handleRightCollapse}
           title="Collapse work panel"
           aria-label="Collapse work panel"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="13" y1="2" x2="13" y2="14" />
             <path d="M4 5l4 3-4 3" />
-          </svg>
-        </button>
-      ) : (
-        <button
-          className="terminal-control-btn"
-          onPointerDown={(e) => e.preventDefault()}
-          onClick={() => setCollapsedPane(null)}
-          title="Expand work panel"
-          aria-label="Expand work panel"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="13" y1="2" x2="13" y2="14" />
-            <path d="M9 5l-4 3 4 3" />
           </svg>
         </button>
       )}
@@ -252,20 +238,6 @@ export function App() {
           {overviewTitle}
         </h1>
         <div className="header-controls">
-          {/* Bugfix #522: Expand button shown in header only when architect panel is collapsed */}
-          {collapsedPane === 'left' && (
-            <button
-              className="header-btn"
-              onClick={() => setCollapsedPane(null)}
-              title="Expand architect panel"
-              aria-label="Expand architect panel"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="2" x2="3" y2="14" />
-                <path d="M7 5l4 3-4 3" />
-              </svg>
-            </button>
-          )}
           {state?.version && <span className="header-version">v{state.version}</span>}
         </div>
       </header>
@@ -286,6 +258,8 @@ export function App() {
             </div>
           }
           collapsedPane={collapsedPane}
+          onExpandLeft={() => setCollapsedPane(null)}
+          onExpandRight={() => setCollapsedPane(null)}
         />
       </div>
     </div>

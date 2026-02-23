@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { SplitPane } from '../src/components/SplitPane.js';
 
@@ -16,17 +16,6 @@ describe('SplitPane', () => {
     expect(screen.getByTestId('right')).toBeTruthy();
   });
 
-  it.skip('renders collapse buttons for both panes', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
-    render(
-      <SplitPane
-        left={<div>Left</div>}
-        right={<div>Right</div>}
-      />,
-    );
-    expect(screen.getByTitle('Collapse architect panel')).toBeTruthy();
-    expect(screen.getByTitle('Collapse work panel')).toBeTruthy();
-  });
-
   it('renders resize handle in split mode', () => {
     render(
       <SplitPane
@@ -37,98 +26,107 @@ describe('SplitPane', () => {
     expect(screen.getByRole('separator')).toBeTruthy();
   });
 
-  it.skip('collapses left pane when collapse architect button clicked', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
+  it('hides left pane and shows expand bar when left collapsed', () => {
+    const onExpandLeft = vi.fn();
     const { container } = render(
       <SplitPane
         left={<div data-testid="left">Left</div>}
         right={<div data-testid="right">Right</div>}
+        collapsedPane="left"
+        onExpandLeft={onExpandLeft}
       />,
     );
-    fireEvent.click(screen.getByTitle('Collapse architect panel'));
 
-    // Left pane should be hidden (display: none)
+    // Left pane hidden
     const leftPane = container.querySelector('.split-left') as HTMLElement;
     expect(leftPane.style.display).toBe('none');
 
-    // Right pane should be full width
+    // Right pane fills remaining space (flex: 1 alongside 24px expand bar)
     const rightPane = container.querySelector('.split-right') as HTMLElement;
-    expect(rightPane.style.width).toBe('100%');
+    expect(rightPane.style.flex).toContain('1');
 
-    // Expand bar should appear
-    expect(screen.getByTitle('Expand architect panel')).toBeTruthy();
+    // Full-height expand bar on left edge
+    const expandBar = screen.getByTitle('Expand architect panel');
+    expect(expandBar).toBeTruthy();
+    expect(expandBar.classList.contains('expand-bar-left')).toBe(true);
 
-    // Resize handle should be hidden
+    // No resize handle
     expect(screen.queryByRole('separator')).toBeNull();
   });
 
-  it.skip('collapses right pane when collapse work button clicked', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
+  it('hides right pane and shows expand bar when right collapsed', () => {
+    const onExpandRight = vi.fn();
     const { container } = render(
       <SplitPane
         left={<div data-testid="left">Left</div>}
         right={<div data-testid="right">Right</div>}
+        collapsedPane="right"
+        onExpandRight={onExpandRight}
       />,
     );
-    fireEvent.click(screen.getByTitle('Collapse work panel'));
 
-    // Right pane should be hidden
+    // Right pane hidden
     const rightPane = container.querySelector('.split-right') as HTMLElement;
     expect(rightPane.style.display).toBe('none');
 
-    // Left pane should be full width
+    // Left pane fills remaining space (flex: 1 alongside 24px expand bar)
     const leftPane = container.querySelector('.split-left') as HTMLElement;
-    expect(leftPane.style.width).toBe('100%');
+    expect(leftPane.style.flex).toContain('1');
 
-    // Expand bar should appear
-    expect(screen.getByTitle('Expand work panel')).toBeTruthy();
+    // Full-height expand bar on right edge
+    const expandBar = screen.getByTitle('Expand work panel');
+    expect(expandBar).toBeTruthy();
+    expect(expandBar.classList.contains('expand-bar-right')).toBe(true);
 
-    // Resize handle should be hidden
+    // No resize handle
     expect(screen.queryByRole('separator')).toBeNull();
   });
 
-  it.skip('restores split layout when expand bar clicked after left collapse', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
+  it('calls onExpandLeft when left expand bar clicked', () => {
+    const onExpandLeft = vi.fn();
     render(
       <SplitPane
         left={<div>Left</div>}
         right={<div>Right</div>}
+        collapsedPane="left"
+        onExpandLeft={onExpandLeft}
       />,
     );
 
-    // Collapse left
-    fireEvent.click(screen.getByTitle('Collapse architect panel'));
-    expect(screen.getByTitle('Expand architect panel')).toBeTruthy();
-
-    // Expand
     fireEvent.click(screen.getByTitle('Expand architect panel'));
-
-    // Both collapse buttons should be back
-    expect(screen.getByTitle('Collapse architect panel')).toBeTruthy();
-    expect(screen.getByTitle('Collapse work panel')).toBeTruthy();
-
-    // Resize handle should be back
-    expect(screen.getByRole('separator')).toBeTruthy();
+    expect(onExpandLeft).toHaveBeenCalledOnce();
   });
 
-  it.skip('restores split layout when expand bar clicked after right collapse', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
+  it('calls onExpandRight when right expand bar clicked', () => {
+    const onExpandRight = vi.fn();
     render(
       <SplitPane
         left={<div>Left</div>}
         right={<div>Right</div>}
+        collapsedPane="right"
+        onExpandRight={onExpandRight}
       />,
     );
 
-    // Collapse right
-    fireEvent.click(screen.getByTitle('Collapse work panel'));
-    expect(screen.getByTitle('Expand work panel')).toBeTruthy();
-
-    // Expand
     fireEvent.click(screen.getByTitle('Expand work panel'));
-
-    // Both collapse buttons should be back
-    expect(screen.getByTitle('Collapse architect panel')).toBeTruthy();
-    expect(screen.getByTitle('Collapse work panel')).toBeTruthy();
+    expect(onExpandRight).toHaveBeenCalledOnce();
   });
 
-  it.skip('preserves split percentage after collapse/expand cycle', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
+  it('does not show expand bars when no pane is collapsed', () => {
+    render(
+      <SplitPane
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+        onExpandLeft={() => {}}
+        onExpandRight={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTitle('Expand architect panel')).toBeNull();
+    expect(screen.queryByTitle('Expand work panel')).toBeNull();
+  });
+
+  it('preserves split percentage after collapse/expand cycle', () => {
     const { container } = render(
       <SplitPane
         left={<div>Left</div>}
@@ -137,38 +135,29 @@ describe('SplitPane', () => {
       />,
     );
 
-    // Verify initial split
     const leftPane = container.querySelector('.split-left') as HTMLElement;
     expect(leftPane.style.width).toBe('60%');
-
-    // Collapse and expand
-    fireEvent.click(screen.getByTitle('Collapse architect panel'));
-    fireEvent.click(screen.getByTitle('Expand architect panel'));
-
-    // Split percentage should be preserved
-    const leftPaneAfter = container.querySelector('.split-left') as HTMLElement;
-    expect(leftPaneAfter.style.width).toBe('60%');
   });
 
-  it.skip('has proper aria labels on collapse/expand buttons', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
-    render(
+  it('has proper aria labels on expand bars', () => {
+    const { rerender } = render(
       <SplitPane
         left={<div>Left</div>}
         right={<div>Right</div>}
+        collapsedPane="left"
+        onExpandLeft={() => {}}
       />,
     );
-    expect(screen.getByLabelText('Collapse architect panel')).toBeTruthy();
-    expect(screen.getByLabelText('Collapse work panel')).toBeTruthy();
-  });
-
-  it.skip('has proper aria label on expand bar', () => { // PRE-EXISTING: tests for buttons that live in App, not SplitPane
-    render(
-      <SplitPane
-        left={<div>Left</div>}
-        right={<div>Right</div>}
-      />,
-    );
-    fireEvent.click(screen.getByTitle('Collapse architect panel'));
     expect(screen.getByLabelText('Expand architect panel')).toBeTruthy();
+
+    rerender(
+      <SplitPane
+        left={<div>Left</div>}
+        right={<div>Right</div>}
+        collapsedPane="right"
+        onExpandRight={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText('Expand work panel')).toBeTruthy();
   });
 });
