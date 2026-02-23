@@ -30,11 +30,12 @@ function makeStats(overrides: Partial<AnalyticsResponse> = {}): AnalyticsRespons
       avgTimeToMergeHours: 3.5,
       issuesClosed: 6,
       avgTimeToCloseBugsHours: 1.2,
-      projectsCompleted: 5,
-      bugsFixed: 3,
-      throughputPerWeek: 2.5,
       activeBuilders: 2,
-      projectsByProtocol: { spir: 3, bugfix: 2, aspir: 1 },
+      projectsByProtocol: {
+        spir: { count: 3, avgWallClockHours: 48.2 },
+        bugfix: { count: 2, avgWallClockHours: 1.5 },
+        aspir: { count: 1, avgWallClockHours: 24.0 },
+      },
     },
     consultation: {
       totalCount: 20,
@@ -201,8 +202,10 @@ describe('AnalyticsView', () => {
 
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('3.5h')).toBeInTheDocument();
-    expect(screen.getByText('Projects Completed')).toBeInTheDocument();
-    expect(screen.getByText('Bugs Fixed')).toBeInTheDocument();
+    // Removed redundant metrics
+    expect(screen.queryByText('Projects Completed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bugs Fixed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Throughput / Week')).not.toBeInTheDocument();
   });
 
   it('renders protocol breakdown metrics', async () => {
@@ -240,9 +243,6 @@ describe('AnalyticsView', () => {
         avgTimeToMergeHours: null,
         issuesClosed: 0,
         avgTimeToCloseBugsHours: null,
-        projectsCompleted: 0,
-        bugsFixed: 0,
-        throughputPerWeek: 0,
         activeBuilders: 0,
         projectsByProtocol: {},
       },

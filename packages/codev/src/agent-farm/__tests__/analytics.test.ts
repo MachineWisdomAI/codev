@@ -43,7 +43,7 @@ import { computeAnalytics, clearAnalyticsCache, protocolFromBranch } from '../se
 // Helpers
 // ---------------------------------------------------------------------------
 
-function mockGhOutput(responses: Record<string, string>) {
+function mockGhOutput(responses: Record<string, string>, onItTimestamps?: Record<number, string>) {
   execFileMock.mockImplementation((_cmd: string, args: string[]) => {
     const argsStr = args.join(' ');
 
@@ -52,6 +52,12 @@ function mockGhOutput(responses: Record<string, string>) {
     }
     if (argsStr.includes('issue') && argsStr.includes('list') && argsStr.includes('closed')) {
       return Promise.resolve({ stdout: responses.closedIssues ?? '[]' });
+    }
+    // gh issue view <N> --json comments --jq ... (for fetchOnItTimestamps)
+    if (argsStr.includes('issue') && argsStr.includes('view') && argsStr.includes('comments')) {
+      const issueNum = parseInt(args[2], 10);
+      const ts = onItTimestamps?.[issueNum];
+      return Promise.resolve({ stdout: ts ?? '' });
     }
 
     return Promise.resolve({ stdout: '[]' });
@@ -221,10 +227,14 @@ describe('computeAnalytics', () => {
     expect(result.activity.avgTimeToMergeHours).toBeCloseTo(30); // (36+24)/2
     expect(result.activity.issuesClosed).toBe(2);
     expect(result.activity.avgTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days for bug only
-    expect(result.activity.projectsCompleted).toBe(2); // #42 (body) + #73 (title)
-    expect(result.activity.bugsFixed).toBe(1); // Only issue #42 has bug label
     expect(result.activity.activeBuilders).toBe(3);
-    expect(result.activity.projectsByProtocol).toEqual({ spir: 1, aspir: 1 });
+    // Protocol breakdown now includes count + avgWallClockHours (no "on it" → falls back to PR times)
+    expect(result.activity.projectsByProtocol.spir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(36) });
+    expect(result.activity.projectsByProtocol.aspir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(24) });
+    // Removed fields
+    expect(result.activity).not.toHaveProperty('projectsCompleted');
+    expect(result.activity).not.toHaveProperty('bugsFixed');
+    expect(result.activity).not.toHaveProperty('throughputPerWeek');
 
     expect(result.consultation.totalCount).toBe(5);
     expect(result.consultation.totalCostUsd).toBe(15.00);
@@ -307,10 +317,8 @@ describe('computeAnalytics', () => {
     expect(result.activity.avgTimeToMergeHours).toBeNull();
     expect(result.activity.issuesClosed).toBe(0);
     expect(result.activity.avgTimeToCloseBugsHours).toBeNull();
-    expect(result.activity.projectsCompleted).toBe(0);
-    expect(result.activity.bugsFixed).toBe(0);
-    expect(result.activity.throughputPerWeek).toBe(0);
     expect(result.activity.activeBuilders).toBe(2);
+    expect(result.activity.projectsByProtocol).toEqual({});
     // Consultation still works
     expect(result.consultation.totalCount).toBe(5);
     expect(result.errors?.consultation).toBeUndefined();
@@ -353,62 +361,6 @@ describe('computeAnalytics', () => {
     expect(result.consultation.successRate).toBeNull();
   });
 
-  // --- Projects completed ---
-
-  it('excludes PRs without linked issues from projectsCompleted', async () => {
-    mockGhOutput({
-      mergedPRs: JSON.stringify([
-        { number: 1, title: 'No link', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'No issue ref' },
-        { number: 2, title: '[Spec 42] Feature', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: '' },
-      ]),
-      closedIssues: '[]',
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsCompleted).toBe(1);
-  });
-
-  it('counts all linked issues from a single PR with multiple references', async () => {
-    mockGhOutput({
-      mergedPRs: JSON.stringify([
-        { number: 1, title: 'Big PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42 and Fixes #73' },
-      ]),
-      closedIssues: '[]',
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsCompleted).toBe(2); // Both #42 and #73
-  });
-
-  it('counts distinct issues when multiple PRs link to same issue', async () => {
-    mockGhOutput({
-      mergedPRs: JSON.stringify([
-        { number: 1, title: '[Spec 42] Part 1', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42' },
-        { number: 2, title: '[Spec 42] Part 2', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Closes #42' },
-      ]),
-      closedIssues: '[]',
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsCompleted).toBe(1);
-  });
-
-  // --- Bugs fixed ---
-
-  it('counts bugs fixed from closed issues with bug label', async () => {
-    mockGhOutput({
-      mergedPRs: '[]',
-      closedIssues: JSON.stringify([
-        { number: 1, title: 'Bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-11T00:00:00Z', labels: [{ name: 'bug' }] },
-        { number: 2, title: 'Feature', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-15T00:00:00Z', labels: [{ name: 'enhancement' }] },
-        { number: 3, title: 'Another bug', createdAt: '2026-02-10T00:00:00Z', closedAt: '2026-02-12T00:00:00Z', labels: [{ name: 'bug' }] },
-      ]),
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.bugsFixed).toBe(2);
-  });
-
   // --- Bug-only avg time to close ---
 
   it('only counts bug-labeled issues for avgTimeToCloseBugsHours', async () => {
@@ -442,7 +394,7 @@ describe('computeAnalytics', () => {
 
   // --- Protocol breakdown from PR branch names (#538) ---
 
-  it('derives protocol counts from PR branch names', async () => {
+  it('derives protocol counts and wall clock times from PR branch names', async () => {
     mockGhOutput({
       mergedPRs: JSON.stringify([
         { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/spir-42-feature' },
@@ -454,11 +406,39 @@ describe('computeAnalytics', () => {
     });
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsByProtocol).toEqual({
-      spir: 2,
-      air: 1,
-      bugfix: 1,
+    expect(result.activity.projectsByProtocol.spir?.count).toBe(2);
+    expect(result.activity.projectsByProtocol.spir?.avgWallClockHours).toBeCloseTo(24);
+    expect(result.activity.projectsByProtocol.air?.count).toBe(1);
+    expect(result.activity.projectsByProtocol.bugfix?.count).toBe(1);
+  });
+
+  it('uses "on it" comment timestamp when available', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T12:00:00Z', mergedAt: '2026-02-11T12:00:00Z', body: 'Fixes #42', headRefName: 'builder/bugfix-42-fix' },
+      ]),
+      closedIssues: '[]',
+    }, {
+      // "On it" comment posted 6 hours before PR was created
+      42: '2026-02-10T06:00:00Z',
     });
+
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    // Wall clock should be mergedAt - onIt = 30 hours (not 24 from PR createdAt)
+    expect(result.activity.projectsByProtocol.bugfix?.avgWallClockHours).toBeCloseTo(30);
+  });
+
+  it('falls back to PR createdAt when no "on it" comment found', async () => {
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/bugfix-42-fix' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7', 0);
+    // No "on it" → uses PR createdAt → mergedAt = 24 hours
+    expect(result.activity.projectsByProtocol.bugfix?.avgWallClockHours).toBeCloseTo(24);
   });
 
   it('ignores PRs with unrecognized branch names', async () => {
@@ -472,7 +452,8 @@ describe('computeAnalytics', () => {
     });
 
     const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.projectsByProtocol).toEqual({ bugfix: 1 });
+    expect(Object.keys(result.activity.projectsByProtocol)).toEqual(['bugfix']);
+    expect(result.activity.projectsByProtocol.bugfix?.count).toBe(1);
   });
 
   it('returns empty projectsByProtocol when no PRs have protocol branches', async () => {
@@ -524,36 +505,6 @@ describe('computeAnalytics', () => {
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
 
-  // --- Throughput ---
-
-  it('computes throughput for 30d range', async () => {
-    mockGhOutput({
-      mergedPRs: JSON.stringify([
-        { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
-        { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
-        { number: 3, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #30' },
-        { number: 4, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #40' },
-      ]),
-      closedIssues: '[]',
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '30', 0);
-    const expected = Math.round((4 / (30 / 7)) * 10) / 10;
-    expect(result.activity.throughputPerWeek).toBeCloseTo(expected, 1);
-  });
-
-  it('computes throughput for 7d range (equals projectsCompleted)', async () => {
-    mockGhOutput({
-      mergedPRs: JSON.stringify([
-        { number: 1, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #10' },
-        { number: 2, title: 'PR', createdAt: '2026-02-01T00:00:00Z', mergedAt: '2026-02-02T00:00:00Z', body: 'Fixes #20' },
-      ]),
-      closedIssues: '[]',
-    });
-
-    const result = await computeAnalytics('/tmp/workspace', '7', 0);
-    expect(result.activity.throughputPerWeek).toBe(2);
-  });
 });
 
 // ---------------------------------------------------------------------------

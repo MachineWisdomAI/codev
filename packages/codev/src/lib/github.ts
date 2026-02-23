@@ -235,6 +235,48 @@ export async function fetchClosedIssues(since: string | null, cwd?: string): Pro
   }
 }
 
+/**
+ * Fetch the "On it!" comment timestamp for multiple issues in parallel.
+ *
+ * For each issue number, fetches comments and finds the first one containing
+ * "On it!" (posted by `af spawn`). Returns a map of issue number → ISO timestamp.
+ * Issues without an "On it!" comment are omitted from the result.
+ *
+ * Uses limited concurrency (5 parallel requests) to avoid overwhelming the API.
+ */
+export async function fetchOnItTimestamps(
+  issueNumbers: number[],
+  cwd?: string,
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (issueNumbers.length === 0) return result;
+
+  const unique = [...new Set(issueNumbers)];
+  const CONCURRENCY = 5;
+
+  for (let i = 0; i < unique.length; i += CONCURRENCY) {
+    const batch = unique.slice(i, i + CONCURRENCY);
+    const promises = batch.map(async (issueNum) => {
+      try {
+        const { stdout } = await execFileAsync('gh', [
+          'issue', 'view', String(issueNum),
+          '--json', 'comments',
+          '--jq', '.comments[] | select(.body | test("On it!")) | .createdAt',
+        ], { cwd });
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        if (lines.length > 0) {
+          result.set(issueNum, lines[0]);
+        }
+      } catch {
+        // Silently skip — fallback to PR createdAt will be used
+      }
+    });
+    await Promise.all(promises);
+  }
+
+  return result;
+}
+
 // =============================================================================
 // Parsing utilities
 // =============================================================================

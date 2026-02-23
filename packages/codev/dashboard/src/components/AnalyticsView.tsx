@@ -98,10 +98,20 @@ function MiniBarChart({ data, dataKey, nameKey, color, formatter }: {
   );
 }
 
+function fmtWallClock(hours: number | null): string {
+  if (hours === null) return '\u2014';
+  if (hours < 1) return `${Math.round(hours * 60)}m`;
+  return `${Number(hours.toFixed(1))}h`;
+}
+
 function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['activity']; errors?: AnalyticsResponse['errors'] }) {
   const protocolData = Object.entries(activity.projectsByProtocol)
-    .map(([proto, count]) => ({ name: proto.toUpperCase(), value: count }))
-    .sort((a, b) => b.value - a.value);
+    .map(([proto, stats]) => ({
+      name: proto.toUpperCase(),
+      count: stats.count,
+      avgWallClock: stats.avgWallClockHours,
+    }))
+    .sort((a, b) => b.count - a.count);
 
   return (
     <Section title="Activity" error={errors?.github}>
@@ -110,20 +120,17 @@ function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['ac
           <h4 className="analytics-sub-title">Projects by Protocol</h4>
           <MetricGrid>
             {protocolData.map(d => (
-              <Metric key={d.name} label={d.name} value={String(d.value)} />
+              <Metric key={d.name} label={d.name} value={`${d.count} (avg ${fmtWallClock(d.avgWallClock)})`} />
             ))}
           </MetricGrid>
-          <MiniBarChart data={protocolData} dataKey="value" nameKey="name" />
+          <MiniBarChart data={protocolData} dataKey="count" nameKey="name" />
         </div>
       )}
       <MetricGrid>
-        <Metric label="Projects Completed" value={String(activity.projectsCompleted)} />
-        <Metric label="Bugs Fixed" value={String(activity.bugsFixed)} />
         <Metric label="PRs Merged" value={String(activity.prsMerged)} />
         <Metric label="Issues Closed" value={String(activity.issuesClosed)} />
         <Metric label="Avg Time to Merge" value={fmt(activity.avgTimeToMergeHours, 1, 'h')} />
         <Metric label="Avg Time to Close Bugs" value={fmt(activity.avgTimeToCloseBugsHours, 1, 'h')} />
-        <Metric label="Throughput / Week" value={fmt(activity.throughputPerWeek)} />
         <Metric label="Active Builders" value={String(activity.activeBuilders)} />
       </MetricGrid>
     </Section>

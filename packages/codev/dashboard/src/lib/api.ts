@@ -143,6 +143,11 @@ export interface OverviewData {
 
 // Spec 456: Analytics tab types and fetcher
 
+export interface ProtocolStats {
+  count: number;
+  avgWallClockHours: number | null;
+}
+
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
   activity: {
@@ -150,11 +155,8 @@ export interface AnalyticsResponse {
     avgTimeToMergeHours: number | null;
     issuesClosed: number;
     avgTimeToCloseBugsHours: number | null;
-    projectsCompleted: number;
-    bugsFixed: number;
-    throughputPerWeek: number;
     activeBuilders: number;
-    projectsByProtocol: Record<string, number>;
+    projectsByProtocol: Record<string, ProtocolStats>;
   };
   consultation: {
     totalCount: number;

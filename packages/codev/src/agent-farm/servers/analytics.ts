@@ -14,6 +14,7 @@ import {
   fetchMergedPRs,
   fetchClosedIssues,
   parseAllLinkedIssues,
+  fetchOnItTimestamps,
 } from '../../lib/github.js';
 import type { MergedPR } from '../../lib/github.js';
 import { MetricsDB } from '../../commands/consult/metrics.js';
@@ -22,6 +23,11 @@ import { MetricsDB } from '../../commands/consult/metrics.js';
 // Types
 // =============================================================================
 
+export interface ProtocolStats {
+  count: number;
+  avgWallClockHours: number | null;
+}
+
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
   activity: {
@@ -29,11 +35,8 @@ export interface AnalyticsResponse {
     avgTimeToMergeHours: number | null;
     issuesClosed: number;
     avgTimeToCloseBugsHours: number | null;
-    projectsCompleted: number;
-    bugsFixed: number;
-    throughputPerWeek: number;
     activeBuilders: number;
-    projectsByProtocol: Record<string, number>;
+    projectsByProtocol: Record<string, ProtocolStats>;
   };
   consultation: {
     totalCount: number;
@@ -101,15 +104,6 @@ function rangeToSinceDate(range: RangeParam): string | null {
   return since.toISOString().split('T')[0]; // YYYY-MM-DD
 }
 
-function rangeToWeeks(range: RangeParam): number {
-  if (range === '1') return 1 / 7;
-  if (range === '7') return 1;
-  if (range === '30') return 30 / 7;
-  // For "all", we can't know the true range without data, so return 1
-  // (throughput = projectsCompleted / 1 = total projects)
-  return 1;
-}
-
 // =============================================================================
 // GitHub metrics computation
 // =============================================================================
@@ -127,8 +121,6 @@ interface GitHubMetrics {
   avgTimeToMergeHours: number | null;
   issuesClosed: number;
   avgTimeToCloseBugsHours: number | null;
-  projectsCompleted: number;
-  bugsFixed: number;
   mergedPRList: MergedPR[];
 }
 
@@ -167,25 +159,11 @@ async function computeGitHubMetrics(
     closedBugs.map(i => ({ start: i.createdAt, end: i.closedAt })),
   );
 
-  // Bugs fixed (closed issues with bug label)
-  const bugsFixed = closedBugs.length;
-
-  // Projects completed (distinct issue numbers from merged PRs via parseAllLinkedIssues)
-  const linkedIssues = new Set<number>();
-  for (const pr of prs) {
-    for (const issueNum of parseAllLinkedIssues(pr.body ?? '', pr.title)) {
-      linkedIssues.add(issueNum);
-    }
-  }
-  const projectsCompleted = linkedIssues.size;
-
   return {
     prsMerged,
     avgTimeToMergeHours,
     issuesClosed,
     avgTimeToCloseBugsHours,
-    projectsCompleted,
-    bugsFixed,
     mergedPRList: prs,
   };
 }
@@ -286,13 +264,65 @@ export function protocolFromBranch(branch: string): string | null {
   return null;
 }
 
-function computeProjectsByProtocol(mergedPRs: MergedPR[]): Record<string, number> {
-  const result: Record<string, number> = {};
+async function computeProjectsByProtocol(
+  mergedPRs: MergedPR[],
+  cwd: string,
+): Promise<Record<string, ProtocolStats>> {
+  // Group PRs by protocol and collect linked issue numbers
+  const byProtocol = new Map<string, MergedPR[]>();
+  const issueToProtocolPRs = new Map<number, MergedPR[]>();
+
   for (const pr of mergedPRs) {
     const protocol = protocolFromBranch(pr.headRefName ?? '');
-    if (protocol) {
-      result[protocol] = (result[protocol] ?? 0) + 1;
+    if (!protocol) continue;
+
+    if (!byProtocol.has(protocol)) byProtocol.set(protocol, []);
+    byProtocol.get(protocol)!.push(pr);
+
+    // Track linked issues for "on it" timestamp lookup
+    for (const issueNum of parseAllLinkedIssues(pr.body ?? '', pr.title)) {
+      if (!issueToProtocolPRs.has(issueNum)) issueToProtocolPRs.set(issueNum, []);
+      issueToProtocolPRs.get(issueNum)!.push(pr);
     }
+  }
+
+  // Fetch "on it" timestamps for all linked issues
+  const onItTimestamps = await fetchOnItTimestamps(
+    [...issueToProtocolPRs.keys()],
+    cwd,
+  );
+
+  // Build a map from PR number → start time (on-it or fallback to PR createdAt)
+  const prStartTime = new Map<number, string>();
+  for (const [issueNum, prs] of issueToProtocolPRs) {
+    const onIt = onItTimestamps.get(issueNum);
+    if (onIt) {
+      for (const pr of prs) {
+        // Only set if not already set (first linked issue wins)
+        if (!prStartTime.has(pr.number)) {
+          prStartTime.set(pr.number, onIt);
+        }
+      }
+    }
+  }
+
+  // Compute per-protocol stats
+  const result: Record<string, ProtocolStats> = {};
+  for (const [protocol, prs] of byProtocol) {
+    const wallClockHours: number[] = [];
+    for (const pr of prs) {
+      if (!pr.mergedAt) continue;
+      const start = prStartTime.get(pr.number) ?? pr.createdAt;
+      const ms = new Date(pr.mergedAt).getTime() - new Date(start).getTime();
+      wallClockHours.push(ms / (1000 * 60 * 60));
+    }
+
+    result[protocol] = {
+      count: prs.length,
+      avgWallClockHours: wallClockHours.length > 0
+        ? wallClockHours.reduce((a, b) => a + b, 0) / wallClockHours.length
+        : null,
+    };
   }
   return result;
 }
@@ -327,7 +357,6 @@ export async function computeAnalytics(
 
   const since = rangeToSinceDate(range);
   const days = rangeToDays(range);
-  const weeks = rangeToWeeks(range);
   const errors: { github?: string; consultation?: string } = {};
 
   // GitHub metrics
@@ -342,8 +371,6 @@ export async function computeAnalytics(
       avgTimeToMergeHours: null,
       issuesClosed: 0,
       avgTimeToCloseBugsHours: null,
-      projectsCompleted: 0,
-      bugsFixed: 0,
       mergedPRList: [],
     };
   }
@@ -367,8 +394,11 @@ export async function computeAnalytics(
     };
   }
 
-  // Protocol breakdown derived from PR branch names (respects time range)
-  const projectsByProtocol = computeProjectsByProtocol(githubMetrics.mergedPRList);
+  // Protocol breakdown with avg wall clock times (from PR branch names + "on it" timestamps)
+  const projectsByProtocol = await computeProjectsByProtocol(
+    githubMetrics.mergedPRList,
+    workspaceRoot,
+  );
 
   const result: AnalyticsResponse = {
     timeRange: rangeToLabel(range),
@@ -377,11 +407,6 @@ export async function computeAnalytics(
       avgTimeToMergeHours: githubMetrics.avgTimeToMergeHours,
       issuesClosed: githubMetrics.issuesClosed,
       avgTimeToCloseBugsHours: githubMetrics.avgTimeToCloseBugsHours,
-      projectsCompleted: githubMetrics.projectsCompleted,
-      bugsFixed: githubMetrics.bugsFixed,
-      throughputPerWeek: weeks > 0
-        ? Math.round((githubMetrics.projectsCompleted / weeks) * 10) / 10
-        : 0,
       activeBuilders,
       projectsByProtocol,
     },
