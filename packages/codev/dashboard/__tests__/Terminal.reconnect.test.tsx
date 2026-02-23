@@ -175,30 +175,36 @@ describe('Terminal WebSocket auto-reconnect (Bugfix #442)', () => {
     const { container } = render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
 
-    // No status dot while connected
-    expect(container.querySelector('.terminal-status-icon')).toBeNull();
+    // Bugfix #524: Status icon always visible — green when connected
+    const connectedDot = container.querySelector('.terminal-status-icon');
+    expect(connectedDot).not.toBeNull();
+    expect(connectedDot!.classList.contains('terminal-status-connected')).toBe(true);
 
-    // Disconnect triggers reconnecting dot
+    // Disconnect triggers reconnecting dot (yellow)
     act(() => { wsInstances[0].simulateClose(); });
     const dot = container.querySelector('.terminal-status-icon');
     expect(dot).not.toBeNull();
     expect(dot!.classList.contains('terminal-status-reconnecting')).toBe(true);
   });
 
-  it('hides status dot on successful reconnection', () => {
+  it('restores connected status on successful reconnection', () => {
     const { container } = render(<Terminal wsPath="/ws/terminal/t1" />);
     act(() => { wsInstances[0].simulateOpen(); });
     act(() => { wsInstances[0].simulateClose(); });
 
-    // Dot is shown
-    expect(container.querySelector('.terminal-status-icon')).not.toBeNull();
+    // Dot shows reconnecting
+    const reconnDot = container.querySelector('.terminal-status-icon');
+    expect(reconnDot).not.toBeNull();
+    expect(reconnDot!.classList.contains('terminal-status-reconnecting')).toBe(true);
 
     // Reconnect
     act(() => { vi.advanceTimersByTime(1000); });
     act(() => { wsInstances[1].simulateOpen(); });
 
-    // Dot is hidden
-    expect(container.querySelector('.terminal-status-icon')).toBeNull();
+    // Dot returns to connected (green)
+    const dot = container.querySelector('.terminal-status-icon');
+    expect(dot).not.toBeNull();
+    expect(dot!.classList.contains('terminal-status-connected')).toBe(true);
   });
 
   it('gives up after max attempts and shows session ended', () => {

@@ -112,6 +112,29 @@ body {
   background: var(--accent);
 }
 
+/* Full-height expand bar when a panel is collapsed (Bugfix #524) */
+.expand-bar {
+  width: 24px;
+  height: 100%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: none;
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+
+.expand-bar:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
 /* Header controls — collapse/expand buttons (Issue #513) */
 .header-controls {
   display: flex;
@@ -374,19 +397,24 @@ body {
   flex-shrink: 0;
 }
 
-/* Connection status icon in toolbar (Bugfix #451, #493) */
+/* Connection status icon — traffic-light colors (Bugfix #451, #493, #524) */
 .terminal-status-icon {
   cursor: default;
 }
 
+.terminal-status-icon.terminal-status-connected {
+  color: #22c55e;
+  opacity: 0.7;
+}
+
 .terminal-status-icon.terminal-status-reconnecting {
-  color: #ffcc00;
+  color: #eab308;
   opacity: 0.8;
   animation: terminal-pulse 1.2s ease-in-out infinite;
 }
 
 .terminal-status-icon.terminal-status-disconnected {
-  color: #ff4444;
+  color: #ef4444;
   opacity: 0.8;
 }
 
