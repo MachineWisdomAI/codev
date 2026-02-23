@@ -36,7 +36,7 @@ vi.mock('../../commands/consult/metrics.js', () => ({
 // Static imports (resolved after mocks are hoisted)
 // ---------------------------------------------------------------------------
 
-import { fetchMergedPRs, fetchClosedIssues } from '../../lib/github.js';
+import { fetchMergedPRs, fetchClosedIssues, fetchOnItTimestamps } from '../../lib/github.js';
 import { computeAnalytics, clearAnalyticsCache, protocolFromBranch } from '../servers/analytics.js';
 
 // ---------------------------------------------------------------------------
@@ -53,11 +53,23 @@ function mockGhOutput(responses: Record<string, string>, onItTimestamps?: Record
     if (argsStr.includes('issue') && argsStr.includes('list') && argsStr.includes('closed')) {
       return Promise.resolve({ stdout: responses.closedIssues ?? '[]' });
     }
-    // gh issue view <N> --json comments --jq ... (for fetchOnItTimestamps)
-    if (argsStr.includes('issue') && argsStr.includes('view') && argsStr.includes('comments')) {
-      const issueNum = parseInt(args[2], 10);
-      const ts = onItTimestamps?.[issueNum];
-      return Promise.resolve({ stdout: ts ?? '' });
+    // gh repo view --json owner,name (for GraphQL repo context)
+    if (argsStr.includes('repo') && argsStr.includes('view')) {
+      return Promise.resolve({ stdout: JSON.stringify({ owner: { login: 'test' }, name: 'repo' }) });
+    }
+    // gh api graphql (for fetchOnItTimestamps batch query)
+    if (argsStr.includes('api') && argsStr.includes('graphql')) {
+      const repository: Record<string, unknown> = {};
+      if (onItTimestamps) {
+        for (const [num, ts] of Object.entries(onItTimestamps)) {
+          repository[`issue${num}`] = {
+            comments: { nodes: [{ body: 'On it! Working on a fix now.', createdAt: ts }] },
+          };
+        }
+      }
+      return Promise.resolve({
+        stdout: JSON.stringify({ data: { repository } }),
+      });
     }
 
     return Promise.resolve({ stdout: '[]' });
@@ -531,5 +543,99 @@ describe('protocolFromBranch', () => {
     '',
   ])('returns null for unrecognized branch "%s"', (branch) => {
     expect(protocolFromBranch(branch)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchOnItTimestamps — regression test for #543 (GraphQL batch query)
+// ---------------------------------------------------------------------------
+
+describe('fetchOnItTimestamps', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('uses GraphQL batch query instead of individual gh issue view calls', async () => {
+    execFileMock.mockImplementation((_cmd: string, args: string[]) => {
+      const argsStr = args.join(' ');
+      if (argsStr.includes('repo') && argsStr.includes('view')) {
+        return Promise.resolve({ stdout: JSON.stringify({ owner: { login: 'test' }, name: 'repo' }) });
+      }
+      if (argsStr.includes('api') && argsStr.includes('graphql')) {
+        return Promise.resolve({
+          stdout: JSON.stringify({
+            data: {
+              repository: {
+                issue42: { comments: { nodes: [{ body: 'On it! Working on it.', createdAt: '2026-02-10T06:00:00Z' }] } },
+                issue73: { comments: { nodes: [{ body: 'Just a comment', createdAt: '2026-02-10T07:00:00Z' }] } },
+              },
+            },
+          }),
+        });
+      }
+      return Promise.resolve({ stdout: '[]' });
+    });
+
+    const result = await fetchOnItTimestamps([42, 73], '/tmp');
+
+    expect(result.get(42)).toBe('2026-02-10T06:00:00Z');
+    expect(result.has(73)).toBe(false); // No "On it!" comment
+    // Verify it used GraphQL, not individual gh issue view calls
+    const calls = execFileMock.mock.calls.map((c: unknown[]) => (c[1] as string[]).join(' '));
+    expect(calls.some((c: string) => c.includes('api') && c.includes('graphql'))).toBe(true);
+    expect(calls.some((c: string) => c.includes('issue') && c.includes('view'))).toBe(false);
+  });
+
+  it('returns empty map for empty input', async () => {
+    const result = await fetchOnItTimestamps([]);
+    expect(result.size).toBe(0);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates issue numbers', async () => {
+    execFileMock.mockImplementation((_cmd: string, args: string[]) => {
+      const argsStr = args.join(' ');
+      if (argsStr.includes('repo') && argsStr.includes('view')) {
+        return Promise.resolve({ stdout: JSON.stringify({ owner: { login: 'test' }, name: 'repo' }) });
+      }
+      if (argsStr.includes('api') && argsStr.includes('graphql')) {
+        // Check that the query only has one alias for issue 42
+        const queryArg = args.find((a: string) => a.startsWith('query='));
+        const count = (queryArg?.match(/issue42:/g) ?? []).length;
+        expect(count).toBe(1);
+        return Promise.resolve({
+          stdout: JSON.stringify({ data: { repository: {} } }),
+        });
+      }
+      return Promise.resolve({ stdout: '[]' });
+    });
+
+    await fetchOnItTimestamps([42, 42, 42], '/tmp');
+  });
+
+  it('returns empty map when repo lookup fails', async () => {
+    execFileMock.mockRejectedValue(new Error('gh not found'));
+
+    const result = await fetchOnItTimestamps([42], '/tmp');
+    expect(result.size).toBe(0);
+  });
+
+  it('handles GraphQL query failure gracefully', async () => {
+    let callCount = 0;
+    execFileMock.mockImplementation((_cmd: string, args: string[]) => {
+      const argsStr = args.join(' ');
+      if (argsStr.includes('repo') && argsStr.includes('view')) {
+        return Promise.resolve({ stdout: JSON.stringify({ owner: { login: 'test' }, name: 'repo' }) });
+      }
+      if (argsStr.includes('api') && argsStr.includes('graphql')) {
+        callCount++;
+        return Promise.reject(new Error('GraphQL rate limited'));
+      }
+      return Promise.resolve({ stdout: '[]' });
+    });
+
+    const result = await fetchOnItTimestamps([42, 73], '/tmp');
+    expect(result.size).toBe(0);
+    expect(callCount).toBe(1); // Only one batch call attempted
   });
 });
