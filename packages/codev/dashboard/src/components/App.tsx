@@ -134,7 +134,7 @@ export function App() {
         <div style={{ display: activeTab?.type === 'work' ? undefined : 'none', height: '100%' }}>
           <WorkView state={state} onRefresh={refresh} onSelectTab={selectTab} />
         </div>
-        <div style={{ display: activeTab?.type === 'analytics' ? undefined : 'none' }}>
+        <div style={{ display: activeTab?.type === 'analytics' ? undefined : 'none', height: '100%' }}>
           <AnalyticsView isActive={activeTab?.type === 'analytics'} />
         </div>
         {activeTab?.type === 'file' && renderAnnotation(activeTab)}
