@@ -67,6 +67,7 @@ export interface StatsFilters {
   type?: string;
   protocol?: string;
   project?: string;
+  workspace?: string;
   last?: number;
 }
 
@@ -147,6 +148,10 @@ function buildWhereClause(filters: StatsFilters): { where: string; params: Recor
   if (filters.project) {
     conditions.push('project_id = @filterProject');
     params.filterProject = filters.project;
+  }
+  if (filters.workspace) {
+    conditions.push('workspace_path = @filterWorkspace');
+    params.filterWorkspace = filters.workspace;
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
