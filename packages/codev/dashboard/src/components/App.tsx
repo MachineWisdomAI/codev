@@ -205,9 +205,7 @@ export function App() {
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="3" y1="2" x2="3" y2="14" />
-            {collapsedPane === 'right'
-              ? <path d="M7 5l4 3-4 3" />
-              : <path d="M12 5l-4 3 4 3" />}
+            <path d="M12 5l-4 3 4 3" />
           </svg>
         </button>
       )}
@@ -216,14 +214,12 @@ export function App() {
           className="terminal-control-btn"
           onPointerDown={(e) => e.preventDefault()}
           onClick={handleRightCollapse}
-          title={collapsedPane === 'left' ? 'Restore split layout' : 'Collapse work panel'}
-          aria-label={collapsedPane === 'left' ? 'Restore split layout' : 'Collapse work panel'}
+          title="Collapse work panel"
+          aria-label="Collapse work panel"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="13" y1="2" x2="13" y2="14" />
-            {collapsedPane === 'left'
-              ? <path d="M9 5l-4 3 4 3" />
-              : <path d="M4 5l4 3-4 3" />}
+            <path d="M4 5l4 3-4 3" />
           </svg>
         </button>
       )}
