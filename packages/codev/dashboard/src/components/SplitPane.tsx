@@ -55,7 +55,8 @@ export function SplitPane({ left, right, defaultSplit = 50, collapsedPane = null
       <div
         className="split-left"
         style={{
-          width: isLeftCollapsed ? 0 : isRightCollapsed ? '100%' : `${split}%`,
+          width: isLeftCollapsed ? 0 : isRightCollapsed ? undefined : `${split}%`,
+          flex: isRightCollapsed ? 1 : undefined,
           display: isLeftCollapsed ? 'none' : undefined,
         }}
       >
@@ -67,7 +68,8 @@ export function SplitPane({ left, right, defaultSplit = 50, collapsedPane = null
       <div
         className="split-right"
         style={{
-          width: isRightCollapsed ? 0 : isLeftCollapsed ? '100%' : `${100 - split}%`,
+          width: isRightCollapsed ? 0 : isLeftCollapsed ? undefined : `${100 - split}%`,
+          flex: isLeftCollapsed ? 1 : undefined,
           display: isRightCollapsed ? 'none' : undefined,
         }}
       >

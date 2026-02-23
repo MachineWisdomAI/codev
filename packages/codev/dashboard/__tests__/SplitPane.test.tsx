@@ -41,9 +41,9 @@ describe('SplitPane', () => {
     const leftPane = container.querySelector('.split-left') as HTMLElement;
     expect(leftPane.style.display).toBe('none');
 
-    // Right pane full width
+    // Right pane fills remaining space (flex: 1 alongside 24px expand bar)
     const rightPane = container.querySelector('.split-right') as HTMLElement;
-    expect(rightPane.style.width).toBe('100%');
+    expect(rightPane.style.flex).toContain('1');
 
     // Full-height expand bar on left edge
     const expandBar = screen.getByTitle('Expand architect panel');
@@ -69,9 +69,9 @@ describe('SplitPane', () => {
     const rightPane = container.querySelector('.split-right') as HTMLElement;
     expect(rightPane.style.display).toBe('none');
 
-    // Left pane full width
+    // Left pane fills remaining space (flex: 1 alongside 24px expand bar)
     const leftPane = container.querySelector('.split-left') as HTMLElement;
-    expect(leftPane.style.width).toBe('100%');
+    expect(leftPane.style.flex).toContain('1');
 
     // Full-height expand bar on right edge
     const expandBar = screen.getByTitle('Expand work panel');
