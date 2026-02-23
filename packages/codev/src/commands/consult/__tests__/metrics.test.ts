@@ -344,6 +344,54 @@ describe('Stats filter flags', () => {
   });
 });
 
+// Test: Workspace filtering (#545 regression)
+describe('Workspace filtering (#545)', () => {
+  let tmpDir: string;
+  let db: MetricsDB;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    db = new MetricsDB(join(tmpDir, 'test.db'));
+
+    db.record(sampleRecord({ workspacePath: '/projects/codev', costUsd: 5.00 }));
+    db.record(sampleRecord({ workspacePath: '/projects/codev', costUsd: 3.00 }));
+    db.record(sampleRecord({ workspacePath: '/projects/small-app', costUsd: 1.00 }));
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('query filters by workspace', () => {
+    const rows = db.query({ workspace: '/projects/codev' });
+    expect(rows).toHaveLength(2);
+    rows.forEach(r => expect(r.workspace_path).toBe('/projects/codev'));
+  });
+
+  it('summary scoped to workspace only includes that workspace', () => {
+    const summary = db.summary({ workspace: '/projects/small-app' });
+    expect(summary.totalCount).toBe(1);
+    expect(summary.totalCost).toBeCloseTo(1.00);
+  });
+
+  it('summary without workspace filter returns all workspaces', () => {
+    const summary = db.summary({});
+    expect(summary.totalCount).toBe(3);
+    expect(summary.totalCost).toBeCloseTo(9.00);
+  });
+
+  it('costByProject scoped to workspace', () => {
+    db.record(sampleRecord({ workspacePath: '/projects/codev', projectId: '0042', costUsd: 10.00 }));
+    db.record(sampleRecord({ workspacePath: '/projects/small-app', projectId: '0042', costUsd: 20.00 }));
+
+    const result = db.costByProject({ workspace: '/projects/codev' });
+    const proj = result.find(r => r.projectId === '0042');
+    expect(proj).toBeDefined();
+    expect(proj!.totalCost).toBeCloseTo(10.00);
+  });
+});
+
 // Test 8: CLI flag acceptance (--protocol, --project-id)
 describe('CLI flag acceptance', () => {
   let tmpDir: string;

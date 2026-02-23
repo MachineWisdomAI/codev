@@ -517,6 +517,43 @@ describe('computeAnalytics', () => {
     expect(mockSummary).toHaveBeenCalledTimes(2);
   });
 
+  // --- Workspace scoping (#545) ---
+
+  it('passes workspace filter to MetricsDB.summary()', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
+
+    await computeAnalytics('/tmp/my-workspace', '7', 0);
+
+    expect(mockSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: '/tmp/my-workspace' }),
+    );
+  });
+
+  it('passes workspace filter for all time ranges', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
+
+    await computeAnalytics('/tmp/workspace-a', 'all', 0);
+
+    expect(mockSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: '/tmp/workspace-a' }),
+    );
+  });
+
+  it('different workspaces get different cache entries', async () => {
+    mockGhOutput({ mergedPRs: '[]', closedIssues: '[]' });
+
+    await computeAnalytics('/tmp/workspace-a', '7', 0);
+    await computeAnalytics('/tmp/workspace-b', '7', 0);
+
+    expect(mockSummary).toHaveBeenCalledTimes(2);
+    expect(mockSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: '/tmp/workspace-a' }),
+    );
+    expect(mockSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: '/tmp/workspace-b' }),
+    );
+  });
+
 });
 
 // ---------------------------------------------------------------------------

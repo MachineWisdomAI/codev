@@ -189,10 +189,11 @@ interface ConsultationMetrics {
   byProtocol: Record<string, number>;
 }
 
-function computeConsultationMetrics(days: number | undefined): ConsultationMetrics {
+function computeConsultationMetrics(days: number | undefined, workspacePath: string): ConsultationMetrics {
   const db = new MetricsDB();
   try {
-    const filters = days ? { days } : {};
+    const filters: { days?: number; workspace: string } = { workspace: workspacePath };
+    if (days) filters.days = days;
     const summary = db.summary(filters);
 
     // Derive costByModel from summary.byModel
@@ -378,7 +379,7 @@ export async function computeAnalytics(
   // Consultation metrics
   let consultMetrics: ConsultationMetrics;
   try {
-    consultMetrics = computeConsultationMetrics(days);
+    consultMetrics = computeConsultationMetrics(days, workspaceRoot);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     errors.consultation = msg;
