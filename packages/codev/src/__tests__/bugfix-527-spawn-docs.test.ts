@@ -16,7 +16,9 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
 /** Files that contain af spawn examples agents will read */
 const DOC_FILES = [
   'codev-skeleton/roles/architect.md',
+  'codev/roles/architect.md',
   'codev/resources/commands/agent-farm.md',
+  'codev-skeleton/resources/commands/agent-farm.md',
   'codev/resources/workflow-reference.md',
   '.claude/skills/af/SKILL.md',
   'codev-skeleton/.claude/skills/af/SKILL.md',
