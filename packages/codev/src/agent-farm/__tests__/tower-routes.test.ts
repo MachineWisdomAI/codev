@@ -1017,7 +1017,7 @@ describe('tower-routes', () => {
   describe('GET /api/analytics', () => {
     const fakeStats = {
       timeRange: '7d',
-      activity: { prsMerged: 5, avgTimeToMergeHours: 2.5, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2, projectsCompleted: 3, bugsFixed: 1, throughputPerWeek: 3, activeBuilders: 1, projectsByProtocol: { spir: 2, bugfix: 1 } },
+      activity: { prsMerged: 5, avgTimeToMergeHours: 2.5, issuesClosed: 4, avgTimeToCloseBugsHours: 1.2, activeBuilders: 1, projectsByProtocol: { spir: { count: 2, avgWallClockHours: 36 }, bugfix: { count: 1, avgWallClockHours: 2.5 } } },
       consultation: { totalCount: 10, totalCostUsd: 0.5, costByModel: {}, avgLatencySeconds: 12, successRate: 90, byModel: [], byReviewType: {}, byProtocol: {} },
     };
 
