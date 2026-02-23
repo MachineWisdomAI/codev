@@ -1,17 +1,23 @@
 /**
  * Analytics aggregation service for the dashboard Analytics tab.
  *
- * Aggregates data from two sources:
- * - Project artifacts (codev/projects/<name>/status.yaml) for activity metrics
+ * Aggregates data from three sources:
+ * - GitHub CLI (merged PRs, closed issues, open issue backlogs)
  * - Consultation metrics DB (~/.codev/metrics.db)
+ * - Active builder count (passed in from tower context)
  *
  * Each data source fails independently — partial results are returned
  * with error messages in the `errors` field.
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as yaml from 'js-yaml';
+import {
+  fetchMergedPRs,
+  fetchClosedIssues,
+  fetchIssueList,
+  parseAllLinkedIssues,
+  type MergedPR,
+  type ClosedIssue,
+} from '../../lib/github.js';
 import { MetricsDB } from '../../commands/consult/metrics.js';
 
 // =============================================================================
@@ -20,11 +26,16 @@ import { MetricsDB } from '../../commands/consult/metrics.js';
 
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
-  activity: {
-    projectsCompleted: number;
-    projectsByProtocol: Record<string, number>;
-    bugsFixed: number;
+  github: {
+    prsMerged: number;
     avgTimeToMergeHours: number | null;
+    bugBacklog: number;
+    nonBugBacklog: number;
+    issuesClosed: number;
+    avgTimeToCloseBugsHours: number | null;
+  };
+  builders: {
+    projectsCompleted: number;
     throughputPerWeek: number;
     activeBuilders: number;
   };
@@ -43,9 +54,13 @@ export interface AnalyticsResponse {
     }>;
     byReviewType: Record<string, number>;
     byProtocol: Record<string, number>;
+    costByProject: Array<{
+      projectId: string;
+      totalCost: number;
+    }>;
   };
   errors?: {
-    activity?: string;
+    github?: string;
     consultation?: string;
   };
 }
@@ -87,117 +102,104 @@ function rangeToDays(range: RangeParam): number | undefined {
   return undefined;
 }
 
+function rangeToSinceDate(range: RangeParam): string | null {
+  const days = rangeToDays(range);
+  if (!days) return null;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return since.toISOString().split('T')[0]; // YYYY-MM-DD
+}
+
 function rangeToWeeks(range: RangeParam): number {
   if (range === '1') return 1 / 7;
   if (range === '7') return 1;
   if (range === '30') return 30 / 7;
   // For "all", we can't know the true range without data, so return 1
+  // (throughput = projectsCompleted / 1 = total projects)
   return 1;
 }
 
 // =============================================================================
-// Project artifact scanning
+// GitHub metrics computation
 // =============================================================================
 
-interface ProjectStatus {
-  protocol: string;
-  phase: string;
-  startedAt: string | null;
-  updatedAt: string | null;
+function computeAvgHours(items: Array<{ start: string; end: string }>): number | null {
+  if (items.length === 0) return null;
+  const totalMs = items.reduce((sum, item) => {
+    return sum + (new Date(item.end).getTime() - new Date(item.start).getTime());
+  }, 0);
+  return totalMs / items.length / (1000 * 60 * 60);
 }
 
-/**
- * Scan codev/projects/<name>/status.yaml for project statuses.
- * Exported for testing.
- */
-export function scanProjectStatuses(workspaceRoot: string): ProjectStatus[] {
-  const projectsDir = path.join(workspaceRoot, 'codev', 'projects');
-  if (!fs.existsSync(projectsDir)) return [];
-
-  const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
-  const statuses: ProjectStatus[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const statusFile = path.join(projectsDir, entry.name, 'status.yaml');
-    if (!fs.existsSync(statusFile)) continue;
-    try {
-      const content = fs.readFileSync(statusFile, 'utf-8');
-      const parsed = yaml.load(content) as Record<string, unknown>;
-      if (!parsed || typeof parsed !== 'object') continue;
-      statuses.push({
-        protocol: String(parsed.protocol ?? ''),
-        phase: String(parsed.phase ?? ''),
-        startedAt: parsed.started_at ? String(parsed.started_at) : null,
-        updatedAt: parsed.updated_at ? String(parsed.updated_at) : null,
-      });
-    } catch {
-      // Skip unparseable files
-    }
-  }
-
-  return statuses;
-}
-
-// Normalize protocol names (spider → spir)
-function normalizeProtocol(protocol: string): string {
-  if (protocol === 'spider') return 'spir';
-  return protocol;
-}
-
-interface ActivityMetrics {
-  projectsCompleted: number;
-  projectsByProtocol: Record<string, number>;
-  bugsFixed: number;
+interface GitHubMetrics {
+  prsMerged: number;
   avgTimeToMergeHours: number | null;
+  bugBacklog: number;
+  nonBugBacklog: number;
+  issuesClosed: number;
+  avgTimeToCloseBugsHours: number | null;
+  projectsCompleted: number;
 }
 
-function computeActivityMetrics(
-  workspaceRoot: string,
-  range: RangeParam,
-): ActivityMetrics {
-  const allStatuses = scanProjectStatuses(workspaceRoot);
-  const days = rangeToDays(range);
-  const sinceMs = days ? Date.now() - days * 24 * 60 * 60 * 1000 : null;
+async function computeGitHubMetrics(
+  since: string | null,
+  cwd: string,
+): Promise<GitHubMetrics> {
+  // Fetch merged PRs and closed issues in parallel
+  const [mergedPRs, closedIssues, openIssues] = await Promise.all([
+    fetchMergedPRs(since, cwd),
+    fetchClosedIssues(since, cwd),
+    fetchIssueList(cwd),
+  ]);
 
-  // Filter to complete projects, optionally within time range
-  const completeProjects = allStatuses.filter(p => {
-    if (p.phase !== 'complete') return false;
-    if (sinceMs && p.updatedAt) {
-      return new Date(p.updatedAt).getTime() >= sinceMs;
-    }
-    // If no time filter or no updatedAt, include for 'all' range only
-    return !sinceMs;
-  });
-
-  // Split bugs vs non-bug projects
-  const bugProjects = completeProjects.filter(p => normalizeProtocol(p.protocol) === 'bugfix');
-  const nonBugProjects = completeProjects.filter(p => normalizeProtocol(p.protocol) !== 'bugfix');
-
-  // Group non-bug projects by protocol
-  const projectsByProtocol: Record<string, number> = {};
-  for (const p of nonBugProjects) {
-    const proto = normalizeProtocol(p.protocol);
-    projectsByProtocol[proto] = (projectsByProtocol[proto] ?? 0) + 1;
+  if (mergedPRs === null && closedIssues === null && openIssues === null) {
+    throw new Error('GitHub CLI unavailable');
   }
 
-  // Avg time to complete (started_at → updated_at) for all complete projects
-  const durations: number[] = [];
-  for (const p of completeProjects) {
-    if (p.startedAt && p.updatedAt) {
-      const ms = new Date(p.updatedAt).getTime() - new Date(p.startedAt).getTime();
-      if (ms > 0) durations.push(ms);
+  // PRs merged
+  const prs = mergedPRs ?? [];
+  const prsMerged = prs.length;
+
+  // Average time to merge
+  const avgTimeToMergeHours = computeAvgHours(
+    prs.filter(pr => pr.mergedAt).map(pr => ({ start: pr.createdAt, end: pr.mergedAt })),
+  );
+
+  // Backlogs (from open issues)
+  const issues = openIssues ?? [];
+  const bugBacklog = issues.filter(i =>
+    i.labels.some(l => l.name === 'bug'),
+  ).length;
+  const nonBugBacklog = issues.length - bugBacklog;
+
+  // Closed issues
+  const closed = closedIssues ?? [];
+  const issuesClosed = closed.length;
+
+  // Average time to close bugs
+  const closedBugs = closed.filter(i =>
+    i.labels.some(l => l.name === 'bug') && i.closedAt,
+  );
+  const avgTimeToCloseBugsHours = computeAvgHours(
+    closedBugs.map(i => ({ start: i.createdAt, end: i.closedAt })),
+  );
+
+  // Projects completed (distinct issue numbers from merged PRs via parseAllLinkedIssues)
+  const linkedIssues = new Set<number>();
+  for (const pr of prs) {
+    for (const issueNum of parseAllLinkedIssues(pr.body ?? '', pr.title)) {
+      linkedIssues.add(issueNum);
     }
   }
-  const avgTimeToMergeHours = durations.length > 0
-    ? durations.reduce((a, b) => a + b, 0) / durations.length / (1000 * 60 * 60)
-    : null;
+  const projectsCompleted = linkedIssues.size;
 
   return {
-    projectsCompleted: nonBugProjects.length,
-    projectsByProtocol,
-    bugsFixed: bugProjects.length,
+    prsMerged,
     avgTimeToMergeHours,
+    bugBacklog,
+    nonBugBacklog,
+    issuesClosed,
+    avgTimeToCloseBugsHours,
+    projectsCompleted,
   };
 }
 
@@ -220,6 +222,10 @@ interface ConsultationMetrics {
   }>;
   byReviewType: Record<string, number>;
   byProtocol: Record<string, number>;
+  costByProject: Array<{
+    projectId: string;
+    totalCost: number;
+  }>;
 }
 
 function computeConsultationMetrics(days: number | undefined): ConsultationMetrics {
@@ -227,6 +233,7 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
   try {
     const filters = days ? { days } : {};
     const summary = db.summary(filters);
+    const projectCosts = db.costByProject(filters);
 
     // Derive costByModel from summary.byModel
     const costByModel: Record<string, number> = {};
@@ -267,6 +274,7 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
       })),
       byReviewType,
       byProtocol,
+      costByProject: projectCosts,
     };
   } finally {
     db.close();
@@ -280,7 +288,7 @@ function computeConsultationMetrics(days: number | undefined): ConsultationMetri
 /**
  * Compute analytics for the dashboard Analytics tab.
  *
- * @param workspaceRoot - Path to the workspace root (used for project scanning and as cwd for gh CLI)
+ * @param workspaceRoot - Path to the workspace root (used as cwd for gh CLI)
  * @param range - Time range: '1', '7', '30', or 'all'
  * @param activeBuilders - Current active builder count (from tower context)
  * @param refresh - If true, bypass the cache
@@ -301,22 +309,26 @@ export async function computeAnalytics(
     }
   }
 
+  const since = rangeToSinceDate(range);
   const days = rangeToDays(range);
   const weeks = rangeToWeeks(range);
-  const errors: { activity?: string; consultation?: string } = {};
+  const errors: { github?: string; consultation?: string } = {};
 
-  // Activity metrics (from project artifacts)
-  let activityMetrics: ActivityMetrics;
+  // GitHub metrics
+  let githubMetrics: GitHubMetrics;
   try {
-    activityMetrics = computeActivityMetrics(workspaceRoot, range);
+    githubMetrics = await computeGitHubMetrics(since, workspaceRoot);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    errors.activity = msg;
-    activityMetrics = {
-      projectsCompleted: 0,
-      projectsByProtocol: {},
-      bugsFixed: 0,
+    errors.github = msg;
+    githubMetrics = {
+      prsMerged: 0,
       avgTimeToMergeHours: null,
+      bugBacklog: 0,
+      nonBugBacklog: 0,
+      issuesClosed: 0,
+      avgTimeToCloseBugsHours: null,
+      projectsCompleted: 0,
     };
   }
 
@@ -336,20 +348,24 @@ export async function computeAnalytics(
       byModel: [],
       byReviewType: {},
       byProtocol: {},
+      costByProject: [],
     };
   }
 
-  const totalCompleted = activityMetrics.projectsCompleted + activityMetrics.bugsFixed;
-
   const result: AnalyticsResponse = {
     timeRange: rangeToLabel(range),
-    activity: {
-      projectsCompleted: activityMetrics.projectsCompleted,
-      projectsByProtocol: activityMetrics.projectsByProtocol,
-      bugsFixed: activityMetrics.bugsFixed,
-      avgTimeToMergeHours: activityMetrics.avgTimeToMergeHours,
+    github: {
+      prsMerged: githubMetrics.prsMerged,
+      avgTimeToMergeHours: githubMetrics.avgTimeToMergeHours,
+      bugBacklog: githubMetrics.bugBacklog,
+      nonBugBacklog: githubMetrics.nonBugBacklog,
+      issuesClosed: githubMetrics.issuesClosed,
+      avgTimeToCloseBugsHours: githubMetrics.avgTimeToCloseBugsHours,
+    },
+    builders: {
+      projectsCompleted: githubMetrics.projectsCompleted,
       throughputPerWeek: weeks > 0
-        ? Math.round((totalCompleted / weeks) * 10) / 10
+        ? Math.round((githubMetrics.projectsCompleted / weeks) * 10) / 10
         : 0,
       activeBuilders,
     },

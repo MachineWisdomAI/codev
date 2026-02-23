@@ -141,15 +141,20 @@ export interface OverviewData {
   errors?: { prs?: string; issues?: string };
 }
 
-// Spec 456 / Bugfix #529: Analytics tab types and fetcher
+// Spec 456: Analytics tab types and fetcher
 
 export interface AnalyticsResponse {
   timeRange: '24h' | '7d' | '30d' | 'all';
-  activity: {
-    projectsCompleted: number;
-    projectsByProtocol: Record<string, number>;
-    bugsFixed: number;
+  github: {
+    prsMerged: number;
     avgTimeToMergeHours: number | null;
+    bugBacklog: number;
+    nonBugBacklog: number;
+    issuesClosed: number;
+    avgTimeToCloseBugsHours: number | null;
+  };
+  builders: {
+    projectsCompleted: number;
     throughputPerWeek: number;
     activeBuilders: number;
   };
@@ -168,9 +173,13 @@ export interface AnalyticsResponse {
     }>;
     byReviewType: Record<string, number>;
     byProtocol: Record<string, number>;
+    costByProject: Array<{
+      projectId: string;
+      totalCost: number;
+    }>;
   };
   errors?: {
-    activity?: string;
+    github?: string;
     consultation?: string;
   };
 }
