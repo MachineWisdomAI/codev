@@ -1,10 +1,9 @@
 /**
  * Analytics aggregation service for the dashboard Analytics tab.
  *
- * Aggregates data from three sources:
+ * Aggregates data from two sources:
  * - GitHub CLI (merged PRs, closed issues, protocol breakdown from branch names)
  * - Consultation metrics DB (~/.codev/metrics.db)
- * - Active builder count (passed in from tower context)
  *
  * Each data source fails independently — partial results are returned
  * with error messages in the `errors` field.

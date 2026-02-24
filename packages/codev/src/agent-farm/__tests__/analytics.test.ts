@@ -375,7 +375,7 @@ describe('computeAnalytics', () => {
 
   // --- Bug-only avg time to close ---
 
-  it('only counts bug-labeled issues for avgTimeToCloseBugsHours', async () => {
+  it('only counts bug-labeled issues for medianTimeToCloseBugsHours', async () => {
     mockGhOutput({
       mergedPRs: '[]',
       closedIssues: JSON.stringify([

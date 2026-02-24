@@ -151,8 +151,7 @@ function buildWhereClause(filters: StatsFilters): { where: string; params: Recor
   }
   if (filters.workspace) {
     // Prefix match: builder worktree paths like /repo/.builders/bugfix-42
-    // should match when filtering by /repo. Also handles repo renames
-    // (e.g. codev-public → codev) by matching on the workspace root's parent.
+    // should match when filtering by /repo.
     const ws = filters.workspace.endsWith('/') ? filters.workspace.slice(0, -1) : filters.workspace;
     conditions.push("(workspace_path = @filterWorkspace OR workspace_path LIKE @filterWorkspacePrefix)");
     params.filterWorkspace = ws;
