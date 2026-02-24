@@ -326,6 +326,32 @@ export class MetricsDB {
     };
   }
 
+  agentTimeByProtocol(filters: StatsFilters): Array<{ protocol: string; avgAgentTimeSeconds: number; projectCount: number }> {
+    const { where, params } = buildWhereClause(filters);
+    const extraCondition = where
+      ? 'AND project_id IS NOT NULL AND protocol IS NOT NULL'
+      : 'WHERE project_id IS NOT NULL AND protocol IS NOT NULL';
+
+    const rows = this.db.prepare(`
+      SELECT
+        protocol,
+        AVG(project_total) as avg_agent_time_seconds,
+        COUNT(*) as project_count
+      FROM (
+        SELECT protocol, project_id, SUM(duration_seconds) as project_total
+        FROM consultation_metrics ${where} ${extraCondition}
+        GROUP BY protocol, project_id
+      )
+      GROUP BY protocol
+    `).all(params) as Array<{ protocol: string; avg_agent_time_seconds: number; project_count: number }>;
+
+    return rows.map(r => ({
+      protocol: r.protocol,
+      avgAgentTimeSeconds: r.avg_agent_time_seconds,
+      projectCount: r.project_count,
+    }));
+  }
+
   costByProject(filters: StatsFilters): Array<{ projectId: string; totalCost: number }> {
     const { where, params } = buildWhereClause(filters);
     const extraCondition = where

@@ -31,9 +31,9 @@ function makeStats(overrides: Partial<AnalyticsResponse> = {}): AnalyticsRespons
       issuesClosed: 6,
       medianTimeToCloseBugsHours: 1.2,
       projectsByProtocol: {
-        spir: { count: 3, avgWallClockHours: 48.2 },
-        bugfix: { count: 2, avgWallClockHours: 1.5 },
-        aspir: { count: 1, avgWallClockHours: 24.0 },
+        spir: { count: 3, avgWallClockHours: 48.2, avgAgentTimeHours: 0.75 },
+        bugfix: { count: 2, avgWallClockHours: 1.5, avgAgentTimeHours: 0.2 },
+        aspir: { count: 1, avgWallClockHours: 24.0, avgAgentTimeHours: null },
       },
     },
     consultation: {

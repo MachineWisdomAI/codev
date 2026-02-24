@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 const mockSummary = vi.hoisted(() => vi.fn());
+const mockAgentTimeByProtocol = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn());
 
 // Mock child_process + util (for GitHub CLI calls in github.ts)
@@ -28,6 +29,7 @@ vi.mock('node:util', () => ({
 vi.mock('../../commands/consult/metrics.js', () => ({
   MetricsDB: class MockMetricsDB {
     summary = mockSummary;
+    agentTimeByProtocol = mockAgentTimeByProtocol;
     close = mockClose;
   },
 }));
@@ -218,6 +220,7 @@ describe('computeAnalytics', () => {
     clearAnalyticsCache();
     vi.clearAllMocks();
     mockSummary.mockReturnValue(defaultSummary());
+    mockAgentTimeByProtocol.mockReturnValue([]);
   });
 
   it('assembles full statistics from all data sources', async () => {
@@ -240,9 +243,9 @@ describe('computeAnalytics', () => {
     expect(result.activity.issuesClosed).toBe(2);
     expect(result.activity.medianTimeToCloseBugsHours).toBeCloseTo(84); // 3.5 days for bug only (single item)
     expect(result.activity).not.toHaveProperty('activeBuilders');
-    // Protocol breakdown now includes count + avgWallClockHours (no "on it" → falls back to PR times)
-    expect(result.activity.projectsByProtocol.spir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(36) });
-    expect(result.activity.projectsByProtocol.aspir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(24) });
+    // Protocol breakdown now includes count + avgWallClockHours + avgAgentTimeHours
+    expect(result.activity.projectsByProtocol.spir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(36), avgAgentTimeHours: null });
+    expect(result.activity.projectsByProtocol.aspir).toEqual({ count: 1, avgWallClockHours: expect.closeTo(24), avgAgentTimeHours: null });
     // Removed fields
     expect(result.activity).not.toHaveProperty('projectsCompleted');
     expect(result.activity).not.toHaveProperty('bugsFixed');
@@ -485,6 +488,58 @@ describe('computeAnalytics', () => {
 
     const result = await computeAnalytics('/tmp/workspace', '7');
     expect(result.activity.projectsByProtocol).toEqual({});
+  });
+
+  // --- Agent time per protocol (#541) ---
+
+  it('includes avgAgentTimeHours from MetricsDB consultation durations', async () => {
+    mockAgentTimeByProtocol.mockReturnValue([
+      { protocol: 'spir', avgAgentTimeSeconds: 2700, projectCount: 5 },   // 45 min
+      { protocol: 'bugfix', avgAgentTimeSeconds: 720, projectCount: 10 }, // 12 min
+    ]);
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/spir-42-feature' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T12:00:00Z', body: 'Fixes #100', headRefName: 'builder/bugfix-100-fix' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    expect(result.activity.projectsByProtocol.spir?.avgAgentTimeHours).toBeCloseTo(0.75);  // 2700/3600
+    expect(result.activity.projectsByProtocol.bugfix?.avgAgentTimeHours).toBeCloseTo(0.2);  // 720/3600
+  });
+
+  it('returns null avgAgentTimeHours when no consultation data for that protocol', async () => {
+    mockAgentTimeByProtocol.mockReturnValue([
+      { protocol: 'spir', avgAgentTimeSeconds: 1800, projectCount: 3 },
+    ]);
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/spir-42-feature' },
+        { number: 2, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-10T12:00:00Z', body: 'Fixes #100', headRefName: 'builder/bugfix-100-fix' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    expect(result.activity.projectsByProtocol.spir?.avgAgentTimeHours).toBeCloseTo(0.5);  // 1800/3600
+    expect(result.activity.projectsByProtocol.bugfix?.avgAgentTimeHours).toBeNull();
+  });
+
+  it('handles agentTimeByProtocol failure gracefully', async () => {
+    mockAgentTimeByProtocol.mockImplementation(() => { throw new Error('DB locked'); });
+    mockGhOutput({
+      mergedPRs: JSON.stringify([
+        { number: 1, title: 'PR', createdAt: '2026-02-10T00:00:00Z', mergedAt: '2026-02-11T00:00:00Z', body: 'Fixes #42', headRefName: 'builder/spir-42-feature' },
+      ]),
+      closedIssues: '[]',
+    });
+
+    const result = await computeAnalytics('/tmp/workspace', '7');
+    // Should still return protocol stats, just with null agent time
+    expect(result.activity.projectsByProtocol.spir?.count).toBe(1);
+    expect(result.activity.projectsByProtocol.spir?.avgAgentTimeHours).toBeNull();
   });
 
   // --- Caching ---
