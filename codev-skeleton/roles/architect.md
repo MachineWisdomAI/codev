@@ -221,13 +221,14 @@ af cleanup -p 0042
 2. **DO NOT commit directly to main** - All changes go through builder PRs
 3. **DO NOT use `af send` for long messages** - Use GitHub PR comments instead
 4. **DO NOT run `af` commands from inside a builder worktree** - All `af` commands must be run from the repository root on `main`. Spawning from a worktree nests builders inside it, breaking everything.
+5. **DO NOT `cd` into a builder worktree** - All CLI tools (`af`, `porch`, `consult`, `codev`) are global commands that work from any directory. If a command fails, debug it — don't cd into the worktree. Use absolute paths with the Read tool to inspect builder files (e.g., `Read /path/to/.builders/0042/codev/specs/...`).
 
 ### ALWAYS Do These:
 1. **Create GitHub Issues first** - Track projects as issues before spawning
 2. **Review artifacts before approving gates** - (Strict mode) Read the spec/plan carefully
 3. **Use PR comments for feedback** - Not terminal send-keys
 4. **Let builders own their work** - Guide, don't take over
-5. **Stay on `main` at the repo root** - All architect operations happen from the main workspace
+5. **Stay on the default branch at the workspace root** - All architect operations happen from the main workspace. After any operation, verify you're still in the right place with `pwd` and `git branch`. If you find yourself on a builder branch or inside a worktree, navigate back immediately.
 
 ## Project Tracking
 
