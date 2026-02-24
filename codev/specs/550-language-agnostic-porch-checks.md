@@ -1,3 +1,8 @@
+---
+approved: 2026-02-24
+validated: [gemini, codex, claude]
+---
+
 # Specification: Language-Agnostic Porch Check Commands
 
 <!--
@@ -10,12 +15,12 @@ DO NOT include in this spec:
 - Code examples or pseudocode
 - "First we will... then we will..."
 
-These belong in codev/plans/495-language-agnostic-porch-checks.md
+These belong in codev/plans/550-language-agnostic-porch-checks.md
 -->
 
 ## Metadata
-- **ID**: 495-language-agnostic-porch-checks
-- **Status**: draft
+- **ID**: 550-language-agnostic-porch-checks
+- **Status**: approved
 - **Created**: 2026-02-23
 - **Multi-Agent**: true (GPT-5.1 Codex, Gemini 3 Pro, O3)
 

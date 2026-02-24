@@ -1,9 +1,14 @@
+---
+approved: 2026-02-24
+validated: [gemini, codex, claude]
+---
+
 # Plan: Language-Agnostic Porch Check Commands
 
 ## Metadata
-- **ID**: 495-language-agnostic-porch-checks
-- **Specification**: [codev/specs/495-language-agnostic-porch-checks.md](/codev/specs/495-language-agnostic-porch-checks.md)
-- **Status**: draft
+- **ID**: 550-language-agnostic-porch-checks
+- **Specification**: [codev/specs/550-language-agnostic-porch-checks.md](/codev/specs/550-language-agnostic-porch-checks.md)
+- **Status**: approved
 - **Created**: 2026-02-23
 
 ## Executive Summary
