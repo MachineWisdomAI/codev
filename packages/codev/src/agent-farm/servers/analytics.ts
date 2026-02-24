@@ -25,6 +25,7 @@ import { MetricsDB } from '../../commands/consult/metrics.js';
 export interface ProtocolStats {
   count: number;
   avgWallClockHours: number | null;
+  avgAgentTimeHours: number | null;
 }
 
 export interface AnalyticsResponse {
@@ -269,6 +270,7 @@ export function protocolFromBranch(branch: string): string | null {
 async function computeProjectsByProtocol(
   mergedPRs: MergedPR[],
   cwd: string,
+  agentTimeByProtocol?: Map<string, number>,
 ): Promise<Record<string, ProtocolStats>> {
   // Group PRs by protocol and collect linked issue numbers
   const byProtocol = new Map<string, MergedPR[]>();
@@ -319,11 +321,13 @@ async function computeProjectsByProtocol(
       wallClockHours.push(ms / (1000 * 60 * 60));
     }
 
+    const avgAgentSec = agentTimeByProtocol?.get(protocol);
     result[protocol] = {
       count: prs.length,
       avgWallClockHours: wallClockHours.length > 0
         ? wallClockHours.reduce((a, b) => a + b, 0) / wallClockHours.length
         : null,
+      avgAgentTimeHours: avgAgentSec != null ? avgAgentSec / 3600 : null,
     };
   }
   return result;
@@ -394,10 +398,27 @@ export async function computeAnalytics(
     };
   }
 
+  // Agent time by protocol from consultation metrics
+  let agentTimeByProtocol: Map<string, number> | undefined;
+  try {
+    const db = new MetricsDB();
+    try {
+      const agentFilters: { days?: number; workspace: string } = { workspace: workspaceRoot };
+      if (days) agentFilters.days = days;
+      const agentTimeRows = db.agentTimeByProtocol(agentFilters);
+      agentTimeByProtocol = new Map(agentTimeRows.map(r => [r.protocol, r.avgAgentTimeSeconds]));
+    } finally {
+      db.close();
+    }
+  } catch {
+    // Agent time is best-effort; don't fail if MetricsDB is unavailable
+  }
+
   // Protocol breakdown with avg wall clock times (from PR branch names + "on it" timestamps)
   const projectsByProtocol = await computeProjectsByProtocol(
     githubMetrics.mergedPRList,
     workspaceRoot,
+    agentTimeByProtocol,
   );
 
   const result: AnalyticsResponse = {

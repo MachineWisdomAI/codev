@@ -110,6 +110,7 @@ function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['ac
       name: proto.toUpperCase(),
       count: stats.count,
       avgWallClock: stats.avgWallClockHours,
+      avgAgentTime: stats.avgAgentTimeHours,
     }))
     .sort((a, b) => b.count - a.count);
 
@@ -120,7 +121,7 @@ function ActivitySection({ activity, errors }: { activity: AnalyticsResponse['ac
           <h4 className="analytics-sub-title">Projects by Protocol</h4>
           <MetricGrid>
             {protocolData.map(d => (
-              <Metric key={d.name} label={d.name} value={`${d.count} (avg ${fmtWallClock(d.avgWallClock)})`} />
+              <Metric key={d.name} label={d.name} value={`${d.count} (wall ${fmtWallClock(d.avgWallClock)}${d.avgAgentTime != null ? `, agent ${fmtWallClock(d.avgAgentTime)}` : ''})`} />
             ))}
           </MetricGrid>
           <MiniBarChart data={protocolData} dataKey="count" nameKey="name" />

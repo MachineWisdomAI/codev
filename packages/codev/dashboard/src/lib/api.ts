@@ -146,6 +146,7 @@ export interface OverviewData {
 export interface ProtocolStats {
   count: number;
   avgWallClockHours: number | null;
+  avgAgentTimeHours: number | null;
 }
 
 export interface AnalyticsResponse {
