@@ -56,6 +56,19 @@ consult stats --days 7 --json     # Last 7 days as JSON
 --protocol <name>            # Protocol: spir, bugfix, tick, maintain
 -t, --type <type>            # Review type: spec, plan, impl, pr, phase, integration
 --issue <number>             # Issue number (architect context)
+--output <path>              # Save result to file (recommended for background runs)
+```
+
+## Output Persistence
+
+**Always use `--output` when running consultations in the background.** Without it, results are written to a temporary file that may be garbage-collected before you read them.
+
+```bash
+# Bad — output may be deleted before you can read it
+consult -m claude --type integration --issue 42 &
+
+# Good — result is saved to a stable path
+consult -m claude --type integration --issue 42 --output /tmp/review-claude-42.md &
 ```
 
 ## Review Types (--type with --protocol)
@@ -78,16 +91,16 @@ Protocol-specific prompts live in `codev/protocols/<protocol>/consult-types/`.
 
 ## Parallel Consultation (3-Way / cmap)
 
-Run all three models in parallel for thorough reviews:
+Run all three models in parallel for thorough reviews. **Always use `--output`:**
 
 ```bash
-consult -m gemini --protocol spir --type spec &
-consult -m codex --protocol spir --type spec &
-consult -m claude --protocol spir --type spec &
+consult -m gemini --type integration --issue 42 --output /tmp/cmap-gemini-42.md &
+consult -m codex --type integration --issue 42 --output /tmp/cmap-codex-42.md &
+consult -m claude --type integration --issue 42 --output /tmp/cmap-claude-42.md &
 wait
 ```
 
-Or from Claude Code, use **cmap** pattern: three parallel background Bash calls.
+Or from Claude Code, use **cmap** pattern: three parallel background Bash calls with `--output`.
 
 ## Common Mistakes
 
