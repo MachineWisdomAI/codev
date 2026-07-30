@@ -61,3 +61,5 @@ packages/codev/coverage/
 # Local MCP config and channel state
 .mcp.json
 .claude/channels/ci/
+# Local MachineWisdom agent/review artifacts
+.wise-agents/
